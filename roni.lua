@@ -11,147 +11,79 @@ getgenv().Settings = {
     AutoSellAll = false,
     AutoSellStrawberry = false,
     AutoGiftPet = false,
+    AutoBuySeed = false,
+    AutoBuyGear = false,
     TargetPlayer = nil,
     SelectedPet = nil,
     GiftKG = 100,
     GiftAge = 10
 }
 
--- ================== AUTO GIFT PET ==================
-spawn(function()
-    while wait(2.5) do
-        if getgenv().Settings.AutoGiftPet and getgenv().Settings.TargetPlayer and getgenv().Settings.SelectedPet then
-            pcall(function()
-                local target = Players:FindFirstChild(getgenv().Settings.TargetPlayer)
-                if target then
-                    for _, pet in pairs(LocalPlayer.Backpack:GetChildren()) do
-                        if pet.Name == getgenv().Settings.SelectedPet then
-                            local prompt = pet:FindFirstChildWhichIsA("ProximityPrompt")
-                            if prompt then
-                                prompt:InputHoldBegin()
-                                wait(0.4)
-                                prompt:InputHoldEnd()
-                                print("Gifted "..pet.Name.." → "..target.Name)
-                            end
-                        end
-                    end
-                end
-            end)
-        end
-    end
-end)
-
--- ================== GUI ==================
+-- ================== GUI HUB STYLE ==================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 360, 0, 620)
-MainFrame.Position = UDim2.new(0, 30, 0.15, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.Size = UDim2.new(0, 620, 0, 420)      -- Lebih lebar (persegi panjang)
+MainFrame.Position = UDim2.new(0.5, -310, 0.5, -210)
+MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
 MainFrame.Parent = ScreenGui
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 MainFrame.Draggable = true
 MainFrame.Active = true
 
+-- Title
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1,0,0,45)
-Title.BackgroundTransparency = 1
-Title.Text = "Garden Helper"
+Title.Size = UDim2.new(1,0,0,50)
+Title.BackgroundColor3 = Color3.fromRGB(25,25,25)
+Title.Text = "RONI HUB - Grow a Garden"
 Title.TextColor3 = Color3.fromRGB(255, 200, 0)
-Title.TextSize = 22
-Title.Font = Enum.Font.GothamSemibold
+Title.TextSize = 24
+Title.Font = Enum.Font.GothamBold
 Title.Parent = MainFrame
 
--- Close
+-- Sidebar Kiri
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0, 160, 1, -50)
+Sidebar.Position = UDim2.new(0,0,0,50)
+Sidebar.BackgroundColor3 = Color3.fromRGB(22,22,22)
+Sidebar.Parent = MainFrame
+
+-- Content Area (Kanan)
+local Content = Instance.new("Frame")
+Content.Size = UDim2.new(1, -160, 1, -50)
+Content.Position = UDim2.new(0,160,0,50)
+Content.BackgroundTransparency = 1
+Content.Parent = MainFrame
+
+-- Close Button
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0,35,0,35)
-closeBtn.Position = UDim2.new(1,-40,0,8)
+closeBtn.Size = UDim2.new(0,40,0,40)
+closeBtn.Position = UDim2.new(1,-45,0,5)
 closeBtn.Text = "✕"
-closeBtn.TextColor3 = Color3.fromRGB(255,100,100)
+closeBtn.TextColor3 = Color3.fromRGB(255,80,80)
 closeBtn.BackgroundTransparency = 1
-closeBtn.TextSize = 22
+closeBtn.TextSize = 24
 closeBtn.Parent = MainFrame
 closeBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
--- ================== PLAYER SELECTION (Baru & Lebih Baik) ==================
-local selectedLabel = Instance.new("TextLabel")
-selectedLabel.Size = UDim2.new(0.65,0,0,40)
-selectedLabel.Position = UDim2.new(0.05,0,0.13,0)
-selectedLabel.BackgroundColor3 = Color3.fromRGB(30,30,30)
-selectedLabel.Text = "Belum pilih player"
-selectedLabel.TextColor3 = Color3.fromRGB(200,200,200)
-selectedLabel.TextSize = 15
-selectedLabel.Font = Enum.Font.Gotham
-selectedLabel.Parent = MainFrame
-Instance.new("UICorner", selectedLabel).CornerRadius = UDim.new(0,8)
+-- ================== SIDEBAR BUTTONS ==================
+local function createSidebarButton(text, posY, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1,0,0,45)
+    btn.Position = UDim2.new(0,0,posY,0)
+    btn.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255,200,0)
+    btn.TextSize = 16
+    btn.Font = Enum.Font.GothamSemibold
+    btn.Parent = Sidebar
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
+    
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
 
--- Tombol Pilih Player
-local selectPlayerBtn = Instance.new("TextButton")
-selectPlayerBtn.Size = UDim2.new(0.25,0,0,40)
-selectPlayerBtn.Position = UDim2.new(0.72,0,0.13,0)
-selectPlayerBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
-selectPlayerBtn.Text = "Pilih"
-selectPlayerBtn.TextColor3 = Color3.fromRGB(255,220,100)
-selectPlayerBtn.TextSize = 16
-selectPlayerBtn.Parent = MainFrame
-Instance.new("UICorner", selectPlayerBtn).CornerRadius = UDim.new(0,8)
+-- Content akan diisi sesuai pilihan nanti
 
-selectPlayerBtn.MouseButton1Click:Connect(function()
-    local players = {}
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer then
-            table.insert(players, plr.Name)
-        end
-    end
-    if #players > 0 then
-        selectedLabel.Text = players[1]
-        getgenv().Settings.TargetPlayer = players[1]
-    else
-        selectedLabel.Text = "Tidak ada player lain"
-    end
-end)
-
--- Tombol Batal (Clear)
-local cancelBtn = Instance.new("TextButton")
-cancelBtn.Size = UDim2.new(0.25,0,0,40)
-cancelBtn.Position = UDim2.new(0.72,0,0.22,0)
-cancelBtn.BackgroundColor3 = Color3.fromRGB(80,30,30)
-cancelBtn.Text = "Batal"
-cancelBtn.TextColor3 = Color3.fromRGB(255,150,150)
-cancelBtn.TextSize = 16
-cancelBtn.Parent = MainFrame
-Instance.new("UICorner", cancelBtn).CornerRadius = UDim.new(0,8)
-
-cancelBtn.MouseButton1Click:Connect(function()
-    selectedLabel.Text = "Belum pilih player"
-    getgenv().Settings.TargetPlayer = nil
-end)
-
--- ================== Pet Selection ==================
-local petBtn = Instance.new("TextButton")
-petBtn.Size = UDim2.new(0.9,0,0,40)
-petBtn.Position = UDim2.new(0.05,0,0.32,0)
-petBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
-petBtn.Text = "Pilih Pet →"
-petBtn.TextColor3 = Color3.fromRGB(255,220,100)
-petBtn.TextSize = 16
-petBtn.Parent = MainFrame
-Instance.new("UICorner", petBtn).CornerRadius = UDim.new(0,8)
-
-petBtn.MouseButton1Click:Connect(function()
-    local pets = {}
-    for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
-        if item:IsA("Tool") then
-            table.insert(pets, item.Name)
-        end
-    end
-    if #pets > 0 then
-        petBtn.Text = pets[1]
-        getgenv().Settings.SelectedPet = pets[1]
-    else
-        petBtn.Text = "Tidak ada Pet di Backpack"
-    end
-end)
-
---
+print("✅ RONI HUB UI Style (mirip Node Hub) telah dimuat")
