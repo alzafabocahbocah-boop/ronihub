@@ -1,5 +1,5 @@
 -- RONI HUB - Grow a Garden
-print("🔥 RONI HUB Loaded - V5.2")
+print("🔥 RONI HUB Loaded - AUTO BUY V6 EXTREME")
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -11,27 +11,37 @@ getgenv().Settings = {
     AutoBuySeed = false,
     AutoBuyEgg = false,
     AutoBuyGear = false,
-    BuyAll = false
+    BuyAll = false,
+    ExtremeMode = true
 }
 
--- ================== AUTO BUY V5.2 ==================
+-- ================== AUTO BUY EXTREME V6 ==================
 spawn(function()
-    while wait(0.55) do
+    while wait(0.3) do  -- Sangat cepat
         if not (getgenv().Settings.BuyAll or getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then continue end
 
         pcall(function()
-            for _, v in pairs(Workspace:GetDescendants()) do
-                if v:IsA("ProximityPrompt") then
-                    local name = v.Parent.Name
-                    if getgenv().Settings.BuyAll or 
-                       (getgenv().Settings.AutoBuySeed and (name:find("Seed") or name:find("Pack"))) or
-                       (getgenv().Settings.AutoBuyEgg and name:find("Egg")) or
-                       (getgenv().Settings.AutoBuyGear and (name:find("Gear") or name:find("Tool"))) then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("ProximityPrompt") then
+                    local name = obj.Parent.Name
+
+                    local shouldBuy = getgenv().Settings.BuyAll or
+                        (getgenv().Settings.AutoBuySeed and (name:find("Seed") or name:find("Pack"))) or
+                        (getgenv().Settings.AutoBuyEgg and name:find("Egg")) or
+                        (getgenv().Settings.AutoBuyGear and (name:find("Gear") or name:find("Tool") or name:find("Can")))
+
+                    if shouldBuy then
+                        -- Method 1: Normal Prompt
+                        obj:InputHoldBegin()
+                        wait(0.15)
+                        obj:InputHoldEnd()
                         
-                        v:InputHoldBegin()
+                        -- Method 2: Force Click
+                        if obj.Parent:FindFirstChildWhichIsA("ClickDetector") then
+                            fireclickdetector(obj.Parent:FindFirstChildWhichIsA("ClickDetector"))
+                        end
+                        
                         wait(0.25)
-                        v:InputHoldEnd()
-                        wait(0.35)
                     end
                 end
             end
@@ -39,7 +49,7 @@ spawn(function()
     end
 end)
 
--- ================== GUI ==================
+-- ================== GUI V5.2 ==================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -51,7 +61,6 @@ MainFrame.Parent = ScreenGui
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 MainFrame.Draggable = true
 
--- Title + Versi
 local TitleFrame = Instance.new("Frame")
 TitleFrame.Size = UDim2.new(1,0,0,50)
 TitleFrame.BackgroundColor3 = Color3.fromRGB(25,25,25)
@@ -70,7 +79,7 @@ Title.Parent = TitleFrame
 local Version = Instance.new("TextLabel")
 Version.Size = UDim2.new(0.35,0,1,0)
 Version.BackgroundTransparency = 1
-Version.Text = "V5.2"          -- <--- Versi di sini
+Version.Text = "V6 EXTREME"
 Version.TextColor3 = Color3.fromRGB(0, 255, 150)
 Version.TextSize = 20
 Version.Font = Enum.Font.GothamBold
@@ -124,10 +133,9 @@ end)
 
 destroyBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
-    print("🛑 RONI HUB dihancurkan")
 end)
 
--- Sidebar & Misc (lengkap)
+-- Sidebar + Misc
 local Sidebar = Instance.new("Frame")
 Sidebar.Size = UDim2.new(0, 180, 1, -50)
 Sidebar.Position = UDim2.new(0,0,0,50)
@@ -156,12 +164,12 @@ end
 
 local function showMiscContent()
     Content:ClearAllChildren()
-    -- Auto Buy UI
+
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(0.9,0,0,40)
     title.Position = UDim2.new(0.05,0,0.05,0)
     title.BackgroundTransparency = 1
-    title.Text = "AUTO BUY"
+    title.Text = "AUTO BUY EXTREME"
     title.TextColor3 = Color3.fromRGB(255,200,0)
     title.TextSize = 22
     title.Font = Enum.Font.GothamBold
@@ -211,4 +219,4 @@ createSidebarButton("MISC", 0.45, showMiscContent)
 
 showMiscContent()
 
-print("✅ V5.2 - Versi jelas + Tombol Close & Destroy")
+print("✅ V6 EXTREME - Auto Buy sudah di mode maksimal")
