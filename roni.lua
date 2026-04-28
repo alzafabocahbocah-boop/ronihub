@@ -1,5 +1,5 @@
 -- RONI HUB - Grow a Garden
-print("🔥 RONI HUB Loaded")
+print("🔥 RONI HUB Loaded - Auto Buy V2")
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -14,46 +14,43 @@ getgenv().Settings = {
     BuyAll = false
 }
 
--- ================== AUTO BUY LOGIC (Diperbaiki) ==================
+-- ================== AUTO BUY V2 (Lebih Kuat) ==================
 spawn(function()
-    while wait(0.7) do
+    while wait(0.6) do
         if not (getgenv().Settings.BuyAll or getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then 
             continue 
         end
 
         pcall(function()
-            for _, prompt in pairs(Workspace:GetDescendants()) do
-                if prompt:IsA("ProximityPrompt") then
-                    local parentName = prompt.Parent.Name
-                    
-                    -- Buy All
+            for _, v in pairs(Workspace:GetDescendants()) do
+                if v:IsA("ProximityPrompt") or v:IsA("ClickDetector") then
+                    local parent = v.Parent
+                    local name = parent.Name .. (parent:FindFirstChild("Display") and parent.Display.Text or "")
+
+                    -- Buy All Mode
                     if getgenv().Settings.BuyAll then
-                        if parentName:find("Seed") or parentName:find("Egg") or parentName:find("Gear") or 
-                           parentName:find("Shop") or parentName:find("Buy") then
-                            prompt:InputHoldBegin()
-                            wait(0.2)
-                            prompt:InputHoldEnd()
-                            wait(0.3)
+                        if name:find("Seed") or name:find("Egg") or name:find("Gear") or name:find("Shop") or 
+                           name:find("Buy") or name:find("Pack") then
+                            if v:IsA("ProximityPrompt") then
+                                v:InputHoldBegin()
+                                wait(0.25)
+                                v:InputHoldEnd()
+                            elseif v:IsA("ClickDetector") then
+                                fireclickdetector(v)
+                            end
+                            wait(0.4)
                         end
                     end
-                    
+
                     -- Spesifik
-                    if getgenv().Settings.AutoBuySeed and (parentName:find("Seed") or parentName:find("Pack")) then
-                        prompt:InputHoldBegin()
-                        wait(0.2)
-                        prompt:InputHoldEnd()
+                    if getgenv().Settings.AutoBuySeed and (name:find("Seed") or name:find("Pack")) then
+                        if v:IsA("ProximityPrompt") then v:InputHoldBegin() wait(0.25) v:InputHoldEnd() end
                     end
-                    
-                    if getgenv().Settings.AutoBuyEgg and parentName:find("Egg") then
-                        prompt:InputHoldBegin()
-                        wait(0.2)
-                        prompt:InputHoldEnd()
+                    if getgenv().Settings.AutoBuyEgg and name:find("Egg") then
+                        if v:IsA("ProximityPrompt") then v:InputHoldBegin() wait(0.25) v:InputHoldEnd() end
                     end
-                    
-                    if getgenv().Settings.AutoBuyGear and (parentName:find("Gear") or parentName:find("Tool") or parentName:find("Can")) then
-                        prompt:InputHoldBegin()
-                        wait(0.2)
-                        prompt:InputHoldEnd()
+                    if getgenv().Settings.AutoBuyGear and (name:find("Gear") or name:find("Tool")) then
+                        if v:IsA("ProximityPrompt") then v:InputHoldBegin() wait(0.25) v:InputHoldEnd() end
                     end
                 end
             end
@@ -94,7 +91,7 @@ Content.Position = UDim2.new(0,180,0,50)
 Content.BackgroundTransparency = 1
 Content.Parent = MainFrame
 
--- Close Button
+-- Close
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0,40,0,40)
 closeBtn.Position = UDim2.new(1,-45,0,5)
@@ -132,7 +129,6 @@ local function showMiscContent()
     title.Font = Enum.Font.GothamBold
     title.Parent = Content
 
-    -- Buy All
     local buyAllBtn = Instance.new("TextButton")
     buyAllBtn.Size = UDim2.new(0.85,0,0,50)
     buyAllBtn.Position = UDim2.new(0.1,0,0.15,0)
@@ -149,7 +145,6 @@ local function showMiscContent()
         buyAllBtn.TextColor3 = getgenv().Settings.BuyAll and Color3.fromRGB(0,255,100) or Color3.fromRGB(255,100,100)
     end)
 
-    -- Specific Toggles
     local function createToggle(name, posY, setting)
         local toggle = Instance.new("TextButton")
         toggle.Size = UDim2.new(0.85,0,0,45)
@@ -173,20 +168,9 @@ local function showMiscContent()
     createToggle("Auto Buy Gear", 0.56, "AutoBuyGear")
 end
 
-createSidebarButton("ELEPHANT", 0.05, function() 
-    Content:ClearAllChildren()
-    local txt = Instance.new("TextLabel")
-    txt.Size = UDim2.new(0.9,0,0.8,0)
-    txt.Position = UDim2.new(0.05,0,0.1,0)
-    txt.BackgroundTransparency = 1
-    txt.Text = "ELEPHANT SECTION\n\nFitur utama akan ditambahkan"
-    txt.TextColor3 = Color3.fromRGB(180,180,180)
-    txt.TextSize = 20
-    txt.Parent = Content
-end)
-
+createSidebarButton("ELEPHANT", 0.05, function() Content:ClearAllChildren() end)
 createSidebarButton("MISC", 0.45, showMiscContent)
 
 showMiscContent()
 
-print("✅ Auto Buy sudah di-upgrade (Buy All + Spesifik)")
+print("✅ Auto Buy V2 (Lebih Kuat) telah aktif")
