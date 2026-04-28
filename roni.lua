@@ -62,7 +62,7 @@ closeBtn.TextSize = 24
 closeBtn.Parent = MainFrame
 closeBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
--- Sidebar Labels (Clickable)
+-- Sidebar Button
 local function createSidebarButton(text, posY, callback)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, -10, 0, 45)
@@ -74,7 +74,6 @@ local function createSidebarButton(text, posY, callback)
     btn.Font = Enum.Font.GothamBold
     btn.Parent = Sidebar
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
-    
     btn.MouseButton1Click:Connect(callback)
 end
 
@@ -82,48 +81,71 @@ end
 local function showMiscContent()
     Content:ClearAllChildren()
 
-    -- Auto Buy
-    local autoBuy = Instance.new("TextButton")
-    autoBuy.Size = UDim2.new(0.9,0,0,50)
-    autoBuy.Position = UDim2.new(0.05,0,0.05,0)
-    autoBuy.BackgroundColor3 = Color3.fromRGB(35,35,35)
-    autoBuy.Text = "Auto Buy"
-    autoBuy.TextColor3 = Color3.fromRGB(255,200,0)
-    autoBuy.TextSize = 20
-    autoBuy.Parent = Content
-    Instance.new("UICorner", autoBuy).CornerRadius = UDim.new(0,8)
+    -- Auto Buy Button
+    local autoBuyBtn = Instance.new("TextButton")
+    autoBuyBtn.Size = UDim2.new(0.9,0,0,50)
+    autoBuyBtn.Position = UDim2.new(0.05,0,0.05,0)
+    autoBuyBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    autoBuyBtn.Text = "Auto Buy"
+    autoBuyBtn.TextColor3 = Color3.fromRGB(255,200,0)
+    autoBuyBtn.TextSize = 20
+    autoBuyBtn.Parent = Content
+    Instance.new("UICorner", autoBuyBtn).CornerRadius = UDim.new(0,8)
 
-    -- Auto Gift
-    local autoGift = Instance.new("TextButton")
-    autoGift.Size = UDim2.new(0.9,0,0,50)
-    autoGift.Position = UDim2.new(0.05,0,0.18,0)
-    autoGift.BackgroundColor3 = Color3.fromRGB(35,35,35)
-    autoGift.Text = "Auto Gift"
-    autoGift.TextColor3 = Color3.fromRGB(255,200,0)
-    autoGift.TextSize = 20
-    autoGift.Parent = Content
-    Instance.new("UICorner", autoGift).CornerRadius = UDim.new(0,8)
+    -- Sub Auto Buy (Seed, Egg, Gear)
+    local function createSubToggle(name, posY, setting)
+        local toggle = Instance.new("TextButton")
+        toggle.Size = UDim2.new(0.85,0,0,40)
+        toggle.Position = UDim2.new(0.1,0,posY,0)
+        toggle.BackgroundColor3 = Color3.fromRGB(30,30,30)
+        toggle.Text = name .. ": OFF"
+        toggle.TextColor3 = Color3.fromRGB(255,100,100)
+        toggle.TextSize = 16
+        toggle.Parent = Content
+        Instance.new("UICorner", toggle).CornerRadius = UDim.new(0,8)
+
+        toggle.MouseButton1Click:Connect(function()
+            getgenv().Settings[setting] = not getgenv().Settings[setting]
+            toggle.Text = name .. (getgenv().Settings[setting] and ": ON" or ": OFF")
+            toggle.TextColor3 = getgenv().Settings[setting] and Color3.fromRGB(0,255,100) or Color3.fromRGB(255,100,100)
+        end)
+    end
+
+    createSubToggle("Auto Buy Seed", 0.20, "AutoBuySeed")
+    createSubToggle("Auto Buy Egg",  0.32, "AutoBuyEgg")
+    createSubToggle("Auto Buy Gear", 0.44, "AutoBuyGear")
+
+    -- Auto Gift Button
+    local autoGiftBtn = Instance.new("TextButton")
+    autoGiftBtn.Size = UDim2.new(0.9,0,0,50)
+    autoGiftBtn.Position = UDim2.new(0.05,0,0.60,0)
+    autoGiftBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    autoGiftBtn.Text = "Auto Gift"
+    autoGiftBtn.TextColor3 = Color3.fromRGB(255,200,0)
+    autoGiftBtn.TextSize = 20
+    autoGiftBtn.Parent = Content
+    Instance.new("UICorner", autoGiftBtn).CornerRadius = UDim.new(0,8)
 
     -- Rejoin
-    local rejoin = Instance.new("TextButton")
-    rejoin.Size = UDim2.new(0.9,0,0,50)
-    rejoin.Position = UDim2.new(0.05,0,0.31,0)
-    rejoin.BackgroundColor3 = Color3.fromRGB(35,35,35)
-    rejoin.Text = "Rejoin Server"
-    rejoin.TextColor3 = Color3.fromRGB(255,200,0)
-    rejoin.TextSize = 20
-    rejoin.Parent = Content
-    Instance.new("UICorner", rejoin).CornerRadius = UDim.new(0,8)
+    local rejoinBtn = Instance.new("TextButton")
+    rejoinBtn.Size = UDim2.new(0.9,0,0,50)
+    rejoinBtn.Position = UDim2.new(0.05,0,0.75,0)
+    rejoinBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    rejoinBtn.Text = "Rejoin Server"
+    rejoinBtn.TextColor3 = Color3.fromRGB(255,200,0)
+    rejoinBtn.TextSize = 20
+    rejoinBtn.Parent = Content
+    Instance.new("UICorner", rejoinBtn).CornerRadius = UDim.new(0,8)
 end
 
--- Sidebar Buttons
+-- Sidebar
 createSidebarButton("ELEPHANT", 0.05, function() 
     Content:ClearAllChildren()
     local txt = Instance.new("TextLabel")
     txt.Size = UDim2.new(0.9,0,0.8,0)
     txt.Position = UDim2.new(0.05,0,0.1,0)
     txt.BackgroundTransparency = 1
-    txt.Text = "Elephant Section\n\n(Fitur utama akan ditambahkan)"
+    txt.Text = "ELEPHANT SECTION\n\nFitur utama akan ditambahkan di sini"
     txt.TextColor3 = Color3.fromRGB(180,180,180)
     txt.TextSize = 20
     txt.Parent = Content
@@ -131,7 +153,7 @@ end)
 
 createSidebarButton("MISC", 0.45, showMiscContent)
 
--- Tampilkan Misc secara default
+-- Default tampilkan Misc
 showMiscContent()
 
-print("✅ Misc Tab sudah interaktif (klik MISC)")
+print("✅ Misc dengan Auto Buy (Seed, Egg, Gear) telah aktif")
