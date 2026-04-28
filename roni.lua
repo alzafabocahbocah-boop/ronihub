@@ -1,5 +1,5 @@
 -- RONI HUB - Grow a Garden
-print("🔥 RONI HUB Loaded - Auto Buy V2")
+print("🔥 RONI HUB Loaded - V3")
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -14,43 +14,25 @@ getgenv().Settings = {
     BuyAll = false
 }
 
--- ================== AUTO BUY V2 (Lebih Kuat) ==================
+-- ================== AUTO BUY V3 ==================
 spawn(function()
     while wait(0.6) do
-        if not (getgenv().Settings.BuyAll or getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then 
-            continue 
-        end
+        if not (getgenv().Settings.BuyAll or getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then continue end
 
         pcall(function()
             for _, v in pairs(Workspace:GetDescendants()) do
-                if v:IsA("ProximityPrompt") or v:IsA("ClickDetector") then
-                    local parent = v.Parent
-                    local name = parent.Name .. (parent:FindFirstChild("Display") and parent.Display.Text or "")
-
-                    -- Buy All Mode
-                    if getgenv().Settings.BuyAll then
-                        if name:find("Seed") or name:find("Egg") or name:find("Gear") or name:find("Shop") or 
-                           name:find("Buy") or name:find("Pack") then
-                            if v:IsA("ProximityPrompt") then
-                                v:InputHoldBegin()
-                                wait(0.25)
-                                v:InputHoldEnd()
-                            elseif v:IsA("ClickDetector") then
-                                fireclickdetector(v)
-                            end
-                            wait(0.4)
-                        end
-                    end
-
-                    -- Spesifik
-                    if getgenv().Settings.AutoBuySeed and (name:find("Seed") or name:find("Pack")) then
-                        if v:IsA("ProximityPrompt") then v:InputHoldBegin() wait(0.25) v:InputHoldEnd() end
-                    end
-                    if getgenv().Settings.AutoBuyEgg and name:find("Egg") then
-                        if v:IsA("ProximityPrompt") then v:InputHoldBegin() wait(0.25) v:InputHoldEnd() end
-                    end
-                    if getgenv().Settings.AutoBuyGear and (name:find("Gear") or name:find("Tool")) then
-                        if v:IsA("ProximityPrompt") then v:InputHoldBegin() wait(0.25) v:InputHoldEnd() end
+                if v:IsA("ProximityPrompt") then
+                    local name = v.Parent.Name
+                    
+                    if getgenv().Settings.BuyAll or 
+                       (getgenv().Settings.AutoBuySeed and name:find("Seed")) or
+                       (getgenv().Settings.AutoBuyEgg and name:find("Egg")) or
+                       (getgenv().Settings.AutoBuyGear and (name:find("Gear") or name:find("Tool"))) then
+                        
+                        v:InputHoldBegin()
+                        wait(0.22)
+                        v:InputHoldEnd()
+                        wait(0.35)
                     end
                 end
             end
@@ -91,7 +73,7 @@ Content.Position = UDim2.new(0,180,0,50)
 Content.BackgroundTransparency = 1
 Content.Parent = MainFrame
 
--- Close
+-- Close Button
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0,40,0,40)
 closeBtn.Position = UDim2.new(1,-45,0,5)
@@ -100,8 +82,30 @@ closeBtn.TextColor3 = Color3.fromRGB(255,80,80)
 closeBtn.BackgroundTransparency = 1
 closeBtn.TextSize = 24
 closeBtn.Parent = MainFrame
-closeBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
+-- ================== LOGO REOPEN ==================
+local ReopenLogo = Instance.new("TextButton")
+ReopenLogo.Size = UDim2.new(0, 50, 0, 50)
+ReopenLogo.Position = UDim2.new(1, -70, 1, -70)
+ReopenLogo.BackgroundColor3 = Color3.fromRGB(255, 160, 0)
+ReopenLogo.Text = "🦒"   -- Logo gajah / Roni
+ReopenLogo.TextSize = 30
+ReopenLogo.TextColor3 = Color3.fromRGB(0,0,0)
+ReopenLogo.Visible = false
+ReopenLogo.Parent = ScreenGui
+Instance.new("UICorner", ReopenLogo).CornerRadius = UDim.new(1,0)
+
+ReopenLogo.MouseButton1Click:Connect(function()
+    MainFrame.Visible = true
+    ReopenLogo.Visible = false
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+    ReopenLogo.Visible = true
+end)
+
+-- Sidebar Buttons
 local function createSidebarButton(text, posY, callback)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, -10, 0, 45)
@@ -173,4 +177,4 @@ createSidebarButton("MISC", 0.45, showMiscContent)
 
 showMiscContent()
 
-print("✅ Auto Buy V2 (Lebih Kuat) telah aktif")
+print("✅ Auto Buy V3 + Logo Reopen telah aktif")
