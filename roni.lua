@@ -1,149 +1,137 @@
--- RONI HUB - Grow a Garden V8.1 EXTREME
-print("🔥 RONI HUB V8.1 EXTREME Loaded")
+-- RONI HUB - Grow a Garden V8.7
+print("🔥 RONI HUB V8.7 Loaded")
 
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
 getgenv().Settings = {
-    BuyAll = false,
-    AutoBuySeed = false,
-    AutoBuyEgg = false,
-    AutoBuyGear = false
+    AutoGiftPet = false,
+    TargetPlayer = nil,
+    SelectedPet = nil
 }
 
--- ULTRA EXTREME AUTO BUY
+-- Auto Gift Pet
 spawn(function()
-    while wait(0.25) do
-        if not (getgenv().Settings.BuyAll or getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then continue end
-
-        pcall(function()
-            -- Method 1: Proximity Prompt
-            for _, prompt in pairs(Workspace:GetDescendants()) do
-                if prompt:IsA("ProximityPrompt") then
-                    local n = prompt.Parent.Name
-                    if getgenv().Settings.BuyAll or 
-                       (getgenv().Settings.AutoBuySeed and n:find("Seed")) or
-                       (getgenv().Settings.AutoBuyEgg and n:find("Egg")) or
-                       (getgenv().Settings.AutoBuyGear and n:find("Gear")) then
-                        prompt:InputHoldBegin()
-                        wait(0.15)
-                        prompt:InputHoldEnd()
+    while wait(2) do
+        if getgenv().Settings.AutoGiftPet and getgenv().Settings.TargetPlayer and getgenv().Settings.SelectedPet then
+            pcall(function()
+                local target = Players:FindFirstChild(getgenv().Settings.TargetPlayer)
+                if target then
+                    for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
+                        if item.Name == getgenv().Settings.SelectedPet then
+                            local prompt = item:FindFirstChildWhichIsA("ProximityPrompt")
+                            if prompt then
+                                prompt:InputHoldBegin()
+                                wait(0.4)
+                                prompt:InputHoldEnd()
+                                print("🎁 Gifted "..item.Name.." to "..target.Name)
+                                wait(3)
+                            end
+                        end
                     end
                 end
-            end
-
-            -- Method 2: Fire all possible buy remotes
-            for _, remote in pairs(ReplicatedStorage:GetDescendants()) do
-                if remote:IsA("RemoteEvent") and (remote.Name:find("Buy") or remote.Name:find("Purchase") or remote.Name:find("Shop")) then
-                    if getgenv().Settings.BuyAll then
-                        remote:FireServer()
-                    end
-                end
-            end
-        end)
+            end)
+        end
     end
 end)
 
--- GUI (dengan Close, Destroy, Reopen)
+-- ================== GUI ==================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 700, 0, 520)
-MainFrame.Position = UDim2.new(0.5, -350, 0.5, -260)
-MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+MainFrame.Size = UDim2.new(0, 420, 0, 520)
+MainFrame.Position = UDim2.new(0.5, -210, 0.5, -260)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.Parent = ScreenGui
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
 MainFrame.Draggable = true
 
--- Title + Versi
-local tf = Instance.new("Frame")
-tf.Size = UDim2.new(1,0,0,50)
-tf.BackgroundColor3 = Color3.fromRGB(25,25,25)
-tf.Parent = MainFrame
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1,0,0,45)
+Title.BackgroundColor3 = Color3.fromRGB(30,30,30)
+Title.Text = "RONI HUB - Auto Gift Pet"
+Title.TextColor3 = Color3.fromRGB(255, 200, 0)
+Title.TextSize = 20
+Title.Font = Enum.Font.GothamBold
+Title.Parent = MainFrame
 
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(0.65,0,1,0)
-title.BackgroundTransparency = 1
-title.Text = "RONI HUB"
-title.TextColor3 = Color3.fromRGB(255, 200, 0)
-title.TextSize = 26
-title.Font = Enum.Font.GothamBold
-title.Parent = tf
+-- Close
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0,60,0,30)
+closeBtn.Position = UDim2.new(1,-70,0,8)
+closeBtn.BackgroundColor3 = Color3.fromRGB(40,40,40)
+closeBtn.Text = "CLOSE"
+closeBtn.TextColor3 = Color3.fromRGB(255,255,100)
+closeBtn.TextSize = 14
+closeBtn.Parent = MainFrame
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0,6)
 
-local ver = Instance.new("TextLabel")
-ver.Size = UDim2.new(0.35,0,1,0)
-ver.BackgroundTransparency = 1
-ver.Text = "V8.1 ULTRA"
-ver.TextColor3 = Color3.fromRGB(0, 255, 100)
-ver.TextSize = 20
-ver.Font = Enum.Font.GothamBold
-ver.Parent = tf
+closeBtn.MouseButton1Click:Connect(function() MainFrame.Visible = false end)
 
--- Tombol Close & Destroy
-local close = Instance.new("TextButton")
-close.Size = UDim2.new(0,80,0,35)
-close.Position = UDim2.new(1,-200,0,8)
-close.BackgroundColor3 = Color3.fromRGB(40,40,40)
-close.Text = "CLOSE"
-close.TextColor3 = Color3.fromRGB(255,255,100)
-close.Parent = tf
-Instance.new("UICorner", close).CornerRadius = UDim.new(0,6)
+-- Pilih Pet (Daftar Manual)
+local petList = {"Dog","Cat","Bunny","Chicken","Cow","Pig","Sheep","Horse","Lion","Tiger","Panda","Koala","Penguin","Fox","Wolf","Raccoon","Peacock","Ruby","Mimic","Venom Mimic","Golden Mimic","Shadow Mimic","Dragon","Phoenix","Unicorn","Griffin","Kitsune","T-Rex","Disco Bee","Octopus","Shark"}
 
-local destroy = Instance.new("TextButton")
-destroy.Size = UDim2.new(0,140,0,35)
-destroy.Position = UDim2.new(1,-110,0,8)
-destroy.BackgroundColor3 = Color3.fromRGB(80,0,0)
-destroy.Text = "DESTROY SCRIPT"
-destroy.TextColor3 = Color3.fromRGB(255,200,200)
-destroy.Parent = tf
-Instance.new("UICorner", destroy).CornerRadius = UDim.new(0,6)
+local y = 60
+for _, petName in ipairs(petList) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.9,0,0,35)
+    btn.Position = UDim2.new(0.05,0,0,y/520)
+    btn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    btn.Text = petName
+    btn.TextColor3 = Color3.fromRGB(255,220,100)
+    btn.TextSize = 15
+    btn.Parent = MainFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
 
-close.MouseButton1Click:Connect(function() MainFrame.Visible = false end)
-destroy.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
-
--- Reopen Logo
-local logo = Instance.new("TextButton")
-logo.Size = UDim2.new(0,60,0,60)
-logo.Position = UDim2.new(1,-80,1,-80)
-logo.BackgroundColor3 = Color3.fromRGB(255,160,0)
-logo.Text = "🦒"
-logo.TextSize = 35
-logo.Visible = false
-logo.Parent = ScreenGui
-Instance.new("UICorner", logo).CornerRadius = UDim.new(1,0)
-
-logo.MouseButton1Click:Connect(function()
-    MainFrame.Visible = true
-    logo.Visible = false
-end)
-
--- Misc Content
-local Content = Instance.new("Frame")
-Content.Size = UDim2.new(1,-180,1,-50)
-Content.Position = UDim2.new(0,180,0,50)
-Content.BackgroundTransparency = 1
-Content.Parent = MainFrame
-
-local function showMisc()
-    Content:ClearAllChildren()
-    -- (Auto Buy UI)
-    local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(0.9,0,0,40)
-    t.Position = UDim2.new(0.05,0,0.05,0)
-    t.BackgroundTransparency = 1
-    t.Text = "AUTO BUY ULTRA V8"
-    t.TextColor3 = Color3.fromRGB(255,200,0)
-    t.TextSize = 22
-    t.Parent = Content
-
-    -- Buy All + Toggles (sama seperti sebelumnya)
-    -- ... (saya ringkas karena panjang)
-    print("Auto Buy Extreme aktif")
+    btn.MouseButton1Click:Connect(function()
+        getgenv().Settings.SelectedPet = petName
+        print("Selected Pet: " .. petName)
+        -- Optional: beri feedback
+        btn.TextColor3 = Color3.fromRGB(0,255,150)
+        wait(0.3)
+        btn.TextColor3 = Color3.fromRGB(255,220,100)
+    end)
+    y = y + 40
 end
 
-showMisc()
+-- Pilih Player
+local playerBtn = Instance.new("TextButton")
+playerBtn.Size = UDim2.new(0.9,0,0,40)
+playerBtn.Position = UDim2.new(0.05,0,0,0.75)
+playerBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+playerBtn.Text = "Pilih Player →"
+playerBtn.TextColor3 = Color3.fromRGB(255,220,100)
+playerBtn.TextSize = 16
+playerBtn.Parent = MainFrame
+Instance.new("UICorner", playerBtn).CornerRadius = UDim.new(0,8)
 
-print("V8.1 ULTRA - Test di Seed Shop sekarang")
+playerBtn.MouseButton1Click:Connect(function()
+    local list = {}
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then table.insert(list, plr.Name) end
+    end
+    if #list > 0 then
+        playerBtn.Text = "Player: " .. list[1]
+        getgenv().Settings.TargetPlayer = list[1]
+    end
+end)
+
+-- Toggle Auto Gift
+local giftToggle = Instance.new("TextButton")
+giftToggle.Size = UDim2.new(0.9,0,0,50)
+giftToggle.Position = UDim2.new(0.05,0,0,0.85)
+giftToggle.BackgroundColor3 = Color3.fromRGB(35,35,35)
+giftToggle.Text = "Auto Gift Pet : OFF"
+giftToggle.TextColor3 = Color3.fromRGB(255,100,100)
+giftToggle.TextSize = 17
+giftToggle.Parent = MainFrame
+Instance.new("UICorner", giftToggle).CornerRadius = UDim.new(0,8)
+
+giftToggle.MouseButton1Click:Connect(function()
+    getgenv().Settings.AutoGiftPet = not getgenv().Settings.AutoGiftPet
+    giftToggle.Text = "Auto Gift Pet : " .. (getgenv().Settings.AutoGiftPet and "ON" or "OFF")
+    giftToggle.TextColor3 = getgenv().Settings.AutoGiftPet and Color3.fromRGB(0,255,100) or Color3.fromRGB(255,100,100)
+end)
+
+print("✅ Pilih Pet sekarang berupa daftar manual (Peacock, Mimic, Ruby, dll)")
