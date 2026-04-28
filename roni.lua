@@ -1,83 +1,154 @@
--- =============================================
 -- RONI HUB - Grow a Garden
--- =============================================
-
-print("🔥 RONI HUB Loaded Successfully!")
+print("🔥 RONI HUB Loaded")
 
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
--- ================== SETTINGS ==================
-getgenv().RoniHub = {
+getgenv().Settings = {
     WalkSpeed = 90,
     JumpPower = 60,
-    AutoPlant = false,
     AutoHarvest = false,
-    AutoAcceptGift = false,
-    AutoSell = false
+    AutoSellAll = false,
+    AutoSellStrawberry = false,
+    AutoPlant = false,
+    AutoGift = false
 }
 
-print("🌱 RONI HUB Menu Loaded")
+-- WalkSpeed & JumpPower Real-time
+spawn(function()
+    while wait(0.5) do
+        pcall(function()
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+            if hum then
+                hum.WalkSpeed = getgenv().Settings.WalkSpeed
+                hum.JumpPower = getgenv().Settings.JumpPower
+            end
+        end)
+    end
+end)
 
--- ================== GUI MENU ==================
+-- ================== AUTO SELL ==================
+spawn(function()
+    while wait(1) do
+        if getgenv().Settings.AutoSellAll or getgenv().Settings.AutoSellStrawberry then
+            pcall(function()
+                for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
+                    local name = item.Name
+                    
+                    if getgenv().Settings.AutoSellAll then
+                        if name:find("Strawberry") or name:find("Beanstalk") or name:find("Blueberry") or 
+                           name:find("Raspberry") or name:find("Banana") or name:find("Apple") then
+                            local prompt = item:FindFirstChildWhichIsA("ProximityPrompt")
+                            if prompt then prompt:InputHoldBegin() wait(0.15) prompt:InputHoldEnd() end
+                        end
+                    end
+                    
+                    if getgenv().Settings.AutoSellStrawberry and name:find("Strawberry") then
+                        local prompt = item:FindFirstChildWhichIsA("ProximityPrompt")
+                        if prompt then prompt:InputHoldBegin() wait(0.15) prompt:InputHoldEnd() end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ================== GUI ==================
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "RoniHubGUI"
-ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 320, 0, 400)
-MainFrame.Position = UDim2.new(0.5, -160, 0.5, -200)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.Size = UDim2.new(0, 340, 0, 520)
+MainFrame.Position = UDim2.new(0.5, -170, 0.5, -260)
+MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
 MainFrame.Parent = ScreenGui
-
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 50)
+Title.Size = UDim2.new(1,0,0,50)
 Title.BackgroundTransparency = 1
-Title.Text = "🔑 RONI HUB"
-Title.TextColor3 = Color3.fromRGB(0, 255, 120)
+Title.Text = "Garden Helper"
+Title.TextColor3 = Color3.fromRGB(0, 220, 100)
 Title.TextScaled = true
 Title.Font = Enum.Font.GothamBold
 Title.Parent = MainFrame
 
--- WalkSpeed
-local wsLabel = Instance.new("TextLabel")
-wsLabel.Text = "WalkSpeed: " .. getgenv().RoniHub.WalkSpeed
-wsLabel.Size = UDim2.new(0.9,0,0,30)
-wsLabel.Position = UDim2.new(0.05,0,0.15,0)
-wsLabel.BackgroundTransparency = 1
-wsLabel.TextColor3 = Color3.fromRGB(255,255,255)
-wsLabel.Parent = MainFrame
+-- Slider Function
+local function createSlider(name, posY, min, max, default, setting)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.9,0,0,25)
+    label.Position = UDim2.new(0.05,0,posY,0)
+    label.BackgroundTransparency = 1
+    label.Text = name .. ": " .. default
+    label.TextColor3 = Color3.fromRGB(255,255,255)
+    label.TextScaled = true
+    label.Font = Enum.Font.Gotham
+    label.Parent = MainFrame
 
--- Toggle Auto Accept Gift
-local function createToggle(name, position, setting)
-    local toggle = Instance.new("TextButton")
-    toggle.Size = UDim2.new(0.9,0,0,40)
-    toggle.Position = position
-    toggle.BackgroundColor3 = Color3.fromRGB(40,40,40)
-    toggle.Text = name .. ": OFF"
-    toggle.TextColor3 = Color3.fromRGB(255,100,100)
-    toggle.Parent = MainFrame
-    Instance.new("UICorner", toggle).CornerRadius = UDim.new(0,8)
+    local slider = Instance.new("TextButton")
+    slider.Size = UDim2.new(0.9,0,0,30)
+    slider.Position = UDim2.new(0.05,0,posY + 0.06,0)
+    slider.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    slider.Text = ""
+    slider.Parent = MainFrame
+    Instance.new("UICorner", slider).CornerRadius = UDim.new(0,8)
 
-    toggle.MouseButton1Click:Connect(function()
-        getgenv().RoniHub[setting] = not getgenv().RoniHub[setting]
-        if getgenv().RoniHub[setting] then
-            toggle.Text = name .. ": ON"
-            toggle.TextColor3 = Color3.fromRGB(0,255,100)
-        else
-            toggle.Text = name .. ": OFF"
-            toggle.TextColor3 = Color3.fromRGB(255,100,100)
+    -- Drag logic sederhana
+    local dragging = false
+    slider.MouseButton1Down:Connect(function()
+        dragging = true
+    end)
+    game:GetService("UserInputService").InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    game:GetService("RunService").RenderStepped:Connect(function()
+        if dragging then
+            local mouseX = game.Players.LocalPlayer:GetMouse().X
+            local sliderPos = slider.AbsolutePosition.X
+            local sliderWidth = slider.AbsoluteSize.X
+            local percent = math.clamp((mouseX - sliderPos) / sliderWidth, 0, 1)
+            local value = math.floor(min + (max - min) * percent)
+            
+            getgenv().Settings[setting] = value
+            label.Text = name .. ": " .. value
         end
     end)
 end
 
-createToggle("Auto Accept Gift", UDim2.new(0.05,0,0.3,0), "AutoAcceptGift")
-createToggle("Auto Plant", UDim2.new(0.05,0,0.45,0), "AutoPlant")
-createToggle("Auto Harvest", UDim2.new(0.05,0,0.6,0), "AutoHarvest")
-createToggle("Auto Sell", UDim2.new(0.05,0,0.75,0), "AutoSell")
+-- Toggles
+local function createToggle(name, posY, setting)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.9,0,0,42)
+    btn.Position = UDim2.new(0.05, 0, posY, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    btn.Text = name .. ": OFF"
+    btn.TextColor3 = Color3.fromRGB(255,80,80)
+    btn.TextScaled = true
+    btn.Parent = MainFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
 
-print("✅ RONI HUB GUI telah muncul!")
+    btn.MouseButton1Click:Connect(function()
+        getgenv().Settings[setting] = not getgenv().Settings[setting]
+        if getgenv().Settings[setting] then
+            btn.Text = name .. ": ON"
+            btn.TextColor3 = Color3.fromRGB(0,255,100)
+        else
+            btn.Text = name .. ": OFF"
+            btn.TextColor3 = Color3.fromRGB(255,80,80)
+        end
+    end)
+end
+
+-- Tambahkan Slider & Toggle
+createSlider("WalkSpeed", 0.12, 16, 300, 90, "WalkSpeed")
+createSlider("JumpPower", 0.28, 50, 200, 60, "JumpPower")
+
+createToggle("Auto Harvest",      0.48, "AutoHarvest")
+createToggle("Auto Sell ALL Buah", 0.60, "AutoSellAll")
+createToggle("Auto Sell Strawberry", 0.72, "AutoSellStrawberry")
+createToggle("Auto Plant",        0.84, "AutoPlant")
+
+print("✅ GUI with Slider Updated")
