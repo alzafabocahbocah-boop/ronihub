@@ -1,5 +1,5 @@
 -- RONI HUB - Grow a Garden
-print("🔥 RONI HUB Loaded - V5")
+print("🔥 RONI HUB Loaded - V5.1")
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -14,26 +14,24 @@ getgenv().Settings = {
     BuyAll = false
 }
 
--- ================== AUTO BUY V5 (Lebih Agresif) ==================
+-- ================== AUTO BUY V5 ==================
 spawn(function()
-    while wait(0.5) do
+    while wait(0.6) do
         if not (getgenv().Settings.BuyAll or getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then continue end
 
         pcall(function()
             for _, v in pairs(Workspace:GetDescendants()) do
                 if v:IsA("ProximityPrompt") then
-                    local name = v.Parent.Name .. (v.Parent:FindFirstChildWhichIsA("TextLabel") and v.Parent:FindFirstChildWhichIsA("TextLabel").Text or "")
-
-                    local shouldBuy = getgenv().Settings.BuyAll or
-                        (getgenv().Settings.AutoBuySeed and name:find("Seed")) or
-                        (getgenv().Settings.AutoBuyEgg and name:find("Egg")) or
-                        (getgenv().Settings.AutoBuyGear and (name:find("Gear") or name:find("Tool")))
-
-                    if shouldBuy then
+                    local name = v.Parent.Name
+                    if getgenv().Settings.BuyAll or 
+                       (getgenv().Settings.AutoBuySeed and name:find("Seed")) or
+                       (getgenv().Settings.AutoBuyEgg and name:find("Egg")) or
+                       (getgenv().Settings.AutoBuyGear and (name:find("Gear") or name:find("Tool"))) then
+                        
                         v:InputHoldBegin()
-                        wait(0.25)
+                        wait(0.22)
                         v:InputHoldEnd()
-                        wait(0.3)
+                        wait(0.4)
                     end
                 end
             end
@@ -41,7 +39,7 @@ spawn(function()
     end
 end)
 
--- ================== GUI ==================
+-- ================== GUI LENGKAP ==================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -53,6 +51,7 @@ MainFrame.Parent = ScreenGui
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 MainFrame.Draggable = true
 
+-- Title + Versi
 local TitleFrame = Instance.new("Frame")
 TitleFrame.Size = UDim2.new(1,0,0,50)
 TitleFrame.BackgroundColor3 = Color3.fromRGB(25,25,25)
@@ -71,14 +70,14 @@ Title.Parent = TitleFrame
 local Version = Instance.new("TextLabel")
 Version.Size = UDim2.new(0.3,0,1,0)
 Version.BackgroundTransparency = 1
-Version.Text = "V5.0"
+Version.Text = "V5.1"
 Version.TextColor3 = Color3.fromRGB(180, 180, 180)
 Version.TextSize = 18
 Version.Font = Enum.Font.Gotham
 Version.TextXAlignment = Enum.TextXAlignment.Right
 Version.Parent = TitleFrame
 
--- Close Button (Hanya nutup GUI)
+-- Close & Destroy
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 80, 0, 35)
 closeBtn.Position = UDim2.new(1, -200, 0, 8)
@@ -90,7 +89,6 @@ closeBtn.Font = Enum.Font.GothamBold
 closeBtn.Parent = TitleFrame
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0,6)
 
--- Destroy Button
 local destroyBtn = Instance.new("TextButton")
 destroyBtn.Size = UDim2.new(0, 140, 0, 35)
 destroyBtn.Position = UDim2.new(1, -110, 0, 8)
@@ -129,7 +127,71 @@ destroyBtn.MouseButton1Click:Connect(function()
     print("🛑 RONI HUB telah dihancurkan")
 end)
 
--- Sidebar + Misc Content (sama seperti sebelumnya, tapi lebih ringkas)
--- ... (kode sidebar dan misc content tetap sama seperti V4)
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0, 180, 1, -50)
+Sidebar.Position = UDim2.new(0,0,0,50)
+Sidebar.BackgroundColor3 = Color3.fromRGB(22,22,22)
+Sidebar.Parent = MainFrame
 
-print("✅ V5.0 - Tombol Close + Destroy + Logo Reopen telah ditambahkan")
+local Content = Instance.new("Frame")
+Content.Size = UDim2.new(1, -180, 1, -50)
+Content.Position = UDim2.new(0,180,0,50)
+Content.BackgroundTransparency = 1
+Content.Parent = MainFrame
+
+local function createSidebarButton(text, posY, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -10, 0, 45)
+    btn.Position = UDim2.new(0, 5, posY, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 200, 0)
+    btn.TextSize = 18
+    btn.Font = Enum.Font.GothamBold
+    btn.Parent = Sidebar
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
+    btn.MouseButton1Click:Connect(callback)
+end
+
+local function showMiscContent()
+    Content:ClearAllChildren()
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(0.9,0,0,40)
+    title.Position = UDim2.new(0.05,0,0.05,0)
+    title.BackgroundTransparency = 1
+    title.Text = "AUTO BUY"
+    title.TextColor3 = Color3.fromRGB(255,200,0)
+    title.TextSize = 22
+    title.Font = Enum.Font.GothamBold
+    title.Parent = Content
+
+    local buyAllBtn = Instance.new("TextButton")
+    buyAllBtn.Size = UDim2.new(0.85,0,0,50)
+    buyAllBtn.Position = UDim2.new(0.1,0,0.15,0)
+    buyAllBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    buyAllBtn.Text = "Buy All Items : OFF"
+    buyAllBtn.TextColor3 = Color3.fromRGB(255,100,100)
+    buyAllBtn.TextSize = 17
+    buyAllBtn.Parent = Content
+    Instance.new("UICorner", buyAllBtn).CornerRadius = UDim.new(0,8)
+
+    buyAllBtn.MouseButton1Click:Connect(function()
+        getgenv().Settings.BuyAll = not getgenv().Settings.BuyAll
+        buyAllBtn.Text = "Buy All Items : " .. (getgenv().Settings.BuyAll and "ON" or "OFF")
+        buyAllBtn.TextColor3 = getgenv().Settings.BuyAll and Color3.fromRGB(0,255,100) or Color3.fromRGB(255,100,100)
+    end)
+
+    local function createToggle(name, posY, setting)
+        local toggle = Instance.new("TextButton")
+        toggle.Size = UDim2.new(0.85,0,0,45)
+        toggle.Position = UDim2.new(0.1,0,posY,0)
+        toggle.BackgroundColor3 = Color3.fromRGB(35,35,35)
+        toggle.Text = name .. ": OFF"
+        toggle.TextColor3 = Color3.fromRGB(255,100,100)
+        toggle.TextSize = 17
+        toggle.Parent = Content
+        Instance.new("UICorner", toggle).CornerRadius = UDim.new(0,8)
+
+        toggle.MouseButton1Click:Connect(function()
+            getgenv().Settings[setting
