@@ -1,32 +1,17 @@
--- =============================================
--- RONI HUB - Grow a Garden Script
--- Username: alzafabocahbocah-boop
--- =============================================
-
-print("🔥 RONI HUB Loaded from GitHub")
+-- RONI HUB - Grow a Garden
+print("🔥 RONI HUB Loaded Successfully!")
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
--- ================== KEY SYSTEM ==================
-local AllowedKeys = {
-    "resti gendut",
-    "RestiGendut",
-    "restigendut",
-    "RoniHub2026"
-}
-
-print("✅ RONI HUB - Grow a Garden")
+print("✅ Key System Passed")
 
 getgenv().RoniHub = {
-    AutoPlant = true,
-    AutoHarvest = true,
-    AutoAcceptGift = true,
     WalkSpeed = 90,
     JumpPower = 60
 }
 
--- WalkSpeed & JumpPower
+-- WalkSpeed
 spawn(function()
     while wait(1) do
         pcall(function()
@@ -39,5 +24,5 @@ spawn(function()
     end
 end)
 
-print("🌱 RONI HUB Berjalan - WalkSpeed & JumpPower aktif")
-print("Siap ditambahkan fitur Auto Gift, Auto Plant, dll")
+print("🌱 RONI HUB Berjalan")
+print("WalkSpeed = 90 | JumpPower = 60")
