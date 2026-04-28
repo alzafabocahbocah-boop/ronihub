@@ -2,6 +2,7 @@
 print("🔥 RONI HUB Loaded")
 
 local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
 getgenv().Settings = {
@@ -13,12 +14,46 @@ getgenv().Settings = {
     AutoBuySeed = false,
     AutoBuyEgg = false,
     AutoBuyGear = false,
-    AutoGiftPet = false,
-    TargetPlayer = nil,
-    SelectedPet = nil
+    AutoGiftPet = false
 }
 
--- ================== GUI ==================
+-- ================== AUTO BUY LOGIC ==================
+spawn(function()
+    while wait(1.2) do
+        if not (getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then continue end
+        
+        pcall(function()
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("ProximityPrompt") then
+                    local parent = obj.Parent
+                    
+                    -- Auto Buy Seed
+                    if getgenv().Settings.AutoBuySeed and (parent.Name:find("Seed") or parent.Name:find("Shop")) then
+                        obj:InputHoldBegin()
+                        wait(0.2)
+                        obj:InputHoldEnd()
+                    end
+                    
+                    -- Auto Buy Egg
+                    if getgenv().Settings.AutoBuyEgg and (parent.Name:find("Egg") or parent.Name:find("Hatch")) then
+                        obj:InputHoldBegin()
+                        wait(0.2)
+                        obj:InputHoldEnd()
+                    end
+                    
+                    -- Auto Buy Gear
+                    if getgenv().Settings.AutoBuyGear and (parent.Name:find("Gear") or parent.Name:find("Tool")) then
+                        obj:InputHoldBegin()
+                        wait(0.2)
+                        obj:InputHoldEnd()
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- ================== GUI (Node Hub Style) ==================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -51,7 +86,7 @@ Content.Position = UDim2.new(0,180,0,50)
 Content.BackgroundTransparency = 1
 Content.Parent = MainFrame
 
--- Close Button
+-- Close
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0,40,0,40)
 closeBtn.Position = UDim2.new(1,-45,0,5)
@@ -62,7 +97,6 @@ closeBtn.TextSize = 24
 closeBtn.Parent = MainFrame
 closeBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
--- Sidebar Button
 local function createSidebarButton(text, posY, callback)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, -10, 0, 45)
@@ -77,30 +111,28 @@ local function createSidebarButton(text, posY, callback)
     btn.MouseButton1Click:Connect(callback)
 end
 
--- ================== SHOW MISC ==================
 local function showMiscContent()
     Content:ClearAllChildren()
 
-    -- Auto Buy Button
-    local autoBuyBtn = Instance.new("TextButton")
-    autoBuyBtn.Size = UDim2.new(0.9,0,0,50)
-    autoBuyBtn.Position = UDim2.new(0.05,0,0.05,0)
-    autoBuyBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
-    autoBuyBtn.Text = "Auto Buy"
-    autoBuyBtn.TextColor3 = Color3.fromRGB(255,200,0)
-    autoBuyBtn.TextSize = 20
-    autoBuyBtn.Parent = Content
-    Instance.new("UICorner", autoBuyBtn).CornerRadius = UDim.new(0,8)
+    -- Auto Buy Section
+    local autoBuyTitle = Instance.new("TextLabel")
+    autoBuyTitle.Size = UDim2.new(0.9,0,0,40)
+    autoBuyTitle.Position = UDim2.new(0.05,0,0.05,0)
+    autoBuyTitle.BackgroundTransparency = 1
+    autoBuyTitle.Text = "AUTO BUY"
+    autoBuyTitle.TextColor3 = Color3.fromRGB(255,200,0)
+    autoBuyTitle.TextSize = 22
+    autoBuyTitle.Font = Enum.Font.GothamBold
+    autoBuyTitle.Parent = Content
 
-    -- Sub Auto Buy (Seed, Egg, Gear)
-    local function createSubToggle(name, posY, setting)
+    local function createToggle(name, posY, setting)
         local toggle = Instance.new("TextButton")
-        toggle.Size = UDim2.new(0.85,0,0,40)
+        toggle.Size = UDim2.new(0.85,0,0,45)
         toggle.Position = UDim2.new(0.1,0,posY,0)
-        toggle.BackgroundColor3 = Color3.fromRGB(30,30,30)
+        toggle.BackgroundColor3 = Color3.fromRGB(35,35,35)
         toggle.Text = name .. ": OFF"
         toggle.TextColor3 = Color3.fromRGB(255,100,100)
-        toggle.TextSize = 16
+        toggle.TextSize = 17
         toggle.Parent = Content
         Instance.new("UICorner", toggle).CornerRadius = UDim.new(0,8)
 
@@ -111,41 +143,29 @@ local function showMiscContent()
         end)
     end
 
-    createSubToggle("Auto Buy Seed", 0.20, "AutoBuySeed")
-    createSubToggle("Auto Buy Egg",  0.32, "AutoBuyEgg")
-    createSubToggle("Auto Buy Gear", 0.44, "AutoBuyGear")
+    createToggle("Auto Buy Seed", 0.18, "AutoBuySeed")
+    createToggle("Auto Buy Egg",  0.30, "AutoBuyEgg")
+    createToggle("Auto Buy Gear", 0.42, "AutoBuyGear")
 
-    -- Auto Gift Button
-    local autoGiftBtn = Instance.new("TextButton")
-    autoGiftBtn.Size = UDim2.new(0.9,0,0,50)
-    autoGiftBtn.Position = UDim2.new(0.05,0,0.60,0)
-    autoGiftBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
-    autoGiftBtn.Text = "Auto Gift"
-    autoGiftBtn.TextColor3 = Color3.fromRGB(255,200,0)
-    autoGiftBtn.TextSize = 20
-    autoGiftBtn.Parent = Content
-    Instance.new("UICorner", autoGiftBtn).CornerRadius = UDim.new(0,8)
-
-    -- Rejoin
-    local rejoinBtn = Instance.new("TextButton")
-    rejoinBtn.Size = UDim2.new(0.9,0,0,50)
-    rejoinBtn.Position = UDim2.new(0.05,0,0.75,0)
-    rejoinBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
-    rejoinBtn.Text = "Rejoin Server"
-    rejoinBtn.TextColor3 = Color3.fromRGB(255,200,0)
-    rejoinBtn.TextSize = 20
-    rejoinBtn.Parent = Content
-    Instance.new("UICorner", rejoinBtn).CornerRadius = UDim.new(0,8)
+    -- Auto Gift & Rejoin (sederhana)
+    local giftBtn = Instance.new("TextButton")
+    giftBtn.Size = UDim2.new(0.85,0,0,50)
+    giftBtn.Position = UDim2.new(0.1,0,0.60,0)
+    giftBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    giftBtn.Text = "Auto Gift (Coming Soon)"
+    giftBtn.TextColor3 = Color3.fromRGB(255,200,0)
+    giftBtn.TextSize = 18
+    giftBtn.Parent = Content
+    Instance.new("UICorner", giftBtn).CornerRadius = UDim.new(0,8)
 end
 
--- Sidebar
 createSidebarButton("ELEPHANT", 0.05, function() 
     Content:ClearAllChildren()
     local txt = Instance.new("TextLabel")
     txt.Size = UDim2.new(0.9,0,0.8,0)
     txt.Position = UDim2.new(0.05,0,0.1,0)
     txt.BackgroundTransparency = 1
-    txt.Text = "ELEPHANT SECTION\n\nFitur utama akan ditambahkan di sini"
+    txt.Text = "ELEPHANT\n\nFitur utama sedang dibuat"
     txt.TextColor3 = Color3.fromRGB(180,180,180)
     txt.TextSize = 20
     txt.Parent = Content
@@ -153,7 +173,6 @@ end)
 
 createSidebarButton("MISC", 0.45, showMiscContent)
 
--- Default tampilkan Misc
-showMiscContent()
+showMiscContent()  -- Default Misc
 
-print("✅ Misc dengan Auto Buy (Seed, Egg, Gear) telah aktif")
+print("✅ Auto Buy Seed, Egg, Gear sudah ada logic dasar")
