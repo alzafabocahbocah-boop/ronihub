@@ -1,5 +1,5 @@
 -- RONI HUB - Grow a Garden
-print("🔥 RONI HUB Loaded - V5.1")
+print("🔥 RONI HUB Loaded - V5.2")
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -14,9 +14,9 @@ getgenv().Settings = {
     BuyAll = false
 }
 
--- ================== AUTO BUY V5 ==================
+-- ================== AUTO BUY V5.2 ==================
 spawn(function()
-    while wait(0.6) do
+    while wait(0.55) do
         if not (getgenv().Settings.BuyAll or getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then continue end
 
         pcall(function()
@@ -24,14 +24,14 @@ spawn(function()
                 if v:IsA("ProximityPrompt") then
                     local name = v.Parent.Name
                     if getgenv().Settings.BuyAll or 
-                       (getgenv().Settings.AutoBuySeed and name:find("Seed")) or
+                       (getgenv().Settings.AutoBuySeed and (name:find("Seed") or name:find("Pack"))) or
                        (getgenv().Settings.AutoBuyEgg and name:find("Egg")) or
                        (getgenv().Settings.AutoBuyGear and (name:find("Gear") or name:find("Tool"))) then
                         
                         v:InputHoldBegin()
-                        wait(0.22)
+                        wait(0.25)
                         v:InputHoldEnd()
-                        wait(0.4)
+                        wait(0.35)
                     end
                 end
             end
@@ -39,7 +39,7 @@ spawn(function()
     end
 end)
 
--- ================== GUI LENGKAP ==================
+-- ================== GUI ==================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -58,7 +58,7 @@ TitleFrame.BackgroundColor3 = Color3.fromRGB(25,25,25)
 TitleFrame.Parent = MainFrame
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(0.7,0,1,0)
+Title.Size = UDim2.new(0.65,0,1,0)
 Title.BackgroundTransparency = 1
 Title.Text = "RONI HUB"
 Title.TextColor3 = Color3.fromRGB(255, 200, 0)
@@ -68,16 +68,16 @@ Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = TitleFrame
 
 local Version = Instance.new("TextLabel")
-Version.Size = UDim2.new(0.3,0,1,0)
+Version.Size = UDim2.new(0.35,0,1,0)
 Version.BackgroundTransparency = 1
-Version.Text = "V5.1"
-Version.TextColor3 = Color3.fromRGB(180, 180, 180)
-Version.TextSize = 18
-Version.Font = Enum.Font.Gotham
+Version.Text = "V5.2"          -- <--- Versi di sini
+Version.TextColor3 = Color3.fromRGB(0, 255, 150)
+Version.TextSize = 20
+Version.Font = Enum.Font.GothamBold
 Version.TextXAlignment = Enum.TextXAlignment.Right
 Version.Parent = TitleFrame
 
--- Close & Destroy
+-- Tombol Close & Destroy
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 80, 0, 35)
 closeBtn.Position = UDim2.new(1, -200, 0, 8)
@@ -124,9 +124,10 @@ end)
 
 destroyBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
-    print("🛑 RONI HUB telah dihancurkan")
+    print("🛑 RONI HUB dihancurkan")
 end)
 
+-- Sidebar & Misc (lengkap)
 local Sidebar = Instance.new("Frame")
 Sidebar.Size = UDim2.new(0, 180, 1, -50)
 Sidebar.Position = UDim2.new(0,0,0,50)
@@ -155,7 +156,7 @@ end
 
 local function showMiscContent()
     Content:ClearAllChildren()
-
+    -- Auto Buy UI
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(0.9,0,0,40)
     title.Position = UDim2.new(0.05,0,0.05,0)
@@ -194,4 +195,20 @@ local function showMiscContent()
         Instance.new("UICorner", toggle).CornerRadius = UDim.new(0,8)
 
         toggle.MouseButton1Click:Connect(function()
-            getgenv().Settings[setting
+            getgenv().Settings[setting] = not getgenv().Settings[setting]
+            toggle.Text = name .. (getgenv().Settings[setting] and ": ON" or ": OFF")
+            toggle.TextColor3 = getgenv().Settings[setting] and Color3.fromRGB(0,255,100) or Color3.fromRGB(255,100,100)
+        end)
+    end
+
+    createToggle("Auto Buy Seed", 0.32, "AutoBuySeed")
+    createToggle("Auto Buy Egg",  0.44, "AutoBuyEgg")
+    createToggle("Auto Buy Gear", 0.56, "AutoBuyGear")
+end
+
+createSidebarButton("ELEPHANT", 0.05, function() Content:ClearAllChildren() end)
+createSidebarButton("MISC", 0.45, showMiscContent)
+
+showMiscContent()
+
+print("✅ V5.2 - Versi jelas + Tombol Close & Destroy")
