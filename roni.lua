@@ -11,38 +11,49 @@ getgenv().Settings = {
     AutoBuySeed = false,
     AutoBuyEgg = false,
     AutoBuyGear = false,
-    BuyAll = false,
-    SelectedItem = "All"
+    BuyAll = false
 }
 
--- ================== AUTO BUY LOGIC ==================
+-- ================== AUTO BUY LOGIC (Diperbaiki) ==================
 spawn(function()
-    while wait(0.8) do
-        if not (getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then continue end
+    while wait(0.7) do
+        if not (getgenv().Settings.BuyAll or getgenv().Settings.AutoBuySeed or getgenv().Settings.AutoBuyEgg or getgenv().Settings.AutoBuyGear) then 
+            continue 
+        end
 
         pcall(function()
-            for _, obj in pairs(Workspace:GetDescendants()) do
-                if obj:IsA("ProximityPrompt") then
-                    local name = obj.Parent.Name
-
-                    if getgenv().Settings.BuyAll or getgenv().Settings.SelectedItem == "All" then
-                        if name:find("Seed") or name:find("Egg") or name:find("Gear") or name:find("Shop") then
-                            obj:InputHoldBegin()
-                            wait(0.25)
-                            obj:InputHoldEnd()
+            for _, prompt in pairs(Workspace:GetDescendants()) do
+                if prompt:IsA("ProximityPrompt") then
+                    local parentName = prompt.Parent.Name
+                    
+                    -- Buy All
+                    if getgenv().Settings.BuyAll then
+                        if parentName:find("Seed") or parentName:find("Egg") or parentName:find("Gear") or 
+                           parentName:find("Shop") or parentName:find("Buy") then
+                            prompt:InputHoldBegin()
+                            wait(0.2)
+                            prompt:InputHoldEnd()
+                            wait(0.3)
                         end
-                    elseif getgenv().Settings.AutoBuySeed and name:find("Seed") then
-                        obj:InputHoldBegin()
-                        wait(0.25)
-                        obj:InputHoldEnd()
-                    elseif getgenv().Settings.AutoBuyEgg and name:find("Egg") then
-                        obj:InputHoldBegin()
-                        wait(0.25)
-                        obj:InputHoldEnd()
-                    elseif getgenv().Settings.AutoBuyGear and name:find("Gear") then
-                        obj:InputHoldBegin()
-                        wait(0.25)
-                        obj:InputHoldEnd()
+                    end
+                    
+                    -- Spesifik
+                    if getgenv().Settings.AutoBuySeed and (parentName:find("Seed") or parentName:find("Pack")) then
+                        prompt:InputHoldBegin()
+                        wait(0.2)
+                        prompt:InputHoldEnd()
+                    end
+                    
+                    if getgenv().Settings.AutoBuyEgg and parentName:find("Egg") then
+                        prompt:InputHoldBegin()
+                        wait(0.2)
+                        prompt:InputHoldEnd()
+                    end
+                    
+                    if getgenv().Settings.AutoBuyGear and (parentName:find("Gear") or parentName:find("Tool") or parentName:find("Can")) then
+                        prompt:InputHoldBegin()
+                        wait(0.2)
+                        prompt:InputHoldEnd()
                     end
                 end
             end
@@ -83,7 +94,7 @@ Content.Position = UDim2.new(0,180,0,50)
 Content.BackgroundTransparency = 1
 Content.Parent = MainFrame
 
--- Close
+-- Close Button
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0,40,0,40)
 closeBtn.Position = UDim2.new(1,-45,0,5)
@@ -111,7 +122,6 @@ end
 local function showMiscContent()
     Content:ClearAllChildren()
 
-    -- Auto Buy Title
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(0.9,0,0,40)
     title.Position = UDim2.new(0.05,0,0.05,0)
@@ -122,24 +132,24 @@ local function showMiscContent()
     title.Font = Enum.Font.GothamBold
     title.Parent = Content
 
-    -- Buy All Toggle
-    local buyAll = Instance.new("TextButton")
-    buyAll.Size = UDim2.new(0.85,0,0,45)
-    buyAll.Position = UDim2.new(0.1,0,0.15,0)
-    buyAll.BackgroundColor3 = Color3.fromRGB(35,35,35)
-    buyAll.Text = "Buy All : OFF"
-    buyAll.TextColor3 = Color3.fromRGB(255,100,100)
-    buyAll.TextSize = 17
-    buyAll.Parent = Content
-    Instance.new("UICorner", buyAll).CornerRadius = UDim.new(0,8)
+    -- Buy All
+    local buyAllBtn = Instance.new("TextButton")
+    buyAllBtn.Size = UDim2.new(0.85,0,0,50)
+    buyAllBtn.Position = UDim2.new(0.1,0,0.15,0)
+    buyAllBtn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    buyAllBtn.Text = "Buy All Items : OFF"
+    buyAllBtn.TextColor3 = Color3.fromRGB(255,100,100)
+    buyAllBtn.TextSize = 17
+    buyAllBtn.Parent = Content
+    Instance.new("UICorner", buyAllBtn).CornerRadius = UDim.new(0,8)
 
-    buyAll.MouseButton1Click:Connect(function()
+    buyAllBtn.MouseButton1Click:Connect(function()
         getgenv().Settings.BuyAll = not getgenv().Settings.BuyAll
-        buyAll.Text = "Buy All : " .. (getgenv().Settings.BuyAll and "ON" or "OFF")
-        buyAll.TextColor3 = getgenv().Settings.BuyAll and Color3.fromRGB(0,255,100) or Color3.fromRGB(255,100,100)
+        buyAllBtn.Text = "Buy All Items : " .. (getgenv().Settings.BuyAll and "ON" or "OFF")
+        buyAllBtn.TextColor3 = getgenv().Settings.BuyAll and Color3.fromRGB(0,255,100) or Color3.fromRGB(255,100,100)
     end)
 
-    -- Sub Toggles
+    -- Specific Toggles
     local function createToggle(name, posY, setting)
         local toggle = Instance.new("TextButton")
         toggle.Size = UDim2.new(0.85,0,0,45)
@@ -158,9 +168,9 @@ local function showMiscContent()
         end)
     end
 
-    createToggle("Auto Buy Seed", 0.30, "AutoBuySeed")
-    createToggle("Auto Buy Egg",  0.42, "AutoBuyEgg")
-    createToggle("Auto Buy Gear", 0.54, "AutoBuyGear")
+    createToggle("Auto Buy Seed", 0.32, "AutoBuySeed")
+    createToggle("Auto Buy Egg",  0.44, "AutoBuyEgg")
+    createToggle("Auto Buy Gear", 0.56, "AutoBuyGear")
 end
 
 createSidebarButton("ELEPHANT", 0.05, function() 
@@ -169,7 +179,7 @@ createSidebarButton("ELEPHANT", 0.05, function()
     txt.Size = UDim2.new(0.9,0,0.8,0)
     txt.Position = UDim2.new(0.05,0,0.1,0)
     txt.BackgroundTransparency = 1
-    txt.Text = "ELEPHANT SECTION\n\nSedang dibuat"
+    txt.Text = "ELEPHANT SECTION\n\nFitur utama akan ditambahkan"
     txt.TextColor3 = Color3.fromRGB(180,180,180)
     txt.TextSize = 20
     txt.Parent = Content
@@ -179,4 +189,4 @@ createSidebarButton("MISC", 0.45, showMiscContent)
 
 showMiscContent()
 
-print("✅ Auto Buy sudah bisa dipakai (Buy All + Spesifik)")
+print("✅ Auto Buy sudah di-upgrade (Buy All + Spesifik)")
