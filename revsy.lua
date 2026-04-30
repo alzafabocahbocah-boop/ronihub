@@ -1,6 +1,7 @@
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local TS = game:GetService("TeleportService")
+local HS = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
@@ -9,15 +10,35 @@ if playerGui:FindFirstChild("ZenxShowBtn") then playerGui.ZenxShowBtn:Destroy() 
 
 local petsService = RS:FindFirstChild("PetsService",true)
 
+local DATA_FILE="ZenxLvlData.json"
+
+local function loadData()
+    local ok,content=pcall(readfile,DATA_FILE)
+    if ok and content and content~="" then
+        local ok2,parsed=pcall(function() return HS:JSONDecode(content) end)
+        if ok2 and parsed then return parsed end
+    end
+    return nil
+end
+
+local function saveToFile(data)
+    local ok,encoded=pcall(function() return HS:JSONEncode(data) end)
+    if ok then pcall(writefile,DATA_FILE,encoded) end
+end
+
+local loaded=loadData()
 if not getgenv().ZenxData then
-    getgenv().ZenxData={
+    getgenv().ZenxData=loaded or {
         swapPerPet={},
         swapConfig={swapDelay=0.1,pickupDelay=0.6,placeDelay=0},
         config={equipInterval=5,rejoinMinutes=30},
         targetPetType="(Semua Pet)",
         fromAge=1,toAge=100,maxPetTarget=1,
         autoStartEnabled=false,autoAccGift=false,autoAccTrade=false,
+        autoRejoin=false,
     }
+elseif loaded then
+    for k,v in pairs(loaded) do getgenv().ZenxData[k]=v end
 end
 local d=getgenv().ZenxData
 
@@ -71,7 +92,6 @@ local function getNameKey(item)
     return getPetName(item)..(kg and ("|"..tostring(kg)) or "")
 end
 
--- GUI 580x460
 local GUI_W=580 local GUI_H=460
 local sg=mk("ScreenGui",{Name="ZenxLvlGui",DisplayOrder=999,ResetOnSpawn=false,Parent=playerGui})
 local main=mk("Frame",{
@@ -91,7 +111,6 @@ local hideBtn=btn(TB,"X",10,C.RDim,C.Red)
 hideBtn.Size=UDim2.new(0,22,0,22) hideBtn.Position=UDim2.new(1,-24,0.5,-11) stroke(hideBtn,C.Red,1.2)
 
 local content=mk("Frame",{Size=UDim2.new(1,0,1,-34),Position=UDim2.new(0,0,0,34),BackgroundTransparency=1,Parent=main})
-
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,2),Parent=tabBar})
 
@@ -160,16 +179,17 @@ end)
 
 -- DATA
 local teamPets={}
-local swapPerPet=d.swapPerPet
-local swapConfig=d.swapConfig
-local config=d.config
-local targetPetType=d.targetPetType
-local fromAge=d.fromAge
-local toAge=d.toAge
-local maxPetTarget=d.maxPetTarget
-local autoStartEnabled=d.autoStartEnabled
-local autoAccGift=d.autoAccGift
-local autoAccTrade=d.autoAccTrade
+local swapPerPet=d.swapPerPet or {}
+local swapConfig=d.swapConfig or {swapDelay=0.1,pickupDelay=0.6,placeDelay=0}
+local config=d.config or {equipInterval=5,rejoinMinutes=30}
+local targetPetType=d.targetPetType or "(Semua Pet)"
+local fromAge=d.fromAge or 1
+local toAge=d.toAge or 100
+local maxPetTarget=d.maxPetTarget or 1
+local autoStartEnabled=d.autoStartEnabled or false
+local autoAccGift=d.autoAccGift or false
+local autoAccTrade=d.autoAccTrade or false
+local autoRejoin=d.autoRejoin or false
 local isRunning=false
 local mainTask=nil local monitorTask=nil local swapTask=nil
 local isAR=false local arTask=nil
@@ -177,10 +197,18 @@ local accStatus=nil
 local arTog2,arTogStroke2,arStroke2,cdLbl2
 
 local function save()
-    d.swapPerPet=swapPerPet d.swapConfig=swapConfig d.config=config
-    d.targetPetType=targetPetType d.fromAge=fromAge d.toAge=toAge
-    d.maxPetTarget=maxPetTarget d.autoStartEnabled=autoStartEnabled
-    d.autoAccGift=autoAccGift d.autoAccTrade=autoAccTrade
+    d.swapPerPet=swapPerPet
+    d.swapConfig=swapConfig
+    d.config=config
+    d.targetPetType=targetPetType
+    d.fromAge=fromAge
+    d.toAge=toAge
+    d.maxPetTarget=maxPetTarget
+    d.autoStartEnabled=autoStartEnabled
+    d.autoAccGift=autoAccGift
+    d.autoAccTrade=autoAccTrade
+    d.autoRejoin=autoRejoin
+    saveToFile(d)
 end
 
 -- TAB 1
@@ -277,7 +305,7 @@ local function buildTargetList()
                 b.MouseButton1Click:Connect(function()
                     targetPetType=pname d.targetPetType=pname typeBtn.Text=pname
                     typePicker.Visible=false typeOpen=false typePicker.Size=UDim2.new(1,0,0,0)
-                    buildTargetList()
+                    save() buildTargetList()
                 end)
             end
         end
@@ -432,42 +460,62 @@ local function buildOtherSetting()
         corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(v) save() end end)
     end
+
     local t1=lbl(areas[4],"LEVELING",9,C.Teal) t1.Size=UDim2.new(1,0,0,14) t1.LayoutOrder=0
     cfgRow("Equip Interval (dtk)",1,config.equipInterval,function(v) config.equipInterval=math.max(1,v) end)
+
+    -- Auto Start Leveling — simpan state ke file
     local _,asTog,asTogStroke,asStroke2=togRow(areas[4],"Auto Start Leveling","Auto mulai saat script dijalankan",2)
-    asTog.Text=autoStartEnabled and "ON" or "OFF" asTog.BackgroundColor3=autoStartEnabled and C.TDim or C.Panel asTog.TextColor3=autoStartEnabled and C.Teal or C.Gray asTogStroke.Color=autoStartEnabled and C.Teal or C.Dim asStroke2.Color=autoStartEnabled and C.Teal or C.Dim
+    local function setAsTog(val)
+        asTog.Text=val and "ON" or "OFF"
+        asTog.BackgroundColor3=val and C.TDim or C.Panel
+        asTog.TextColor3=val and C.Teal or C.Gray
+        asTogStroke.Color=val and C.Teal or C.Dim
+        asStroke2.Color=val and C.Teal or C.Dim
+    end
+    setAsTog(autoStartEnabled)
     asTog.MouseButton1Click:Connect(function()
-        autoStartEnabled=not autoStartEnabled d.autoStartEnabled=autoStartEnabled
-        if autoStartEnabled then asTog.Text="ON" asTog.BackgroundColor3=C.TDim asTog.TextColor3=C.Teal asTogStroke.Color=C.Teal asStroke2.Color=C.Teal
-        else asTog.Text="OFF" asTog.BackgroundColor3=C.Panel asTog.TextColor3=C.Gray asTogStroke.Color=C.Dim asStroke2.Color=C.Dim end
+        autoStartEnabled=not autoStartEnabled
+        setAsTog(autoStartEnabled)
         save()
     end)
+
     div(areas[4],3)
     local t2=lbl(areas[4],"REJOIN",9,C.Teal) t2.Size=UDim2.new(1,0,0,14) t2.LayoutOrder=4
     local rnBtn=btn(areas[4],"Rejoin Now",10,C.TDim,C.Teal)
     rnBtn.Size=UDim2.new(1,0,0,24) rnBtn.LayoutOrder=5 stroke(rnBtn,C.Teal,1.5)
     rnBtn.MouseButton1Click:Connect(function() rnBtn.Text="Rejoining..." task.wait(0.5) TS:Teleport(game.PlaceId,player) end)
-
-    -- ✅ FIX: simpan langsung ke d.config biar tidak reset
-    cfgRow("Interval (menit)",6,d.config.rejoinMinutes,function(v)
+    cfgRow("Interval (menit)",6,config.rejoinMinutes,function(v)
         local val=math.max(1,math.min(120,v))
         config.rejoinMinutes=val
         d.config.rejoinMinutes=val
         save()
     end)
 
+    -- Auto Rejoin — simpan state ke file
     local _row
     _row,arTog2,arTogStroke2,arStroke2=togRow(areas[4],"Auto Rejoin","Rejoin otomatis sesuai interval, tetap ON",7)
     cdLbl2=lbl(areas[4],"Auto Rejoin: OFF",9,C.Gray,Enum.TextXAlignment.Center)
     cdLbl2.Size=UDim2.new(1,0,0,20) cdLbl2.LayoutOrder=8
     cdLbl2.BackgroundColor3=C.Panel cdLbl2.BackgroundTransparency=0
     corner(cdLbl2,6) stroke(cdLbl2,C.Dim,1.1)
+
+    -- Set tampilan AR toggle sesuai state tersimpan
+    local function setArTog(val)
+        arTog2.Text=val and "ON" or "OFF"
+        arTog2.BackgroundColor3=val and C.TDim or C.Panel
+        arTog2.TextColor3=val and C.Teal or C.Gray
+        arTogStroke2.Color=val and C.Teal or C.Dim
+        arStroke2.Color=val and C.Teal or C.Dim
+    end
+    setArTog(autoRejoin)
+
     div(areas[4],9)
     local t3=lbl(areas[4],"AUTO ACCEPT",9,C.Teal) t3.Size=UDim2.new(1,0,0,14) t3.LayoutOrder=10
     local _,agTog,agTogStroke,agStroke=togRow(areas[4],"Auto Accept Gift","Auto terima gift masuk",11)
     agTog.Text=autoAccGift and "ON" or "OFF" agTog.BackgroundColor3=autoAccGift and C.TDim or C.Panel agTog.TextColor3=autoAccGift and C.Teal or C.Gray agTogStroke.Color=autoAccGift and C.Teal or C.Dim agStroke.Color=autoAccGift and C.Teal or C.Dim
     agTog.MouseButton1Click:Connect(function()
-        autoAccGift=not autoAccGift d.autoAccGift=autoAccGift
+        autoAccGift=not autoAccGift
         if autoAccGift then agTog.Text="ON" agTog.BackgroundColor3=C.TDim agTog.TextColor3=C.Teal agTogStroke.Color=C.Teal agStroke.Color=C.Teal
         else agTog.Text="OFF" agTog.BackgroundColor3=C.Panel agTog.TextColor3=C.Gray agTogStroke.Color=C.Dim agStroke.Color=C.Dim end
         save()
@@ -475,7 +523,7 @@ local function buildOtherSetting()
     local _,atTog,atTogStroke,atStroke=togRow(areas[4],"Auto Accept Trade","Auto terima trade masuk",12)
     atTog.Text=autoAccTrade and "ON" or "OFF" atTog.BackgroundColor3=autoAccTrade and C.TDim or C.Panel atTog.TextColor3=autoAccTrade and C.Teal or C.Gray atTogStroke.Color=autoAccTrade and C.Teal or C.Dim atStroke.Color=autoAccTrade and C.Teal or C.Dim
     atTog.MouseButton1Click:Connect(function()
-        autoAccTrade=not autoAccTrade d.autoAccTrade=autoAccTrade
+        autoAccTrade=not autoAccTrade
         if autoAccTrade then atTog.Text="ON" atTog.BackgroundColor3=C.TDim atTog.TextColor3=C.Teal atTogStroke.Color=C.Teal atStroke.Color=C.Teal
         else atTog.Text="OFF" atTog.BackgroundColor3=C.Panel atTog.TextColor3=C.Gray atTogStroke.Color=C.Dim atStroke.Color=C.Dim end
         save()
@@ -490,11 +538,12 @@ buildTimList() buildTargetList() buildSwapList() buildOtherSetting()
 switchTab(1)
 
 -- ============================================
--- AUTO REJOIN — baca d.config tiap loop
+-- AUTO REJOIN
 -- ============================================
 local function stopAR()
     isAR=false
     if arTask then task.cancel(arTask) arTask=nil end
+    autoRejoin=false save()
     if arTog2 then
         arTog2.Text="OFF" arTog2.BackgroundColor3=C.Panel arTog2.TextColor3=C.Gray
         arTogStroke2.Color=C.Dim arStroke2.Color=C.Dim
@@ -504,11 +553,11 @@ end
 
 local function startAR()
     isAR=true
+    autoRejoin=true save()
     arTog2.Text="ON" arTog2.BackgroundColor3=C.TDim arTog2.TextColor3=C.Teal
     arTogStroke2.Color=C.Teal arStroke2.Color=C.Teal
     arTask=task.spawn(function()
         while isAR do
-            -- ✅ Baca ulang setiap countdown biar pakai nilai terbaru yang tersimpan
             local mins=d.config.rejoinMinutes or 30
             for i=mins*60,1,-1 do
                 if not isAR then return end
@@ -739,6 +788,13 @@ end
 runBtn.MouseButton1Click:Connect(function() doStart() end)
 stopBtn.MouseButton1Click:Connect(function() doStop("Dihentikan") end)
 
-if autoStartEnabled then task.wait(1) doStart() end
+-- ============================================
+-- AUTO START — baca dari file, tetap ON kalau sebelumnya ON
+-- ============================================
+task.wait(1)
+if autoRejoin then startAR() end
+if autoStartEnabled then doStart() end
 
-print("ZenxLvl loaded! PetsService: "..(petsService and "✅" or "❌"))
+print("ZenxLvl loaded!")
+print("Rejoin: "..(autoRejoin and "ON" or "OFF"))
+print("Auto Start: "..(autoStartEnabled and "ON" or "OFF"))
