@@ -71,31 +71,27 @@ local function getNameKey(item)
     return getPetName(item)..(kg and ("|"..tostring(kg)) or "")
 end
 
--- GUI 580x460 (lebar)
+-- GUI 580x460
 local GUI_W=580 local GUI_H=460
 local sg=mk("ScreenGui",{Name="ZenxLvlGui",DisplayOrder=999,ResetOnSpawn=false,Parent=playerGui})
 local main=mk("Frame",{
-    Size=UDim2.new(0,GUI_W,0,GUI_H),
-    Position=UDim2.new(0.5,-GUI_W/2,0.5,-GUI_H/2),
+    Size=UDim2.new(0,GUI_W,0,GUI_H),Position=UDim2.new(0.5,-GUI_W/2,0.5,-GUI_H/2),
     BackgroundColor3=C.BG,BorderSizePixel=0,Active=true,Draggable=true,Parent=sg
 })
 corner(main,10) stroke(main,C.Teal,2)
 
--- Titlebar
 local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=main})
 corner(TB,10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5),Position=UDim2.new(0,0,1,-1.5),BackgroundColor3=C.Teal,BorderSizePixel=0,Parent=TB})
 local TT=lbl(TB,"ZENX AUTO LEVELING",11,C.Teal) TT.Size=UDim2.new(1,-80,1,0) TT.Position=UDim2.new(0,10,0,0)
 
-local minBtn=btn(TB,"−",13,C.Panel,C.Gray)
+local minBtn=btn(TB,"-",13,C.Panel,C.Gray)
 minBtn.Size=UDim2.new(0,22,0,22) minBtn.Position=UDim2.new(1,-50,0.5,-11) stroke(minBtn,C.Dim,1.2)
 local hideBtn=btn(TB,"X",10,C.RDim,C.Red)
 hideBtn.Size=UDim2.new(0,22,0,22) hideBtn.Position=UDim2.new(1,-24,0.5,-11) stroke(hideBtn,C.Red,1.2)
 
--- Content
 local content=mk("Frame",{Size=UDim2.new(1,0,1,-34),Position=UDim2.new(0,0,0,34),BackgroundTransparency=1,Parent=main})
 
--- Tabs
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,2),Parent=tabBar})
 
@@ -145,13 +141,12 @@ for i,name in ipairs(tabNames) do
     local ii=i b.MouseButton1Click:Connect(function() switchTab(ii) end)
 end
 
--- Minimize & Hide
 local minimized=false
 minBtn.MouseButton1Click:Connect(function()
     minimized=not minimized
     content.Visible=not minimized
     main.Size=minimized and UDim2.new(0,GUI_W,0,34) or UDim2.new(0,GUI_W,0,GUI_H)
-    minBtn.Text=minimized and "+" or "−"
+    minBtn.Text=minimized and "+" or "-"
 end)
 
 hideBtn.MouseButton1Click:Connect(function()
@@ -160,9 +155,7 @@ hideBtn.MouseButton1Click:Connect(function()
     local showBtn=btn(showSg,"ZenxLvl",9,C.TDim,C.Teal)
     showBtn.Size=UDim2.new(0,70,0,22) showBtn.Position=UDim2.new(0,5,0.5,-11)
     stroke(showBtn,C.Teal,1.5)
-    showBtn.MouseButton1Click:Connect(function()
-        main.Visible=true showSg:Destroy()
-    end)
+    showBtn.MouseButton1Click:Connect(function() main.Visible=true showSg:Destroy() end)
 end)
 
 -- DATA
@@ -190,9 +183,7 @@ local function save()
     d.autoAccGift=autoAccGift d.autoAccTrade=autoAccTrade
 end
 
--- ============================================
--- TAB 1: TIM LEVELING
--- ============================================
+-- TAB 1
 local function buildTimList()
     for _,c in pairs(areas[1]:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
@@ -235,9 +226,7 @@ local function buildTimList()
     rf.MouseButton1Click:Connect(function() teamPets={} buildTimList() end)
 end
 
--- ============================================
--- TAB 2: PET KE 100
--- ============================================
+-- TAB 2
 local function buildTargetList()
     for _,c in pairs(areas[2]:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
@@ -324,9 +313,7 @@ local function buildTargetList()
     rf.MouseButton1Click:Connect(function() buildTargetList() end)
 end
 
--- ============================================
--- TAB 3: SWAP SKILL CONFIG
--- ============================================
+-- TAB 3
 local function buildSwapList()
     for _,c in pairs(areas[3]:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
@@ -432,9 +419,7 @@ local function buildSwapList()
     searchBox:GetPropertyChangedSignal("Text"):Connect(function() buildSwapPetList(searchBox.Text) end)
 end
 
--- ============================================
--- TAB 4: OTHER SETTING
--- ============================================
+-- TAB 4
 local function buildOtherSetting()
     for _,c in pairs(areas[4]:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
@@ -462,7 +447,15 @@ local function buildOtherSetting()
     local rnBtn=btn(areas[4],"Rejoin Now",10,C.TDim,C.Teal)
     rnBtn.Size=UDim2.new(1,0,0,24) rnBtn.LayoutOrder=5 stroke(rnBtn,C.Teal,1.5)
     rnBtn.MouseButton1Click:Connect(function() rnBtn.Text="Rejoining..." task.wait(0.5) TS:Teleport(game.PlaceId,player) end)
-    cfgRow("Interval (menit)",6,config.rejoinMinutes,function(v) config.rejoinMinutes=math.max(1,math.min(120,v)) end)
+
+    -- ✅ FIX: simpan langsung ke d.config biar tidak reset
+    cfgRow("Interval (menit)",6,d.config.rejoinMinutes,function(v)
+        local val=math.max(1,math.min(120,v))
+        config.rejoinMinutes=val
+        d.config.rejoinMinutes=val
+        save()
+    end)
+
     local _row
     _row,arTog2,arTogStroke2,arStroke2=togRow(areas[4],"Auto Rejoin","Rejoin otomatis sesuai interval, tetap ON",7)
     cdLbl2=lbl(areas[4],"Auto Rejoin: OFF",9,C.Gray,Enum.TextXAlignment.Center)
@@ -497,7 +490,7 @@ buildTimList() buildTargetList() buildSwapList() buildOtherSetting()
 switchTab(1)
 
 -- ============================================
--- AUTO REJOIN — tetap ON, loop terus
+-- AUTO REJOIN — baca d.config tiap loop
 -- ============================================
 local function stopAR()
     isAR=false
@@ -515,7 +508,8 @@ local function startAR()
     arTogStroke2.Color=C.Teal arStroke2.Color=C.Teal
     arTask=task.spawn(function()
         while isAR do
-            local mins=config.rejoinMinutes or 30
+            -- ✅ Baca ulang setiap countdown biar pakai nilai terbaru yang tersimpan
+            local mins=d.config.rejoinMinutes or 30
             for i=mins*60,1,-1 do
                 if not isAR then return end
                 cdLbl2.Text=string.format("Rejoin dalam: %02d:%02d",math.floor(i/60),i%60)
@@ -525,7 +519,6 @@ local function startAR()
                 cdLbl2.Text="Rejoining..."
                 task.wait(0.5)
                 TS:Teleport(game.PlaceId,player)
-                -- Toggle tetap ON, setelah rejoin countdown mulai lagi
             end
         end
     end)
@@ -535,9 +528,7 @@ arTog2.MouseButton1Click:Connect(function()
     if isAR then stopAR() else startAR() end
 end)
 
--- ============================================
--- AUTO ACCEPT HOOKS
--- ============================================
+-- AUTO ACCEPT
 pcall(function()
     local giftPrompted=RS:FindFirstChild("GiftPrompted",true)
     if giftPrompted then
@@ -561,9 +552,7 @@ pcall(function()
     end
 end)
 
--- ============================================
 -- LOGIC UTAMA
--- ============================================
 local function setRunning(state)
     if state then
         runBtn.BackgroundColor3=Color3.fromRGB(30,30,30) runBtn.TextColor3=C.Teal runStroke.Color=C.Teal
