@@ -71,11 +71,14 @@ local function getNameKey(item)
     return getPetName(item)..(kg and ("|"..tostring(kg)) or "")
 end
 
--- GUI 400x720
-local GUI_W=400 local GUI_H=720
+-- GUI 580x460 (lebar)
+local GUI_W=580 local GUI_H=460
 local sg=mk("ScreenGui",{Name="ZenxLvlGui",DisplayOrder=999,ResetOnSpawn=false,Parent=playerGui})
-local main=mk("Frame",{Size=UDim2.new(0,GUI_W,0,GUI_H),Position=UDim2.new(0.5,-GUI_W/2,0.5,-GUI_H/2),
-    BackgroundColor3=C.BG,BorderSizePixel=0,Active=true,Draggable=true,Parent=sg})
+local main=mk("Frame",{
+    Size=UDim2.new(0,GUI_W,0,GUI_H),
+    Position=UDim2.new(0.5,-GUI_W/2,0.5,-GUI_H/2),
+    BackgroundColor3=C.BG,BorderSizePixel=0,Active=true,Draggable=true,Parent=sg
+})
 corner(main,10) stroke(main,C.Teal,2)
 
 -- Titlebar
@@ -86,8 +89,7 @@ local TT=lbl(TB,"ZENX AUTO LEVELING",11,C.Teal) TT.Size=UDim2.new(1,-80,1,0) TT.
 
 local minBtn=btn(TB,"−",13,C.Panel,C.Gray)
 minBtn.Size=UDim2.new(0,22,0,22) minBtn.Position=UDim2.new(1,-50,0.5,-11) stroke(minBtn,C.Dim,1.2)
-
-local hideBtn=btn(TB,"✕",10,C.RDim,C.Red)
+local hideBtn=btn(TB,"X",10,C.RDim,C.Red)
 hideBtn.Size=UDim2.new(0,22,0,22) hideBtn.Position=UDim2.new(1,-24,0.5,-11) stroke(hideBtn,C.Red,1.2)
 
 -- Content
@@ -101,16 +103,19 @@ local tabNames={"Tim Leveling","Pet ke 100","Swap Skill","Other Setting"}
 local tabBtns={}
 
 local function makeScroll(yPos,height)
-    local s=mk("ScrollingFrame",{Size=UDim2.new(1,-10,0,height),Position=UDim2.new(0,5,0,yPos),
+    local s=mk("ScrollingFrame",{
+        Size=UDim2.new(1,-10,0,height),Position=UDim2.new(0,5,0,yPos),
         BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,
-        CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,Visible=false,Parent=content})
+        CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,
+        Visible=false,Parent=content
+    })
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=s})
     mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,3),PaddingRight=UDim.new(0,3),Parent=s})
     return s
 end
 
 local SCROLL_Y=34
-local SCROLL_H=GUI_H-34-70 -- sisakan untuk statusbar dan tombol
+local SCROLL_H=GUI_H-34-70
 local areas={} for i=1,4 do areas[i]=makeScroll(SCROLL_Y,SCROLL_H) end
 
 local botBar=mk("Frame",{Size=UDim2.new(1,-10,0,28),Position=UDim2.new(0,5,0,SCROLL_Y+SCROLL_H+4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=content})
@@ -119,10 +124,10 @@ local statusLbl=lbl(botBar,"Status: Idle",9,C.Gray,Enum.TextXAlignment.Left)
 statusLbl.Size=UDim2.new(1,-10,1,0) statusLbl.Position=UDim2.new(0,8,0,0)
 
 local BOT_Y=SCROLL_Y+SCROLL_H+36
-local runBtn=btn(content,"▶ RUNNING",10,C.Panel,C.Gray)
+local runBtn=btn(content,"RUNNING",10,C.Panel,C.Gray)
 runBtn.Size=UDim2.new(0,170,0,26) runBtn.Position=UDim2.new(0,5,0,BOT_Y)
 local runStroke=stroke(runBtn,C.Dim,1.5)
-local stopBtn=btn(content,"■ STOP",10,C.Panel,C.Gray)
+local stopBtn=btn(content,"STOP",10,C.Panel,C.Gray)
 stopBtn.Size=UDim2.new(0,100,0,26) stopBtn.Position=UDim2.new(0,180,0,BOT_Y)
 local stopStroke=stroke(stopBtn,C.Dim,1.5)
 
@@ -135,12 +140,12 @@ local function switchTab(idx)
 end
 
 for i,name in ipairs(tabNames) do
-    local b=btn(tabBar,name,8,C.Card,C.Gray)
-    b.Size=UDim2.new(0,93,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
+    local b=btn(tabBar,name,9,C.Card,C.Gray)
+    b.Size=UDim2.new(0,138,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
     local ii=i b.MouseButton1Click:Connect(function() switchTab(ii) end)
 end
 
--- Minimize
+-- Minimize & Hide
 local minimized=false
 minBtn.MouseButton1Click:Connect(function()
     minimized=not minimized
@@ -149,7 +154,6 @@ minBtn.MouseButton1Click:Connect(function()
     minBtn.Text=minimized and "+" or "−"
 end)
 
--- Hide (sembunyikan, bisa dibuka lagi)
 hideBtn.MouseButton1Click:Connect(function()
     main.Visible=false
     local showSg=mk("ScreenGui",{Name="ZenxShowBtn",DisplayOrder=998,ResetOnSpawn=false,Parent=playerGui})
@@ -193,7 +197,7 @@ local function buildTimList()
     for _,c in pairs(areas[1]:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
     end
-    lbl(areas[1],"Pilih pet favorit ⭐ untuk tim leveling:",9,C.Gray).Size=UDim2.new(1,0,0,14)
+    lbl(areas[1],"Pilih pet favorit untuk tim leveling:",9,C.Gray).Size=UDim2.new(1,0,0,14)
     local bp=player:FindFirstChild("Backpack") if not bp then return end
     local n=0 local favCount=0
     for _,item in pairs(bp:GetChildren()) do
@@ -207,9 +211,9 @@ local function buildTimList()
             if kg then info=info.." | "..kg.."kg" end
             local card=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=inTeam and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=areas[1]})
             corner(card,6) if inTeam then stroke(card,C.Teal,1.3) end
-            local ico=lbl(card,"⭐",9,C.Gold) ico.Size=UDim2.new(0,18,1,0) ico.Position=UDim2.new(0,4,0,0) ico.TextXAlignment=Enum.TextXAlignment.Center
+            local ico=lbl(card,"*",9,C.Gold) ico.Size=UDim2.new(0,18,1,0) ico.Position=UDim2.new(0,4,0,0) ico.TextXAlignment=Enum.TextXAlignment.Center
             local nl=lbl(card,name..info,9,inTeam and C.Teal or C.White) nl.Size=UDim2.new(0.8,0,1,0) nl.Position=UDim2.new(0,24,0,0)
-            local chk=lbl(card,inTeam and "✔" or "",10,C.Teal,Enum.TextXAlignment.Right) chk.Size=UDim2.new(0,18,1,0) chk.Position=UDim2.new(1,-22,0,0)
+            local chk=lbl(card,inTeam and "V" or "",10,C.Teal,Enum.TextXAlignment.Right) chk.Size=UDim2.new(0,18,1,0) chk.Position=UDim2.new(1,-22,0,0)
             local cb=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=card})
             cb.MouseButton1Click:Connect(function()
                 local found=false
@@ -220,13 +224,13 @@ local function buildTimList()
         end
     end
     if favCount==0 then
-        local e=lbl(areas[1],"⚠️ Tidak ada pet favorit di backpack",9,C.Red,Enum.TextXAlignment.Center)
+        local e=lbl(areas[1],"Tidak ada pet favorit di backpack",9,C.Red,Enum.TextXAlignment.Center)
         e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=1
     end
     local info2=lbl(areas[1],"Tim: "..#teamPets.." pet dipilih",9,C.Teal,Enum.TextXAlignment.Center)
     info2.Size=UDim2.new(1,0,0,14) info2.LayoutOrder=n+2
     div(areas[1],n+3)
-    local rf=btn(areas[1],"🔄 Refresh",10,C.Panel,C.White)
+    local rf=btn(areas[1],"Refresh",10,C.Panel,C.White)
     rf.Size=UDim2.new(1,0,0,24) rf.LayoutOrder=n+4 stroke(rf,C.Dim,1.2)
     rf.MouseButton1Click:Connect(function() teamPets={} buildTimList() end)
 end
@@ -309,13 +313,13 @@ local function buildTargetList()
     local pcRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=6,Parent=areas[2]})
     corner(pcRow,6) stroke(pcRow,C.Dim,1.1)
     lbl(pcRow,"Jumlah Pet (sekaligus):",9,C.Gray).Size=UDim2.new(0.55,0,1,0)
-    local pcMin=btn(pcRow,"−",12,C.Panel,C.Gray) pcMin.Size=UDim2.new(0,20,0,18) pcMin.Position=UDim2.new(1,-68,0.5,-9) stroke(pcMin,C.Dim,1.1)
+    local pcMin=btn(pcRow,"-",12,C.Panel,C.Gray) pcMin.Size=UDim2.new(0,20,0,18) pcMin.Position=UDim2.new(1,-68,0.5,-9) stroke(pcMin,C.Dim,1.1)
     local pcNum=lbl(pcRow,tostring(maxPetTarget),10,C.White,Enum.TextXAlignment.Center) pcNum.Size=UDim2.new(0,22,1,0) pcNum.Position=UDim2.new(1,-46,0,0) pcNum.Font=Enum.Font.GothamBold
     local pcPlus=btn(pcRow,"+",12,C.Panel,C.Gray) pcPlus.Size=UDim2.new(0,20,0,18) pcPlus.Position=UDim2.new(1,-22,0.5,-9) stroke(pcPlus,C.Dim,1.1)
     pcMin.MouseButton1Click:Connect(function() if maxPetTarget>1 then maxPetTarget=maxPetTarget-1 d.maxPetTarget=maxPetTarget pcNum.Text=tostring(maxPetTarget) save() end end)
     pcPlus.MouseButton1Click:Connect(function() if maxPetTarget<10 then maxPetTarget=maxPetTarget+1 d.maxPetTarget=maxPetTarget pcNum.Text=tostring(maxPetTarget) save() end end)
     div(areas[2],7)
-    local rf=btn(areas[2],"🔄 Refresh",10,C.Panel,C.White)
+    local rf=btn(areas[2],"Refresh",10,C.Panel,C.White)
     rf.Size=UDim2.new(1,0,0,22) rf.LayoutOrder=8 stroke(rf,C.Dim,1.2)
     rf.MouseButton1Click:Connect(function() buildTargetList() end)
 end
@@ -443,7 +447,6 @@ local function buildOtherSetting()
         corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(v) save() end end)
     end
-
     local t1=lbl(areas[4],"LEVELING",9,C.Teal) t1.Size=UDim2.new(1,0,0,14) t1.LayoutOrder=0
     cfgRow("Equip Interval (dtk)",1,config.equipInterval,function(v) config.equipInterval=math.max(1,v) end)
     local _,asTog,asTogStroke,asStroke2=togRow(areas[4],"Auto Start Leveling","Auto mulai saat script dijalankan",2)
@@ -454,22 +457,18 @@ local function buildOtherSetting()
         else asTog.Text="OFF" asTog.BackgroundColor3=C.Panel asTog.TextColor3=C.Gray asTogStroke.Color=C.Dim asStroke2.Color=C.Dim end
         save()
     end)
-
     div(areas[4],3)
     local t2=lbl(areas[4],"REJOIN",9,C.Teal) t2.Size=UDim2.new(1,0,0,14) t2.LayoutOrder=4
     local rnBtn=btn(areas[4],"Rejoin Now",10,C.TDim,C.Teal)
     rnBtn.Size=UDim2.new(1,0,0,24) rnBtn.LayoutOrder=5 stroke(rnBtn,C.Teal,1.5)
     rnBtn.MouseButton1Click:Connect(function() rnBtn.Text="Rejoining..." task.wait(0.5) TS:Teleport(game.PlaceId,player) end)
     cfgRow("Interval (menit)",6,config.rejoinMinutes,function(v) config.rejoinMinutes=math.max(1,math.min(120,v)) end)
-
     local _row
     _row,arTog2,arTogStroke2,arStroke2=togRow(areas[4],"Auto Rejoin","Rejoin otomatis sesuai interval, tetap ON",7)
-
     cdLbl2=lbl(areas[4],"Auto Rejoin: OFF",9,C.Gray,Enum.TextXAlignment.Center)
     cdLbl2.Size=UDim2.new(1,0,0,20) cdLbl2.LayoutOrder=8
     cdLbl2.BackgroundColor3=C.Panel cdLbl2.BackgroundTransparency=0
     corner(cdLbl2,6) stroke(cdLbl2,C.Dim,1.1)
-
     div(areas[4],9)
     local t3=lbl(areas[4],"AUTO ACCEPT",9,C.Teal) t3.Size=UDim2.new(1,0,0,14) t3.LayoutOrder=10
     local _,agTog,agTogStroke,agStroke=togRow(areas[4],"Auto Accept Gift","Auto terima gift masuk",11)
@@ -526,7 +525,7 @@ local function startAR()
                 cdLbl2.Text="Rejoining..."
                 task.wait(0.5)
                 TS:Teleport(game.PlaceId,player)
-                -- Setelah rejoin, loop countdown lagi (toggle tetap ON)
+                -- Toggle tetap ON, setelah rejoin countdown mulai lagi
             end
         end
     end)
@@ -688,26 +687,21 @@ local function doStart()
                 doStop("Semua pet selesai Age "..toAge.."!")
                 statusLbl.TextColor3=C.Green buildTargetList() break
             end
-
             local batch={}
             for i,pet in ipairs(queue2) do
                 if i>maxPetTarget then break end
                 table.insert(batch,pet)
             end
-
             local batchUUIDs={}
             for _,pet in ipairs(batch) do
                 local uuid=getPetUUID(pet)
                 if uuid then batchUUIDs[tostring(uuid)]=true end
             end
-
             local bp=player:FindFirstChild("Backpack")
             if bp then
                 for _,item in pairs(bp:GetChildren()) do
                     if isPet(item) then
-                        local age=getAge(item)
-                        local name=getPetName(item)
-                        local uuid=getPetUUID(item)
+                        local age=getAge(item) local name=getPetName(item) local uuid=getPetUUID(item)
                         if uuid and age and age>=fromAge and age<toAge then
                             if targetPetType=="(Semua Pet)" or name==targetPetType then
                                 if not batchUUIDs[tostring(uuid)] then
@@ -718,7 +712,6 @@ local function doStart()
                     end
                 end
             end
-
             for _,pet in ipairs(batch) do
                 if not isRunning then break end
                 local uuid=getPetUUID(pet)
@@ -727,26 +720,21 @@ local function doStart()
                     task.wait(0.2)
                 end
             end
-
             while isRunning do
-                local allDone=true
-                local info=""
+                local allDone=true local info=""
                 for _,pet in ipairs(batch) do
                     if pet and pet.Parent then
                         local age=getAge(pet)
                         if age and age<toAge then
                             allDone=false
-                            info=getPetName(pet).." Age "..(age or 0).."/"..toAge
-                            break
+                            info=getPetName(pet).." Age "..(age or 0).."/"..toAge break
                         end
                     end
                 end
                 if allDone then break end
                 statusLbl.Text=info.." | Sisa "..#getQueue().." | Batch "..#batch
-                statusLbl.TextColor3=C.Teal
-                task.wait(2)
+                statusLbl.TextColor3=C.Teal task.wait(2)
             end
-
             for _,pet in ipairs(batch) do
                 local uuid=getPetUUID(pet)
                 if uuid then
