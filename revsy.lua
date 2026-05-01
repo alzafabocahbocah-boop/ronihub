@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v4.3-chat"
+local SCRIPT_VERSION="v4.5-anim"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -750,6 +750,180 @@ end)
 -- DATA
 local teamPetUUIDs=d.teamPetUUIDs or {}  -- restore dari file (biar gak hilang setelah rejoin)
 local teamPetInfoCache=d.teamPetInfoCache or {}  -- cache nama+kg pet supaya bisa display walau belum scan
+
+-- ===== SKILL DETECTOR (chat/notification based) =====
+-- Listen ke PlayerGui DescendantAdded buat catch notif skill fire
+local SkillDetector={
+    lastFire={},        -- [petTypeLow] = tick when fired
+    watchTypes={},      -- [petTypeLow] = true (which types we watch)
+    notifLog={},        -- recent matched notifs (debug)
+    rawLog={},          -- ALL TextLabel additions (debug)
+    rawLogEnabled=false,
+    initialized=false,
+}
+
+local function _skillDetectorCheckText(text)
+    if not text or text=="" or #text>200 then return end
+    local low=text:lower()
+    for petType,_ in pairs(SkillDetector.watchTypes) do
+        if low:find(petType,1,true) then
+            SkillDetector.lastFire[petType]=tick()
+            table.insert(SkillDetector.notifLog,1,os.date("%X").." | "..petType.." | "..text:sub(1,60))
+            if #SkillDetector.notifLog>20 then table.remove(SkillDetector.notifLog) end
+            break
+        end
+    end
+end
+
+local function _skillDetectorRawLog(text,path)
+    if not SkillDetector.rawLogEnabled then return end
+    if not text or text=="" or #text>120 then return end
+    table.insert(SkillDetector.rawLog,1,os.date("%X").." | "..text:sub(1,60).." @ "..path)
+    if #SkillDetector.rawLog>50 then table.remove(SkillDetector.rawLog) end
+end
+
+local function _skillDetectorHookLabel(lbl)
+    if not lbl or not lbl:IsA("TextLabel") then return end
+    task.spawn(function()
+        task.wait(0.05)
+        local ok,t=pcall(function() return lbl.Text end)
+        if ok and t then
+            _skillDetectorCheckText(t)
+            local p=""
+            pcall(function() p=lbl:GetFullName():gsub(".*PlayerGui%.","") end)
+            _skillDetectorRawLog(t,p)
+        end
+    end)
+    pcall(function()
+        lbl:GetPropertyChangedSignal("Text"):Connect(function()
+            local ok,t=pcall(function() return lbl.Text end)
+            if ok and t then
+                _skillDetectorCheckText(t)
+                local p=""
+                pcall(function() p=lbl:GetFullName():gsub(".*PlayerGui%.","") end)
+                _skillDetectorRawLog(t,p)
+            end
+        end)
+    end)
+end
+
+local function initSkillDetector()
+    if SkillDetector.initialized then return end
+    SkillDetector.initialized=true
+    pcall(function()
+        for _,lbl in ipairs(playerGui:GetDescendants()) do
+            if lbl:IsA("TextLabel") then _skillDetectorHookLabel(lbl) end
+        end
+        playerGui.DescendantAdded:Connect(function(lbl)
+            if lbl:IsA("TextLabel") then _skillDetectorHookLabel(lbl) end
+        end)
+    end)
+    dbg("[SkillDetector] init OK")
+end
+
+local function updateSkillWatchTypes()
+    SkillDetector.watchTypes={}
+    for uuid,_ in pairs(teamPetUUIDs) do
+        local info=teamPetInfoCache[uuid]
+        if info and info.name then
+            local base=getBaseName(info.name):lower()
+            SkillDetector.watchTypes[base]=true
+            local words={}
+            for w in base:gmatch("%S+") do table.insert(words,w) end
+            if #words>1 then SkillDetector.watchTypes[words[#words]]=true end
+        end
+    end
+end
+
+-- ===== ANIMATION SPY =====
+-- Hook Animator pet placed di workspace, log animasi yg play
+local AnimSpy={
+    log={},                -- recent anim events (max 50)
+    hooked={},             -- [model] = true
+    skillFire={},          -- [petTypeLow] = tick when skill anim played
+    minLength=1.0,         -- filter: anim < 1.0s = skip (idle/short)
+    enabled=false,
+    initialized=false,
+}
+
+local function _animSpyFindAnimator(model)
+    -- Cari Animator (bisa di Humanoid atau AnimationController)
+    for _,d in ipairs(model:GetDescendants()) do
+        if d:IsA("Animator") then return d end
+    end
+    return nil
+end
+
+local function _animSpyHookModel(model)
+    if AnimSpy.hooked[model] then return end
+    AnimSpy.hooked[model]=true
+    task.spawn(function()
+        -- Tunggu pet fully load
+        for i=1,10 do
+            local an=_animSpyFindAnimator(model)
+            if an then
+                pcall(function()
+                    an.AnimationPlayed:Connect(function(track)
+                        local name="?" local id="?" local len=0 local looped=true
+                        pcall(function()
+                            if track.Animation then
+                                name=track.Animation.Name
+                                id=track.Animation.AnimationId or "?"
+                            end
+                            len=track.Length or 0
+                            looped=track.Looped
+                        end)
+                        -- Log entry
+                        if AnimSpy.enabled then
+                            local entry=string.format("%s|%s|%.1fs|loop=%s|%s",
+                                os.date("%X"),model.Name:sub(2,9),len,tostring(looped),name:sub(1,15))
+                            table.insert(AnimSpy.log,1,entry)
+                            if #AnimSpy.log>50 then table.remove(AnimSpy.log) end
+                        end
+                        -- Skill detection: non-looped + len >= minLength
+                        if not looped and len>=AnimSpy.minLength then
+                            -- Cari pet type dari model name (UUID) → cache
+                            for uuid,info in pairs(teamPetInfoCache) do
+                                if model.Name:find(uuid,1,true) then
+                                    local base=getBaseName(info.name):lower()
+                                    AnimSpy.skillFire[base]=tick()
+                                    local words={}
+                                    for w in base:gmatch("%S+") do table.insert(words,w) end
+                                    if #words>1 then AnimSpy.skillFire[words[#words]]=tick() end
+                                    break
+                                end
+                            end
+                        end
+                    end)
+                end)
+                return
+            end
+            task.wait(0.5)
+        end
+    end)
+end
+
+local function initAnimSpy()
+    if AnimSpy.initialized then return end
+    AnimSpy.initialized=true
+    local pp=workspace:FindFirstChild("PetsPhysical")
+    if not pp then dbg("[AnimSpy] PetsPhysical gak ada") return end
+    local pm=pp:FindFirstChild("PetMover")
+    if not pm then dbg("[AnimSpy] PetMover gak ada") return end
+    pcall(function()
+        for _,m in ipairs(pm:GetChildren()) do
+            if m:IsA("Model") then _animSpyHookModel(m) end
+        end
+        pm.ChildAdded:Connect(function(m)
+            if m:IsA("Model") then
+                task.wait(0.3)
+                _animSpyHookModel(m)
+            end
+        end)
+    end)
+    dbg("[AnimSpy] init OK")
+end
+
 local config=d.config or {equipInterval=5,rejoinMinutes=30}
 local targetPetTypes=d.targetPetTypes or {}
 local fromAge=d.fromAge or 1
@@ -1295,28 +1469,38 @@ buildSwapList=function()
         if debugLbl then debugLbl.Text=table.concat(lines,"\n") end
     end)
 
-    -- Tombol Raw Notif Log (toggle)
-    local rawLogBtn=btn(dc,"RAW NOTIF LOG (toggle)",9,C.Card,C.Blue)
-    rawLogBtn.Size=UDim2.new(1,0,0,22) rawLogBtn.LayoutOrder=3 stroke(rawLogBtn,C.Blue,1.2)
-    rawLogBtn.MouseButton1Click:Connect(function()
-        pcall(initSkillDetector)
-        if not SkillDetector.rawLogEnabled then
-            SkillDetector.rawLogEnabled=true
-            SkillDetector.rawLog={}
-            rawLogBtn.Text="RAW LOG ON - klik utk show"
-            dbg("[Raw] ON - tunggu pet skill fire, klik lagi buat lihat log")
+    -- Tombol Animation Spy Log (toggle ON, kemudian klik lagi untuk show)
+    local animSpyBtn=btn(dc,"ANIM SPY (toggle)",9,C.Card,C.Blue)
+    animSpyBtn.Size=UDim2.new(1,0,0,22) animSpyBtn.LayoutOrder=3 stroke(animSpyBtn,C.Blue,1.2)
+    animSpyBtn.MouseButton1Click:Connect(function()
+        pcall(initAnimSpy)
+        if not AnimSpy.enabled then
+            AnimSpy.enabled=true
+            AnimSpy.log={}
+            animSpyBtn.Text="ANIM SPY ON - klik utk show"
+            dbg("[AnimSpy] ON - tunggu pet skill fire, klik lagi buat lihat log")
         else
-            -- Show log
-            local lines={"[Raw] last 30 TextLabels added/changed:"}
-            for i=1,math.min(30,#SkillDetector.rawLog) do
-                table.insert(lines,SkillDetector.rawLog[i])
+            local lines={"[AnimSpy] last "..#AnimSpy.log.." anim played:"}
+            for i=1,math.min(30,#AnimSpy.log) do
+                table.insert(lines,AnimSpy.log[i])
             end
-            if #SkillDetector.rawLog==0 then table.insert(lines,"(kosong - belum ada text muncul)") end
+            if #AnimSpy.log==0 then
+                table.insert(lines,"(kosong - pet placed?)")
+                table.insert(lines,"Pastikan pet TIM ditaruh di garden")
+            end
+            table.insert(lines,"")
+            table.insert(lines,"Skill detected (via anim):")
+            local cnt=0
+            for t,tm in pairs(AnimSpy.skillFire) do
+                cnt=cnt+1
+                table.insert(lines,"  "..t.." @ "..os.date("%X",tm))
+            end
+            if cnt==0 then table.insert(lines,"  (none)") end
             _dbgLines={}
             for _,l in ipairs(lines) do table.insert(_dbgLines,1,"> "..l) end
             if debugLbl then debugLbl.Text=table.concat(lines,"\n") end
-            SkillDetector.rawLogEnabled=false
-            rawLogBtn.Text="RAW NOTIF LOG (toggle)"
+            AnimSpy.enabled=false
+            animSpyBtn.Text="ANIM SPY (toggle)"
         end
     end)
 
@@ -2099,93 +2283,6 @@ local function unequipTeam()
     end
 end
 
--- ===== SKILL DETECTOR (chat/notification based) =====
--- Listen ke PlayerGui DescendantAdded buat catch notif skill fire
-local SkillDetector={
-    lastFire={},        -- [petTypeLow] = tick when fired
-    watchTypes={},      -- [petTypeLow] = true (which types we watch)
-    notifLog={},        -- recent matched notifs (debug)
-    rawLog={},          -- ALL TextLabel additions (debug)
-    rawLogEnabled=false,
-    initialized=false,
-}
-
-local function _skillDetectorCheckText(text)
-    if not text or text=="" or #text>200 then return end
-    local low=text:lower()
-    for petType,_ in pairs(SkillDetector.watchTypes) do
-        if low:find(petType,1,true) then
-            SkillDetector.lastFire[petType]=tick()
-            -- Keep recent log
-            table.insert(SkillDetector.notifLog,1,os.date("%X").." | "..petType.." | "..text:sub(1,60))
-            if #SkillDetector.notifLog>20 then table.remove(SkillDetector.notifLog) end
-            break  -- 1 match cukup
-        end
-    end
-end
-
-local function _skillDetectorRawLog(text,path)
-    if not SkillDetector.rawLogEnabled then return end
-    if not text or text=="" or #text>120 then return end
-    table.insert(SkillDetector.rawLog,1,os.date("%X").." | "..text:sub(1,60).." @ "..path)
-    if #SkillDetector.rawLog>50 then table.remove(SkillDetector.rawLog) end
-end
-
-local function _skillDetectorHookLabel(d)
-    if not d or not d:IsA("TextLabel") then return end
-    -- Initial text check (delayed sedikit untuk text di-set)
-    task.spawn(function()
-        task.wait(0.05)
-        local ok,t=pcall(function() return d.Text end)
-        if ok and t then
-            _skillDetectorCheckText(t)
-            _skillDetectorRawLog(t,d:GetFullName():gsub(".*PlayerGui%.",""))
-        end
-    end)
-    -- Listen text changes
-    pcall(function()
-        d:GetPropertyChangedSignal("Text"):Connect(function()
-            local ok,t=pcall(function() return d.Text end)
-            if ok and t then
-                _skillDetectorCheckText(t)
-                _skillDetectorRawLog(t,d:GetFullName():gsub(".*PlayerGui%.",""))
-            end
-        end)
-    end)
-end
-
-local function initSkillDetector()
-    if SkillDetector.initialized then return end
-    SkillDetector.initialized=true
-    -- Hook semua TextLabel yang udah ada di PlayerGui
-    for _,d in ipairs(playerGui:GetDescendants()) do
-        if d:IsA("TextLabel") then _skillDetectorHookLabel(d) end
-    end
-    -- Hook future ones
-    playerGui.DescendantAdded:Connect(function(d)
-        if d:IsA("TextLabel") then _skillDetectorHookLabel(d) end
-    end)
-    dbg("[SkillDetector] init OK")
-end
-
--- Update watched pet types (panggil setiap team berubah)
-local function updateSkillWatchTypes()
-    SkillDetector.watchTypes={}
-    for uuid,_ in pairs(teamPetUUIDs) do
-        local info=teamPetInfoCache[uuid]
-        if info and info.name then
-            local base=getBaseName(info.name):lower()
-            SkillDetector.watchTypes[base]=true
-            -- Last word juga (kalau base masih multi-word, e.g. "French Fry Ferret")
-            local words={}
-            for w in base:gmatch("%S+") do table.insert(words,w) end
-            if #words>1 then
-                SkillDetector.watchTypes[words[#words]]=true
-            end
-        end
-    end
-end
-
 
 local function startSwapForPet(uuid)
     if swapTasks[uuid] then return end
@@ -2224,31 +2321,42 @@ local function startSwapForPet(uuid)
             local pollStart=tick()
             local maxWait=math.max(5,ps.pickup or 60)  -- timeout = manual CD (= pet's max CD)
             local detected=false
+            local detectVia=""
 
             while isRunning do
                 if not isRunning then break end
                 ps=swapPerPet[uuid]
                 if not ps or not ps.enabled then break end
 
-                -- Check skill detector
+                -- Check anim spy (paling cepet, awal skill)
+                local a1=AnimSpy.skillFire[petType] or 0
+                local a2=AnimSpy.skillFire[petTypeLast] or 0
+                local animLatest=math.max(a1,a2)
+                if animLatest>baseline+0.1 then
+                    detected=true detectVia="ANIM"
+                    baseline=animLatest
+                    break
+                end
+
+                -- Check skill detector (notif)
                 local f1=SkillDetector.lastFire[petType] or 0
                 local f2=SkillDetector.lastFire[petTypeLast] or 0
                 local latest=math.max(f1,f2)
                 if latest>baseline+0.1 then
-                    detected=true
-                    baseline=latest  -- update baseline biar nggak repeated trigger
+                    detected=true detectVia="NOTIF"
+                    baseline=latest
                     break
                 end
 
-                if tick()-pollStart>=maxWait then break end  -- timeout
-                task.wait(0.15)
+                if tick()-pollStart>=maxWait then break end
+                task.wait(0.1)
             end
 
             if cycle<=3 then
                 if detected then
-                    dbg(string.format("[Swap] %s skill fired! waited %.1fs",petName,tick()-pollStart))
+                    dbg(string.format("[Swap] %s skill fired via %s! (%.1fs)",petName,detectVia,tick()-pollStart))
                 else
-                    dbg(string.format("[Swap] %s timeout %.0fs (no notif)",petName,tick()-pollStart))
+                    dbg(string.format("[Swap] %s timeout %.0fs (manual)",petName,tick()-pollStart))
                 end
             end
 
@@ -2343,9 +2451,10 @@ local function doStart()
     isRunning=true setRunning(true)
     statusLbl.Text="Berjalan... Q:"..#queue statusLbl.TextColor3=C.Teal
 
-    -- Init skill detector (chat/notif)
+    -- Init skill detector (chat/notif) + anim spy
     pcall(initSkillDetector)
     pcall(updateSkillWatchTypes)
+    pcall(initAnimSpy)
 
     -- Diagnostic: hitung pet TIM & yang swap-enabled
     local teamCnt,swapCnt=0,0
