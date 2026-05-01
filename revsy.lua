@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v3.5-retry"
+local SCRIPT_VERSION="v3.6-match"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -7,7 +7,7 @@ local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HS = game:GetService("HttpService")
 local TS = game:GetService("TeleportService")
-local player = Players.LocalPlayer 
+local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui",10)
 print("[ZenxLvl] step 1 OK - services loaded")
 
@@ -334,7 +334,7 @@ end
 -- Cache slot label per pet type biar gak loop ulang setiap kali
 local _uiCDSlotCache={}
 -- Read CD seconds dari Active Pets UI panel by pet type name
--- Return: {cdSec, slotFrame} atau nil
+-- Return: cdSec, slotFrame atau nil
 local function readUICDForPetType(petType)
     local pg=player:FindFirstChild("PlayerGui")
     if not pg then return nil end
@@ -345,44 +345,69 @@ local function readUICDForPetType(petType)
 
     -- Cek cache: kalau slot udah di-cache & masih valid
     local cached=_uiCDSlotCache[petType]
-    if cached and cached.cdLbl and cached.cdLbl.Parent then
-        local ok,txt=pcall(function() return cached.cdLbl.Text end)
-        if ok then
-            local sec=parseCDText(txt)
-            if sec then return sec, cached.slot end
+    if cached and cached.cdLbl and cached.cdLbl.Parent and cached.nameLbl and cached.nameLbl.Parent then
+        local ok1,nameTxt=pcall(function() return cached.nameLbl.Text end)
+        if ok1 and nameTxt and nameTxt:lower():find(petType:lower(),1,true) then
+            local ok2,txt=pcall(function() return cached.cdLbl.Text end)
+            if ok2 then
+                local sec=parseCDText(txt)
+                if sec then return sec, cached.slot end
+            end
         end
+        -- Cache invalid, drop
+        _uiCDSlotCache[petType]=nil
     end
 
-    -- Scan: cari TextLabel yang match petType (atau sub-string match)
+    -- Cari TextLabel dengan match (priority: exact > substring)
     local petTypeLow=petType:lower()
+    local exactMatch=nil
+    local looseMatch=nil
     for _,d in ipairs(frame:GetDescendants()) do
         if d:IsA("TextLabel") then
             local ok,txt=pcall(function() return d.Text end)
             if ok and txt then
                 local txtLow=txt:lower()
-                if txtLow==petTypeLow or txtLow:find(petTypeLow,1,true) then
-                    -- Walk up cari CD label di slot
-                    local slot=d.Parent
-                    for h=1,6 do
-                        if not slot then break end
-                        for _,sib in ipairs(slot:GetDescendants()) do
-                            if sib:IsA("TextLabel") and sib~=d then
-                                local ok2,t2=pcall(function() return sib.Text end)
-                                if ok2 and t2 then
-                                    local cd=parseCDText(t2)
-                                    if cd then
-                                        -- Cache hasil
-                                        _uiCDSlotCache[petType]={slot=slot,cdLbl=sib,nameLbl=d}
-                                        return cd, slot
-                                    end
-                                end
-                            end
-                        end
-                        slot=slot.Parent
-                    end
+                if txtLow==petTypeLow then
+                    exactMatch=exactMatch or d
+                elseif txtLow:find(petTypeLow,1,true) and #txt<60 then
+                    looseMatch=looseMatch or d
                 end
             end
         end
+    end
+    local nameLbl=exactMatch or looseMatch
+    if not nameLbl then return nil end
+
+    -- Walk up max 3 level cari CD label di slot
+    -- Dengan safety: kalau scan ketemu CD lebih dari 1, ambiguous → naik level
+    local slot=nameLbl.Parent
+    for h=1,3 do
+        if not slot then break end
+        local cdLbls={}
+        for _,sib in ipairs(slot:GetDescendants()) do
+            if sib:IsA("TextLabel") and sib~=nameLbl then
+                local ok2,t2=pcall(function() return sib.Text end)
+                if ok2 and t2 then
+                    local cd=parseCDText(t2)
+                    if cd then table.insert(cdLbls,{lbl=sib,cd=cd}) end
+                end
+            end
+        end
+        if #cdLbls==1 then
+            -- Unambiguous, pakai
+            _uiCDSlotCache[petType]={slot=slot,cdLbl=cdLbls[1].lbl,nameLbl=nameLbl}
+            return cdLbls[1].cd, slot
+        elseif #cdLbls>1 then
+            -- Ambiguous: lebih dari 1 CD di slot ini, mungkin udah naik ke parent yg punya banyak slot
+            -- Coba 1 level di atas nameLbl saja (sibling langsung)
+            -- Atau pakai CD pertama yang positionnya paling deket dgn nameLbl
+            -- Untuk simple: kalau h=1, terlalu banyak CD = bukan slot tunggal, return nil
+            if h==1 then return nil end
+            -- Otherwise, pakai pertama (best effort)
+            _uiCDSlotCache[petType]={slot=slot,cdLbl=cdLbls[1].lbl,nameLbl=nameLbl}
+            return cdLbls[1].cd, slot
+        end
+        slot=slot.Parent
     end
     return nil
 end
