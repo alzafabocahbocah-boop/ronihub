@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v2.6-scan6"
+local SCRIPT_VERSION="v2.7-scan7"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -1141,68 +1141,73 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan v6: dump model "DEFAULT" near player (placed pet di GAG)
-    local scanCDBtn=btn(dc,"DUMP DEFAULT MODELS (debug v6)",9,C.Panel,C.Gold)
+    -- Tombol Scan v7: cari model dengan Animator/Humanoid (kemungkinan pet)
+    local scanCDBtn=btn(dc,"FIND PETS BY ANIMATOR (debug v7)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
-        dbg("[SCAN v6] CLICKED")
+        dbg("[SCAN v7] CLICKED")
         scanCDBtn.Text="Equipping..."
         task.spawn(function()
-            -- Equip dulu
             for uuid,_ in pairs(teamPetUUIDs) do
                 pcall(function() equipPet(uuid) end)
                 task.wait(0.25)
             end
             task.wait(2)
 
-            _dbgLines={"> [SCAN v6] mencari DEFAULT..."}
-            if debugLbl then debugLbl.Text="> [SCAN v6] mencari DEFAULT..." end
+            _dbgLines={"> [SCAN v7] cari model w/ animator..."}
+            if debugLbl then debugLbl.Text="> [SCAN v7] cari model w/ animator..." end
 
-            local fileBuf={"=== ZENX SCAN v6 ==="}
+            local fileBuf={"=== ZENX SCAN v7 ==="}
             local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
 
             local char=player.Character
             local hrp=char and char:FindFirstChild("HumanoidRootPart")
-            if not hrp then logBoth("no character") return end
 
-            -- Cari model DEFAULT dalam radius 50 stud
-            local defaults={}
+            -- Cari semua Model yg punya Animator atau AnimationController child
+            local candidates={}
             for _,m in ipairs(workspace:GetDescendants()) do
-                if m:IsA("Model") and m.Name=="DEFAULT" then
-                    local ok,piv=pcall(function() return m:GetPivot() end)
-                    if ok and piv then
-                        local d=(piv.Position-hrp.Position).Magnitude
-                        if d<60 then table.insert(defaults,{m=m,d=d}) end
+                if m:IsA("Model") and m~=char then
+                    local hasAnim=false
+                    for _,c in ipairs(m:GetDescendants()) do
+                        if c:IsA("Animator") or c:IsA("AnimationController") or c:IsA("Humanoid") then
+                            hasAnim=true break
+                        end
+                    end
+                    if hasAnim then
+                        local d=999
+                        if hrp then
+                            local ok,piv=pcall(function() return m:GetPivot() end)
+                            if ok and piv then d=(piv.Position-hrp.Position).Magnitude end
+                        end
+                        table.insert(candidates,{m=m,d=d})
                     end
                 end
             end
-            table.sort(defaults,function(a,b) return a.d<b.d end)
+            table.sort(candidates,function(a,b) return a.d<b.d end)
 
-            logBoth("DEFAULT found: "..#defaults)
-            for i,e in ipairs(defaults) do
-                if i<=2 then
+            logBoth("Animator models: "..#candidates)
+            for i,e in ipairs(candidates) do
+                if i<=4 then
                     local m=e.m
-                    logBoth("=== #"..i.." dist:"..math.floor(e.d).." ===")
-                    -- Parent chain (3 level up)
+                    logBoth("=== #"..i.." "..m.Name.." dist:"..math.floor(e.d).." ===")
                     local par=m.Parent
-                    if par then logBoth("Parent: "..par.Name.." ("..par.ClassName..")") end
+                    if par then logBoth("Parent: "..par.Name) end
                     if par and par.Parent then logBoth("ParPar: "..par.Parent.Name) end
-                    -- Semua attribute
+                    -- Attribute
                     local cnt=0
                     for k,v in pairs(m:GetAttributes()) do
                         cnt=cnt+1
-                        if cnt<=12 then logBoth("  ["..k.."]="..tostring(v)) end
+                        if cnt<=10 then logBoth("  ["..k.."]="..tostring(v)) end
                     end
                     if cnt==0 then logBoth("  (no attrs)") end
-                    -- Children (4 first)
+                    -- Children dgn attrs
                     for j,ch in ipairs(m:GetChildren()) do
-                        if j<=5 then
-                            logBoth("  >"..ch.Name.." ("..ch.ClassName..")")
-                            -- Cek attribute child juga
+                        if j<=4 then
+                            logBoth("  >"..ch.Name)
                             local cc=0
                             for k,v in pairs(ch:GetAttributes()) do
                                 cc=cc+1
-                                if cc<=3 then logBoth("    ["..k.."]="..tostring(v)) end
+                                if cc<=2 then logBoth("    ["..k.."]="..tostring(v)) end
                             end
                         end
                     end
@@ -1210,8 +1215,8 @@ buildSwapList=function()
             end
 
             logBoth("=== END ===")
-            pcall(function() if writefile then writefile("zenx_scan_v6.txt",table.concat(fileBuf,"\n")) end end)
-            scanCDBtn.Text="DUMP DEFAULT MODELS (debug v6)"
+            pcall(function() if writefile then writefile("zenx_scan_v7.txt",table.concat(fileBuf,"\n")) end end)
+            scanCDBtn.Text="FIND PETS BY ANIMATOR (debug v7)"
         end)
     end)
 
