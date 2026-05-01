@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v4.0-ready"
+local SCRIPT_VERSION="v4.1-monitor"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -185,6 +185,15 @@ dbg("Step 3 OK: data loaded")
 if not d.swapPerPetVersion or d.swapPerPetVersion < 2 then
     d.swapPerPet = {}
     d.swapPerPetVersion = 2
+end
+-- v3 migration: kalau pickup < 1, reset ke 15 (default new mode)
+if d.swapPerPetVersion < 3 then
+    if d.swapPerPet then
+        for uuid,cfg in pairs(d.swapPerPet) do
+            if cfg.pickup and cfg.pickup < 1 then cfg.pickup = 15 end
+        end
+    end
+    d.swapPerPetVersion = 3
 end
 
 local C={
@@ -1197,7 +1206,7 @@ buildSwapList=function()
     end
 
     -- Card setting global delay
-    local dc=mk("Frame",{Size=UDim2.new(1,0,0,170),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
+    local dc=mk("Frame",{Size=UDim2.new(1,0,0,200),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
     corner(dc,7) stroke(dc,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=dc})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=dc})
@@ -1227,7 +1236,101 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan v10: parse format CD dengan emoji ⏰
+    -- Tombol CD Live Monitor (real-time CD viewer)
+    local cdMonBtn=btn(dc,"CD LIVE MONITOR",9,C.TDim,C.Teal)
+    cdMonBtn.Size=UDim2.new(1,0,0,22) cdMonBtn.LayoutOrder=4 stroke(cdMonBtn,C.Teal,1.3)
+    cdMonBtn.MouseButton1Click:Connect(function()
+        local container=getGuiContainer()
+        local existing=container:FindFirstChild("ZenxCDMon")
+        if existing then existing:Destroy() return end
+
+        local mon=Instance.new("ScreenGui")
+        mon.Name="ZenxCDMon" mon.ResetOnSpawn=false mon.IgnoreGuiInset=true mon.DisplayOrder=99998
+        safeParent(mon)
+
+        local fr=Instance.new("Frame")
+        fr.Size=UDim2.new(0,260,0,260) fr.Position=UDim2.new(1,-275,0,80)
+        fr.BackgroundColor3=Color3.fromRGB(0,0,0) fr.BackgroundTransparency=0.15
+        fr.Active=true fr.Draggable=true fr.Parent=mon
+        local crn=Instance.new("UICorner") crn.CornerRadius=UDim.new(0,8) crn.Parent=fr
+        local strk=Instance.new("UIStroke") strk.Color=C.Teal strk.Thickness=1.5 strk.Parent=fr
+
+        local title=Instance.new("TextLabel")
+        title.Size=UDim2.new(1,-30,0,20) title.Position=UDim2.new(0,8,0,4)
+        title.BackgroundTransparency=1 title.Text="CD Live Monitor"
+        title.TextColor3=C.Teal title.Font=Enum.Font.GothamBold title.TextSize=12
+        title.TextXAlignment=Enum.TextXAlignment.Left title.Parent=fr
+
+        local closeBtn=Instance.new("TextButton")
+        closeBtn.Size=UDim2.new(0,20,0,20) closeBtn.Position=UDim2.new(1,-24,0,4)
+        closeBtn.BackgroundColor3=C.RDim closeBtn.Text="X" closeBtn.TextColor3=C.Red
+        closeBtn.Font=Enum.Font.GothamBold closeBtn.TextSize=11 closeBtn.AutoButtonColor=false
+        closeBtn.Parent=fr
+        local cc=Instance.new("UICorner") cc.CornerRadius=UDim.new(0,4) cc.Parent=closeBtn
+        closeBtn.MouseButton1Click:Connect(function() mon:Destroy() end)
+
+        local list=Instance.new("ScrollingFrame")
+        list.Size=UDim2.new(1,-16,1,-30) list.Position=UDim2.new(0,8,0,26)
+        list.BackgroundTransparency=1 list.ScrollBarThickness=3 list.ScrollBarImageColor3=C.Teal
+        list.CanvasSize=UDim2.new(0,0,0,0) list.AutomaticCanvasSize=Enum.AutomaticSize.Y
+        list.Parent=fr
+        local lay=Instance.new("UIListLayout") lay.SortOrder=Enum.SortOrder.LayoutOrder
+        lay.Padding=UDim.new(0,3) lay.Parent=list
+
+        -- Update loop
+        task.spawn(function()
+            local labels={}
+            while mon.Parent do
+                -- Build/update label per pet TIM
+                local seen={}
+                local i=0
+                for uuid,_ in pairs(teamPetUUIDs) do
+                    i=i+1
+                    seen[uuid]=true
+                    local info=teamPetInfoCache[uuid]
+                    local fullName=(info and info.name) or "?"
+                    local petType=getBaseName(fullName)
+                    local cd=readUICDForPetType(petType)
+                    local ps=swapPerPet[uuid]
+                    local enabled=ps and ps.enabled
+
+                    local row=labels[uuid]
+                    if not row then
+                        row=Instance.new("Frame")
+                        row.Size=UDim2.new(1,-4,0,22) row.BackgroundColor3=C.Card
+                        row.BorderSizePixel=0 row.LayoutOrder=i row.Parent=list
+                        local rc=Instance.new("UICorner") rc.CornerRadius=UDim.new(0,4) rc.Parent=row
+                        local nm=Instance.new("TextLabel")
+                        nm.Size=UDim2.new(0.55,0,1,0) nm.Position=UDim2.new(0,6,0,0)
+                        nm.BackgroundTransparency=1 nm.TextColor3=C.White
+                        nm.Font=Enum.Font.Gotham nm.TextSize=9
+                        nm.TextXAlignment=Enum.TextXAlignment.Left nm.Parent=row
+                        local cdL=Instance.new("TextLabel")
+                        cdL.Size=UDim2.new(0.4,0,1,0) cdL.Position=UDim2.new(0.58,0,0,0)
+                        cdL.BackgroundTransparency=1 cdL.Font=Enum.Font.GothamBold cdL.TextSize=10
+                        cdL.TextXAlignment=Enum.TextXAlignment.Right cdL.Parent=row
+                        labels[uuid]={frame=row,name=nm,cd=cdL}
+                        row=labels[uuid]
+                    end
+                    row.name.Text=(enabled and "[ON] " or "")..fullName:sub(1,28)
+                    if cd then
+                        local m=math.floor(cd/60) local s=cd%60
+                        if m>0 then row.cd.Text=string.format("%dm %ds",m,s)
+                        else row.cd.Text=cd.."s" end
+                        row.cd.TextColor3= cd<=2 and C.Green or (cd<60 and C.Gold or C.White)
+                    else
+                        row.cd.Text="N/A" row.cd.TextColor3=C.Dim
+                    end
+                end
+                -- Cleanup pet yang udah dihapus dari team
+                for uuid,row in pairs(labels) do
+                    if not seen[uuid] then row.frame:Destroy() labels[uuid]=nil end
+                end
+                task.wait(1)
+            end
+        end)
+    end)
+
     local scanCDBtn=btn(dc,"PARSE CD WITH EMOJI (debug)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
