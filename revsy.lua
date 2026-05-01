@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v2.7-scan7"
+local SCRIPT_VERSION="v3.1-uiscan"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -280,45 +280,39 @@ end
 -- ============================================
 -- Cari pet yang placed di workspace berdasarkan UUID
 local function findPlacedPetByUUID(uuid)
-    -- Cek workspace.Pets / PlacedPets
+    -- Format UUID dgn curly braces (sesuai cara GAG simpan)
+    local uuidStr=tostring(uuid)
+    local uuidBracket=uuidStr
+    if uuidBracket:sub(1,1)~="{" then uuidBracket="{"..uuidBracket.."}" end
+
+    -- KETEMU: GAG path = workspace.PetsPhysical.PetMover.{UUID}
+    -- Model name itself = UUID dgn curly braces
+    local petsPhys=workspace:FindFirstChild("PetsPhysical")
+    if petsPhys then
+        local petMover=petsPhys:FindFirstChild("PetMover")
+        if petMover then
+            local m=petMover:FindFirstChild(uuidBracket) or petMover:FindFirstChild(uuidStr)
+            if m then return m end
+            -- Fallback: scan all children dengan name match
+            for _,child in ipairs(petMover:GetChildren()) do
+                if child.Name==uuidBracket or child.Name==uuidStr then return child end
+            end
+        end
+    end
+
+    -- Path lama (untuk kompatibilitas)
     for _,n in ipairs({"Pets","PlacedPets","ActivePets"}) do
         local f=workspace:FindFirstChild(n)
         if f then
             for _,m in ipairs(f:GetDescendants()) do
-                if m:GetAttribute("PET_UUID")==uuid or m:GetAttribute("OWNER_UUID")==uuid then return m end
-                if m.Name==tostring(uuid) then return m end
+                if m:GetAttribute("PET_UUID")==uuid or m.Name==uuidBracket or m.Name==uuidStr then return m end
             end
         end
     end
-    -- Cek workspace.Farm.<player>.Important.Pets / Pet_Physical
-    local farm=workspace:FindFirstChild("Farm")
-    if farm then
-        for _,f in ipairs(farm:GetChildren()) do
-            local imp=f:FindFirstChild("Important")
-            if imp then
-                local data=imp:FindFirstChild("Data")
-                local owner=data and data:FindFirstChild("Owner")
-                if owner and owner.Value==player.Name then
-                    for _,sub in ipairs({"Pets","Pet_Physical","PetsPhysical","PetsActive"}) do
-                        local pf=imp:FindFirstChild(sub)
-                        if pf then
-                            for _,m in ipairs(pf:GetDescendants()) do
-                                if m:GetAttribute("PET_UUID")==uuid then return m end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    -- Cek player.Character
-    if player.Character then
-        for _,m in ipairs(player.Character:GetDescendants()) do
-            if m:GetAttribute("PET_UUID")==uuid then return m end
-        end
-    end
-    -- BRUTE FORCE: scan seluruh workspace (last resort)
+
+    -- Brute force fallback
     for _,m in ipairs(workspace:GetDescendants()) do
+        if m:IsA("Model") and (m.Name==uuidBracket or m.Name==uuidStr) then return m end
         local ok,uid=pcall(function() return m:GetAttribute("PET_UUID") end)
         if ok and uid==uuid then return m end
     end
@@ -1141,83 +1135,92 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan v7: cari model dengan Animator/Humanoid (kemungkinan pet)
-    local scanCDBtn=btn(dc,"FIND PETS BY ANIMATOR (debug v7)",9,C.Panel,C.Gold)
+    -- Tombol Scan v8: scan PlayerGui untuk panel Active Pets
+    local scanCDBtn=btn(dc,"SCAN ACTIVE PETS UI (debug)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
-        dbg("[SCAN v7] CLICKED")
-        scanCDBtn.Text="Equipping..."
-        task.spawn(function()
-            for uuid,_ in pairs(teamPetUUIDs) do
-                pcall(function() equipPet(uuid) end)
-                task.wait(0.25)
-            end
-            task.wait(2)
+        dbg("[SCAN UI] CLICKED")
+        _dbgLines={"> [SCAN UI] mencari panel Active Pets..."}
+        if debugLbl then debugLbl.Text="> [SCAN UI] mencari panel Active Pets..." end
 
-            _dbgLines={"> [SCAN v7] cari model w/ animator..."}
-            if debugLbl then debugLbl.Text="> [SCAN v7] cari model w/ animator..." end
+        local fileBuf={"=== ZENX UI SCAN ==="}
+        local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
 
-            local fileBuf={"=== ZENX SCAN v7 ==="}
-            local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
+        local pg=player:FindFirstChild("PlayerGui")
+        if not pg then logBoth("NO PlayerGui!") return end
 
-            local char=player.Character
-            local hrp=char and char:FindFirstChild("HumanoidRootPart")
-
-            -- Cari semua Model yg punya Animator atau AnimationController child
-            local candidates={}
-            for _,m in ipairs(workspace:GetDescendants()) do
-                if m:IsA("Model") and m~=char then
-                    local hasAnim=false
-                    for _,c in ipairs(m:GetDescendants()) do
-                        if c:IsA("Animator") or c:IsA("AnimationController") or c:IsA("Humanoid") then
-                            hasAnim=true break
-                        end
-                    end
-                    if hasAnim then
-                        local d=999
-                        if hrp then
-                            local ok,piv=pcall(function() return m:GetPivot() end)
-                            if ok and piv then d=(piv.Position-hrp.Position).Magnitude end
-                        end
-                        table.insert(candidates,{m=m,d=d})
+        -- Cari TextLabel dengan tulisan "Active Pets"
+        local panelRoot=nil
+        local function findPanel(parent)
+            for _,d in ipairs(parent:GetDescendants()) do
+                if d:IsA("TextLabel") or d:IsA("TextButton") then
+                    local ok,txt=pcall(function() return d.Text end)
+                    if ok and txt and (txt:find("Active Pets") or txt:find("active pets")) then
+                        return d
                     end
                 end
             end
-            table.sort(candidates,function(a,b) return a.d<b.d end)
+            return nil
+        end
+        local found=findPanel(pg)
 
-            logBoth("Animator models: "..#candidates)
-            for i,e in ipairs(candidates) do
-                if i<=4 then
-                    local m=e.m
-                    logBoth("=== #"..i.." "..m.Name.." dist:"..math.floor(e.d).." ===")
-                    local par=m.Parent
-                    if par then logBoth("Parent: "..par.Name) end
-                    if par and par.Parent then logBoth("ParPar: "..par.Parent.Name) end
-                    -- Attribute
-                    local cnt=0
-                    for k,v in pairs(m:GetAttributes()) do
-                        cnt=cnt+1
-                        if cnt<=10 then logBoth("  ["..k.."]="..tostring(v)) end
-                    end
-                    if cnt==0 then logBoth("  (no attrs)") end
-                    -- Children dgn attrs
-                    for j,ch in ipairs(m:GetChildren()) do
-                        if j<=4 then
-                            logBoth("  >"..ch.Name)
-                            local cc=0
-                            for k,v in pairs(ch:GetAttributes()) do
-                                cc=cc+1
-                                if cc<=2 then logBoth("    ["..k.."]="..tostring(v)) end
-                            end
-                        end
+        if found then
+            -- Walk up to find panel root (ScreenGui or first child of ScreenGui)
+            panelRoot=found
+            while panelRoot.Parent and not panelRoot.Parent:IsA("ScreenGui") do
+                panelRoot=panelRoot.Parent
+            end
+            logBoth("FOUND: "..panelRoot:GetFullName())
+        else
+            logBoth("'Active Pets' text NOT FOUND")
+            logBoth("Pastikan panel udah dibuka di game!")
+            return
+        end
+
+        -- Cari TextLabel dengan format CD (XX:YYm atau XX:YY)
+        logBoth("=== CD labels ===")
+        local cdLabels={}
+        for _,d in ipairs(panelRoot:GetDescendants()) do
+            if d:IsA("TextLabel") then
+                local ok,txt=pcall(function() return d.Text end)
+                if ok and txt then
+                    -- Cek format CD: "10:06m", "3:13m", "1:23", "00:30"
+                    if txt:match("^%d+:%d+m?$") or txt:match("^%d+m %d+s$") then
+                        table.insert(cdLabels,{d=d,t=txt})
                     end
                 end
             end
+        end
+        logBoth("CD labels found: "..#cdLabels)
+        for i,e in ipairs(cdLabels) do
+            if i<=4 then
+                local p=e.d:GetFullName()
+                logBoth("[#"..i.."] "..e.t)
+                logBoth("  "..(p:sub(-60)))
+                -- Cek parent kalau ada nama pet
+                local par=e.d.Parent
+                if par then logBoth("  par:"..par.Name) end
+                if par and par.Parent then logBoth("  parPar:"..par.Parent.Name) end
+            end
+        end
 
-            logBoth("=== END ===")
-            pcall(function() if writefile then writefile("zenx_scan_v7.txt",table.concat(fileBuf,"\n")) end end)
-            scanCDBtn.Text="FIND PETS BY ANIMATOR (debug v7)"
-        end)
+        -- Cari semua TextLabel di panel (untuk lihat nama pet juga)
+        logBoth("=== All TextLabels (pet names?) ===")
+        local labels={}
+        for _,d in ipairs(panelRoot:GetDescendants()) do
+            if d:IsA("TextLabel") then
+                local ok,txt=pcall(function() return d.Text end)
+                if ok and txt and #txt>0 and #txt<40 then
+                    table.insert(labels,txt)
+                end
+            end
+        end
+        for i,t in ipairs(labels) do
+            if i<=12 then logBoth(i..". "..t) end
+        end
+
+        logBoth("=== END ===")
+        pcall(function() if writefile then writefile("zenx_ui_scan.txt",table.concat(fileBuf,"\n")) end end)
     end)
 
     div(areas[3],1)
@@ -1836,25 +1839,42 @@ local function startSwapForPet(uuid)
             -- Debug dump pertama kali
             if cycle==1 then debugDumpPet(uuid,petName,item,placed) end
 
-            -- Coba auto-detect cooldown
-            local cd,attrName=readPetCooldown(placed)
-            if cd==nil and item then cd,attrName=readPetCooldown(item) end
+            -- Cari AnimationController di pet model
+            local animCtrl=nil
+            if placed then
+                animCtrl=placed:FindFirstChildOfClass("AnimationController")
+                if not animCtrl then
+                    for _,d in ipairs(placed:GetDescendants()) do
+                        if d:IsA("AnimationController") then animCtrl=d break end
+                    end
+                end
+            end
 
-            if cd~=nil then
-                if cycle==1 then dbg("[Swap] "..petName.." AUTO-DETECT via: "..tostring(attrName)) end
-                local pollStart=tick()
-                local maxPoll=120
+            -- Wait sampai pet skill animasi play (= skill fired = CD selesai)
+            -- Atau timeout fallback: 2x pickup field
+            local maxWait=math.max(5,(ps.pickup or 0.6)*2)
+            local skillFired=false
+            if animCtrl then
+                if cycle==1 then dbg("[Swap] "..petName.." AUTO via animation (timeout "..math.floor(maxWait).."s)") end
+                local conn=animCtrl.AnimationPlayed:Connect(function(track)
+                    skillFired=true
+                end)
+                local startT=tick()
                 while isRunning and ps and ps.enabled do
-                    if tick()-pollStart>maxPoll then break end
-                    local cur=readPetCooldown(placed) or readPetCooldown(item)
-                    if cur==nil or cur<=0.1 then break end
-                    task.wait(0.2)
+                    if skillFired then break end
+                    if tick()-startT>maxWait then break end
+                    task.wait(0.1)
                     ps=swapPerPet[uuid]
                 end
-                if cycle<=2 then dbg(string.format("[Swap] %s ready! waited %.1fs",petName,tick()-pollStart)) end
+                pcall(function() conn:Disconnect() end)
+                if cycle<=2 then
+                    if skillFired then dbg(string.format("[Swap] %s skill fired! (%.1fs)",petName,tick()-startT))
+                    else dbg(string.format("[Swap] %s timeout, force pickup",petName)) end
+                end
+                -- Tunggu animasi selesai dulu (pickup config = post-skill delay)
                 if ps and ps.pickup>0 then task.wait(ps.pickup) end
             else
-                if cycle==1 then dbg("[Swap] "..petName.." auto-detect FAILED, manual "..tostring(ps.pickup).."s") end
+                if cycle==1 then dbg("[Swap] "..petName.." NO AnimationCtrl, manual "..tostring(ps.pickup).."s") end
                 local pkWait=math.max(0.05,ps.pickup)
                 local elapsed=0
                 while elapsed<pkWait do
