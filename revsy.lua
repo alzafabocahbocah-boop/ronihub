@@ -1140,67 +1140,69 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan Cooldown (debug) - auto-equip dulu baru scan workspace
-    local scanCDBtn=btn(dc,"EQUIP & SCAN WORKSPACE (debug)",9,C.Panel,C.Gold)
+    -- Tombol Scan Workspace (debug)
+    local scanCDBtn=btn(dc,"SCAN WORKSPACE NOW (debug)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
-        scanCDBtn.Text="Equipping pet TIM..."
-        task.spawn(function()
-            -- Equip dulu semua pet TIM biar muncul di workspace
-            for uuid,_ in pairs(teamPetUUIDs) do
-                pcall(function() equipPet(uuid) end)
-                task.wait(0.3)
-            end
-            task.wait(2)  -- tunggu pet placed di workspace
+        dbg("[SCAN] BUTTON CLICKED")
+        -- Clear log
+        _dbgLines={"> [SCAN] Starting..."}
+        if debugLbl then debugLbl.Text="> [SCAN] Starting..." end
 
-            -- Clear log dulu
-            _dbgLines={}
-            if debugLbl then debugLbl.Text="" end
-            dbg("=== SCAN WORKSPACE PETS ===")
-            local fileBuf={"=== ZENX WORKSPACE DUMP ==="}
-            local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
+        local fileBuf={"=== ZENX WORKSPACE SCAN ==="}
+        local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
 
-            -- Cari semua model di workspace yang punya PET_UUID attribute (apapun nilainya)
-            local petsFound=0
-            local function scanForPets(parent,depth,maxDepth)
-                if depth>maxDepth then return end
-                for _,m in ipairs(parent:GetChildren()) do
-                    local ok,uid=pcall(function() return m:GetAttribute("PET_UUID") end)
-                    if ok and uid then
-                        petsFound=petsFound+1
-                        if petsFound<=3 then
-                            logBoth("--- placed #"..petsFound.." ---")
-                            logBoth("Path: "..m:GetFullName())
-                            logBoth("Name: "..m.Name)
-                            logBoth("PET_UUID: "..tostring(uid))
-                            for k,v in pairs(m:GetAttributes()) do
-                                logBoth("  ["..k.."]="..tostring(v).." ("..type(v)..")")
-                            end
+        -- Dump workspace top-level
+        logBoth("=== workspace top ===")
+        local cnt=0
+        for _,c in ipairs(workspace:GetChildren()) do
+            cnt=cnt+1
+            if cnt<=20 then logBoth(cnt.." "..c.Name.." ("..c.ClassName..")") end
+        end
+        logBoth("total workspace children: "..cnt)
+
+        -- Cek folder umum tempat pet placed
+        for _,name in ipairs({"Pets","PlacedPets","ActivePets","PetMovers","Farm","Players","Map","PetsActive","Garden"}) do
+            local f=workspace:FindFirstChild(name)
+            if f then
+                logBoth("== workspace."..name.." ("..#f:GetChildren()..") ==")
+                for i,c in ipairs(f:GetChildren()) do
+                    if i<=4 then
+                        logBoth("  "..c.Name.." ("..c.ClassName..")")
+                        -- Dump anak folder pertama
+                        for j,cc in ipairs(c:GetChildren()) do
+                            if j<=3 then logBoth("    > "..cc.Name.." ("..cc.ClassName..")") end
                         end
                     end
-                    pcall(function() scanForPets(m,depth+1,maxDepth) end)
                 end
             end
-            scanForPets(workspace,0,5)
-            logBoth("Total pet placed: "..petsFound)
+        end
 
-            -- Cek juga path-path umum
-            for _,name in ipairs({"Pets","PlacedPets","ActivePets","PetMovers","Farm"}) do
-                local f=workspace:FindFirstChild(name)
-                if f then
-                    logBoth("workspace."..name.." ada ("..#f:GetChildren().." child)")
-                    for i,c in ipairs(f:GetChildren()) do
-                        if i<=3 then logBoth("  "..c.Name.." ("..c.ClassName..")") end
+        -- Brute force: cari model dengan PET_UUID di seluruh workspace
+        logBoth("=== brute force PET_UUID ===")
+        local found=0
+        local function recurse(parent,depth)
+            if depth>6 then return end
+            for _,m in ipairs(parent:GetChildren()) do
+                local ok,uid=pcall(function() return m:GetAttribute("PET_UUID") end)
+                if ok and uid then
+                    found=found+1
+                    if found<=2 then
+                        logBoth("[#"..found.."] "..m:GetFullName())
+                        for k,v in pairs(m:GetAttributes()) do
+                            logBoth("  ["..k.."]="..tostring(v))
+                        end
                     end
                 end
+                pcall(function() recurse(m,depth+1) end)
             end
+        end
+        pcall(function() recurse(workspace,0) end)
+        logBoth("Total PET_UUID found: "..found)
 
-            logBoth("=== END SCAN ===")
-            local ok=pcall(function() if writefile then writefile("zenx_workspace_dump.txt",table.concat(fileBuf,"\n")) end end)
-            if ok then dbg("File: zenx_workspace_dump.txt") end
-
-            scanCDBtn.Text="EQUIP & SCAN WORKSPACE (debug)"
-        end)
+        logBoth("=== END ===")
+        pcall(function() if writefile then writefile("zenx_workspace_dump.txt",table.concat(fileBuf,"\n")) end end)
+        dbg("DONE")
     end)
 
     div(areas[3],1)
