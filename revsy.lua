@@ -1284,7 +1284,7 @@ local function buildAutoGift()
         local arrow=lbl(hdr,"v",11,C.Teal,Enum.TextXAlignment.Right) arrow.Size=UDim2.new(0,24,1,0) arrow.Position=UDim2.new(1,-30,0,0)
         local cover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=hdr})
         -- Content (initially collapsed)
-        local content=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=layoutOrder+0.5,ClipsDescendants=true,AutomaticSize=Enum.AutomaticSize.None,Parent=areas[5]})
+        local content=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=layoutOrder+1,ClipsDescendants=true,AutomaticSize=Enum.AutomaticSize.None,Parent=areas[5]})
         corner(content,7) stroke(content,C.Dim,1)
         mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=content})
         mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=content})
@@ -1311,7 +1311,7 @@ local function buildAutoGift()
         -- Target username
         local trRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
         corner(trRow,6) stroke(trRow,C.Dim,1.1)
-        lbl(trRow,"Target:",9,C.Gray).Size=UDim2.new(0.25,0,1,0).new(0,8,0,0)
+        lbl(trRow,"Target:",9,C.Gray).Size=UDim2.new(0.25,0,1,0)
         local trBox=mk("TextBox",{Size=UDim2.new(0.7,-10,0,20),Position=UDim2.new(0.27,0,0.5,-10),BackgroundColor3=C.Panel,Text=slot.target,PlaceholderText="username",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,Parent=trRow})
         corner(trBox,5) stroke(trBox,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=trBox})
         trBox:GetPropertyChangedSignal("Text"):Connect(function() slot.target=trBox.Text save() end)
@@ -1392,7 +1392,7 @@ local function buildAutoGift()
         -- Filter KG
         local kgRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=4,Parent=parent})
         corner(kgRow,6) stroke(kgRow,C.Dim,1.1)
-        lbl(kgRow,"KG: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0).new(0,8,0,0)
+        lbl(kgRow,"KG: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0)
         local kgBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.kg,PlaceholderText="-60",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=kgRow})
         corner(kgBox,5) stroke(kgBox,C.Dim,1)
         kgBox:GetPropertyChangedSignal("Text"):Connect(function() slot.kg=kgBox.Text save() end)
@@ -1400,7 +1400,7 @@ local function buildAutoGift()
         -- Filter Age
         local ageRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=parent})
         corner(ageRow,6) stroke(ageRow,C.Dim,1.1)
-        lbl(ageRow,"Age: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0).new(0,8,0,0)
+        lbl(ageRow,"Age: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0)
         local ageBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.age,PlaceholderText="-100",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ageRow})
         corner(ageBox,5) stroke(ageBox,C.Dim,1)
         ageBox:GetPropertyChangedSignal("Text"):Connect(function() slot.age=ageBox.Text save() end)
@@ -1474,7 +1474,7 @@ local function buildAutoGift()
     end
 
     -- Auto Accept section (collapsible)
-    local accContent=makeCollapsible("Auto Accept Gift / Trade",40)
+    local accContent=makeCollapsible("Auto Accept Gift / Trade",50)
     local _,agTog,agTS,agSS=togRow(accContent,"Auto Accept Gift","Auto terima gift masuk",1)
     agTog.Text=autoAccGift and "ON" or "OFF" agTog.BackgroundColor3=autoAccGift and C.TDim or C.Panel agTog.TextColor3=autoAccGift and C.Teal or C.Gray agTS.Color=autoAccGift and C.Teal or C.Dim agSS.Color=autoAccGift and C.Teal or C.Dim
     agTog.MouseButton1Click:Connect(function()
@@ -1495,11 +1495,11 @@ local function buildAutoGift()
 
     -- Status (paling bawah)
     sendStatusLbl=lbl(areas[5],"Send: idle",9,C.Gray,Enum.TextXAlignment.Center)
-    sendStatusLbl.Size=UDim2.new(1,0,0,18) sendStatusLbl.LayoutOrder=50 sendStatusLbl.BackgroundColor3=C.Panel sendStatusLbl.BackgroundTransparency=0
+    sendStatusLbl.Size=UDim2.new(1,0,0,18) sendStatusLbl.LayoutOrder=60 sendStatusLbl.BackgroundColor3=C.Panel sendStatusLbl.BackgroundTransparency=0
     corner(sendStatusLbl,5) stroke(sendStatusLbl,C.Dim,1)
 
     accStatusLbl=lbl(areas[5],"Accept: idle",9,C.Gray,Enum.TextXAlignment.Center)
-    accStatusLbl.Size=UDim2.new(1,0,0,18) accStatusLbl.LayoutOrder=51 accStatusLbl.BackgroundColor3=C.Panel accStatusLbl.BackgroundTransparency=0
+    accStatusLbl.Size=UDim2.new(1,0,0,18) accStatusLbl.LayoutOrder=61 accStatusLbl.BackgroundColor3=C.Panel accStatusLbl.BackgroundTransparency=0
     corner(accStatusLbl,5) stroke(accStatusLbl,C.Dim,1)
 end
 
