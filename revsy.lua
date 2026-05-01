@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v3.6-match"
+local SCRIPT_VERSION="v3.7-simple"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -1212,7 +1212,7 @@ buildSwapList=function()
         corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(math.max(0,v)) save() end end)
     end
-    ngRow(dc,"Offset","Buffer setelah ready (dtk, default 0.6)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
+    ngRow(dc,"CD Manual","Pas UI panel ga ada pet (dtk)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
     ngRow(dc,"Re-Place","Jeda sblm place lagi (dtk)",swapConfig.placeDelay,2,function(v) swapConfig.placeDelay=v end)
     ngRow(dc,"Gap","Gap antar cycle (dtk)",swapConfig.swapDelay,3,function(v) swapConfig.swapDelay=v end)
 
@@ -1944,87 +1944,45 @@ local function startSwapForPet(uuid)
             -- Pet TYPE buat lookup CD dari UI
             local petType=getBaseName(petName)
 
-            -- Cari AnimationController fallback
-            local animCtrl=nil
-            if placed then
-                animCtrl=placed:FindFirstChildOfClass("AnimationController")
-                if not animCtrl then
-                    for _,d in ipairs(placed:GetDescendants()) do
-                        if d:IsA("AnimationController") then animCtrl=d break end
-                    end
-                end
-            end
-
-            -- TUNGGU SAMPAI CD READY (via UI panel)
+            -- Coba UI-CD dulu
             local cdSec=readUICDForPetType(petType)
             if cycle==1 then
                 if cdSec then dbg("[Swap] "..petName.." UI-CD: "..cdSec.."s ("..petType..")")
-                else dbg("[Swap] "..petName.." UI-CD: NOT FOUND ("..petType..")") end
+                else dbg("[Swap] "..petName.." MANUAL mode, wait "..tostring(ps.pickup).."s") end
             end
-
-            local skillFired=false
-            local fallbackTimeout=math.max(10,(ps.pickup or 1)*3)
 
             if cdSec then
                 -- Mode UI: poll CD sampai <=1, dengan retry jika nil
                 local pollStart=tick()
                 local nilCount=0
-                local minWaitTime=5  -- minimum wait 5 dtk safety (anti-spam loop)
                 while isRunning and ps and ps.enabled do
                     if tick()-pollStart>7200 then break end  -- 2hr max
                     local cur=readUICDForPetType(petType)
                     if cur==nil then
-                        -- Pet sementara ilang dari panel? Clear cache, retry
                         _uiCDSlotCache[petType]=nil
                         nilCount=nilCount+1
-                        if nilCount>10 then
-                            -- Beneran ilang, bail out tapi tetep wait minimum
-                            local elapsed=tick()-pollStart
-                            if elapsed<minWaitTime then task.wait(minWaitTime-elapsed) end
-                            break
-                        end
+                        if nilCount>10 then break end
                         task.wait(2)
                     else
                         nilCount=0
-                        if cur<=1 then
-                            -- Ready! Tapi pastikan minimum wait juga
-                            local elapsed=tick()-pollStart
-                            if elapsed<minWaitTime then task.wait(minWaitTime-elapsed) end
-                            break
-                        end
+                        if cur<=1 then break end
                         task.wait(math.max(0.5,math.min(5,cur*0.3)))
                     end
                     ps=swapPerPet[uuid]
                 end
                 if cycle<=3 then dbg(string.format("[Swap] %s ready! waited %.1fs (nilCnt=%d)",petName,tick()-pollStart,nilCount)) end
-            elseif animCtrl then
-                -- Fallback: Animation event
-                if cycle==1 then dbg("[Swap] "..petName.." fallback animation event") end
-                local conn=animCtrl.AnimationPlayed:Connect(function() skillFired=true end)
-                local startT=tick()
-                while isRunning and ps and ps.enabled do
-                    if skillFired then break end
-                    if tick()-startT>fallbackTimeout then break end
-                    task.wait(0.1)
-                    ps=swapPerPet[uuid]
-                end
-                pcall(function() conn:Disconnect() end)
             else
-                -- Last fallback: manual timer
-                if cycle==1 then dbg("[Swap] "..petName.." manual timer "..tostring(ps.pickup).."s") end
-                local pkWait=math.max(0.05,ps.pickup)
+                -- MANUAL mode: tunggu offset detik penuh
+                local waitSec=math.max(2,ps.pickup or 60)
                 local elapsed=0
-                while elapsed<pkWait do
+                while elapsed<waitSec do
                     if not isRunning then break end
-                    local step=math.min(0.25,pkWait-elapsed)
+                    local step=math.min(1,waitSec-elapsed)
                     task.wait(step) elapsed=elapsed+step
                     local p2=swapPerPet[uuid]
                     if not p2 or not p2.enabled then break end
                 end
             end
-
-            -- Buffer setelah CD ready (offset)
-            if ps and ps.pickup>0 then task.wait(ps.pickup) end
 
             if not isRunning then break end
             ps=swapPerPet[uuid]
