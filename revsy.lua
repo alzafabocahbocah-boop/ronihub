@@ -4,7 +4,7 @@ warn("[ZenxLvl] kalau pesan ini muncul tapi GUI nggak, lanjut baca console")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local HS = game:GetService("HttpService")
+local HS = game:GetService("HttpService"
 local TS = game:GetService("TeleportService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui",10)
@@ -1140,93 +1140,100 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan Farm Important (debug v3) - eksplorasi struktur farm player
-    local scanCDBtn=btn(dc,"SCAN FARM IMPORTANT (debug)",9,C.Panel,C.Gold)
+    -- Tombol Scan v4: equip dulu, scan placed by name match
+    local scanCDBtn=btn(dc,"EQUIP & SCAN PLACED PET (debug)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
-        dbg("[SCAN] CLICKED")
-        _dbgLines={"> [SCAN] running..."}
-        if debugLbl then debugLbl.Text="> [SCAN] running..." end
+        dbg("[SCAN v4] CLICKED")
+        scanCDBtn.Text="Equipping..."
+        task.spawn(function()
+            -- Step 1: equip pet TIM
+            local teamNames={}  -- nama base buat match
+            for uuid,_ in pairs(teamPetUUIDs) do
+                pcall(function() equipPet(uuid) end)
+                local info=teamPetInfoCache[uuid]
+                local nm=info and info.name or ""
+                local base=getBaseName(nm)
+                if base~="" then teamNames[base:lower()]=true end
+                task.wait(0.25)
+            end
+            task.wait(2)  -- tunggu placement
 
-        local fileBuf={"=== ZENX FARM SCAN ==="}
-        local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
+            _dbgLines={"> [SCAN v4] scanning..."}
+            if debugLbl then debugLbl.Text="> [SCAN v4] scanning..." end
 
-        local farmRoot=workspace:FindFirstChild("Farm")
-        if not farmRoot then logBoth("NO workspace.Farm!") return end
+            local fileBuf={"=== ZENX SCAN v4 ==="}
+            local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
 
-        -- Cari farm player (cek owner di tiap Important.Data)
-        local myFarm=nil
-        for _,fm in ipairs(farmRoot:GetChildren()) do
-            local imp=fm:FindFirstChild("Important")
-            if imp then
-                local data=imp:FindFirstChild("Data")
-                if data then
-                    -- Cek Owner / Player / Username
-                    for _,c in ipairs(data:GetChildren()) do
-                        if c:IsA("StringValue") or c:IsA("ObjectValue") then
-                            local v=tostring(c.Value or "")
-                            if v==player.Name or v:find(player.Name) then
-                                myFarm=fm break
+            -- Cari farm punya player
+            local farmRoot=workspace:FindFirstChild("Farm")
+            local myFarm=nil
+            if farmRoot then
+                for _,fm in ipairs(farmRoot:GetChildren()) do
+                    local imp=fm:FindFirstChild("Important")
+                    if imp then
+                        local data=imp:FindFirstChild("Data")
+                        if data then
+                            for _,c in ipairs(data:GetChildren()) do
+                                if c:IsA("StringValue") or c:IsA("ObjectValue") then
+                                    local v=tostring(c.Value or "")
+                                    if v==player.Name or v:find(player.Name) then
+                                        myFarm=fm break
+                                    end
+                                end
                             end
                         end
                     end
+                    if myFarm then break end
+                end
+                if not myFarm then myFarm=farmRoot:GetChildren()[1] end
+            end
+
+            if not myFarm then logBoth("NO Farm!") return end
+            local imp=myFarm:FindFirstChild("Important")
+            if not imp then logBoth("NO Important!") return end
+
+            logBoth("Farm: "..myFarm.Name)
+            -- Dump Important children
+            for _,c in ipairs(imp:GetChildren()) do
+                logBoth("- "..c.Name.." ("..#c:GetChildren().." child)")
+            end
+
+            -- Cari semua model di Important yang nama-nya match pet team
+            local matched={}
+            local function recurse(parent,depth)
+                if depth>5 then return end
+                for _,m in ipairs(parent:GetChildren()) do
+                    if m:IsA("Model") then
+                        if teamNames[m.Name:lower()] then
+                            table.insert(matched,m)
+                        end
+                    end
+                    pcall(function() recurse(m,depth+1) end)
                 end
             end
-            if myFarm then break end
-        end
-        -- Fallback: pakai farm pertama
-        if not myFarm and #farmRoot:GetChildren()>0 then
-            myFarm=farmRoot:GetChildren()[1]
-            logBoth("WARN: pakai farm pertama (owner check fail)")
-        end
-        if not myFarm then logBoth("NO farm found") return end
+            recurse(imp,0)
 
-        local imp=myFarm:FindFirstChild("Important")
-        logBoth("My farm path: "..myFarm:GetFullName())
-        if not imp then logBoth("NO Important!") return end
-
-        -- Dump Important children
-        logBoth("=== Important children ===")
-        for _,c in ipairs(imp:GetChildren()) do
-            logBoth("- "..c.Name.." ("..c.ClassName..")")
-        end
-
-        -- Cari folder yang berisi pet (apa pun nama-nya)
-        logBoth("=== cari pet dalam Important ===")
-        local petCandidates={}
-        for _,c in ipairs(imp:GetChildren()) do
-            if c:IsA("Folder") or c:IsA("Configuration") or c:IsA("Model") then
-                local nm=c.Name:lower()
-                if nm:find("pet") or nm:find("animal") then
-                    table.insert(petCandidates,c)
-                    logBoth("CANDIDATE: "..c.Name.." ("..#c:GetChildren()..")")
-                end
-            end
-        end
-
-        -- Dump tiap candidate dgn detail child pertama
-        for _,pc in ipairs(petCandidates) do
-            logBoth("== "..pc.Name.." ==")
-            for i,m in ipairs(pc:GetChildren()) do
+            logBoth("=== matched placed pets: "..#matched.." ===")
+            for i,m in ipairs(matched) do
                 if i<=2 then
-                    logBoth(i..". "..m.Name.." ("..m.ClassName..")")
-                    -- Dump attributes
-                    local cnt=0
+                    logBoth("[#"..i.."] "..m.Name)
+                    logBoth("  Path: "..m:GetFullName():sub(-60))
+                    -- Semua attribute
                     for k,v in pairs(m:GetAttributes()) do
-                        cnt=cnt+1
-                        if cnt<=8 then logBoth("  ["..k.."]="..tostring(v)) end
+                        logBoth("  ATTR "..k.."="..tostring(v))
                     end
-                    -- Dump children
+                    -- Children top-level
                     for j,ch in ipairs(m:GetChildren()) do
-                        if j<=4 then logBoth("  child:"..ch.Name.." ("..ch.ClassName..")") end
+                        if j<=4 then logBoth("  ch:"..ch.Name.." ("..ch.ClassName..")") end
                     end
                 end
             end
-        end
 
-        logBoth("=== END ===")
-        pcall(function() if writefile then writefile("zenx_farm_dump.txt",table.concat(fileBuf,"\n")) end end)
-        dbg("DONE")
+            logBoth("=== END ===")
+            pcall(function() if writefile then writefile("zenx_placed_dump.txt",table.concat(fileBuf,"\n")) end end)
+            scanCDBtn.Text="EQUIP & SCAN PLACED PET (debug)"
+        end)
     end)
 
     div(areas[3],1)
