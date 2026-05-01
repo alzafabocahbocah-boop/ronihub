@@ -1,6 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-print("==== [ZenxLvl] SCRIPT MULAI LOAD ====")
-warn("[ZenxLvl] kalau pesan ini muncul tapi GUI nggak, lanjut baca console")
+local SCRIPT_VERSION="v2.5-scan5"
+print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -74,7 +75,7 @@ do
     title.Size = UDim2.new(1,-30,0,20)
     title.Position = UDim2.new(0,8,0,4)
     title.BackgroundTransparency = 1
-    title.Text = "Zenx Debug Log (parent: "..tostring(parentResult)..")"
+    title.Text = "Zenx Debug "..SCRIPT_VERSION.." (parent: "..tostring(parentResult)..")"
     title.TextColor3 = Color3.fromRGB(40,200,160)
     title.Font = Enum.Font.GothamBold
     title.TextSize = 12
