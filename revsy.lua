@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v4.5-anim"
+local SCRIPT_VERSION="v4.6-dedup"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -767,7 +767,15 @@ local function _skillDetectorCheckText(text)
     local low=text:lower()
     for petType,_ in pairs(SkillDetector.watchTypes) do
         if low:find(petType,1,true) then
+            -- Dedup: kalau text persis sama dengan terakhir, skip (biar gak retrigger)
+            local lastTxt=SkillDetector.lastText and SkillDetector.lastText[petType]
+            local lastT=SkillDetector.lastFire[petType] or 0
+            if lastTxt==text and (tick()-lastT)<2 then
+                return  -- same text within 2s, ignore
+            end
             SkillDetector.lastFire[petType]=tick()
+            SkillDetector.lastText=SkillDetector.lastText or {}
+            SkillDetector.lastText[petType]=text
             table.insert(SkillDetector.notifLog,1,os.date("%X").." | "..petType.." | "..text:sub(1,60))
             if #SkillDetector.notifLog>20 then table.remove(SkillDetector.notifLog) end
             break
@@ -2306,8 +2314,8 @@ local function startSwapForPet(uuid)
             dbg("[Swap] "..petName.." watch: "..petType..(petTypeLast~=petType and ", "..petTypeLast or ""))
         end
 
-        -- Baseline: kapan terakhir skill fire (sebelum swap mulai)
-        local baseline=math.max(SkillDetector.lastFire[petType] or 0,SkillDetector.lastFire[petTypeLast] or 0)
+        -- Baseline: mulai detection dari sekarang (ignore notif lama)
+        local baseline=tick()
 
         while isRunning do
             local ps=swapPerPet[uuid]
@@ -2322,41 +2330,49 @@ local function startSwapForPet(uuid)
             local maxWait=math.max(5,ps.pickup or 60)  -- timeout = manual CD (= pet's max CD)
             local detected=false
             local detectVia=""
+            -- Min wait sebelum mulai detect: hindari notif lama langsung match
+            -- = 50% dari pickup (CD), min 2 detik, max 10 detik
+            local minWait=math.max(2,math.min(10,(ps.pickup or 15)*0.5))
 
             while isRunning do
                 if not isRunning then break end
                 ps=swapPerPet[uuid]
                 if not ps or not ps.enabled then break end
 
-                -- Check anim spy (paling cepet, awal skill)
-                local a1=AnimSpy.skillFire[petType] or 0
-                local a2=AnimSpy.skillFire[petTypeLast] or 0
-                local animLatest=math.max(a1,a2)
-                if animLatest>baseline+0.1 then
-                    detected=true detectVia="ANIM"
-                    baseline=animLatest
-                    break
-                end
+                -- Skip detection sampai minWait passed
+                if tick()-pollStart<minWait then
+                    task.wait(0.1)
+                else
+                    -- Check anim spy (paling cepet, awal skill)
+                    local a1=AnimSpy.skillFire[petType] or 0
+                    local a2=AnimSpy.skillFire[petTypeLast] or 0
+                    local animLatest=math.max(a1,a2)
+                    if animLatest>baseline+0.1 then
+                        detected=true detectVia="ANIM"
+                        baseline=animLatest
+                        break
+                    end
 
-                -- Check skill detector (notif)
-                local f1=SkillDetector.lastFire[petType] or 0
-                local f2=SkillDetector.lastFire[petTypeLast] or 0
-                local latest=math.max(f1,f2)
-                if latest>baseline+0.1 then
-                    detected=true detectVia="NOTIF"
-                    baseline=latest
-                    break
-                end
+                    -- Check skill detector (notif)
+                    local f1=SkillDetector.lastFire[petType] or 0
+                    local f2=SkillDetector.lastFire[petTypeLast] or 0
+                    local latest=math.max(f1,f2)
+                    if latest>baseline+0.1 then
+                        detected=true detectVia="NOTIF"
+                        baseline=latest
+                        break
+                    end
 
-                if tick()-pollStart>=maxWait then break end
-                task.wait(0.1)
+                    if tick()-pollStart>=maxWait then break end
+                    task.wait(0.1)
+                end
             end
 
-            if cycle<=3 then
+            if cycle<=5 then
                 if detected then
-                    dbg(string.format("[Swap] %s skill fired via %s! (%.1fs)",petName,detectVia,tick()-pollStart))
+                    dbg(string.format("[Swap] %s fire via %s (%.1fs)",petName,detectVia,tick()-pollStart))
                 else
-                    dbg(string.format("[Swap] %s timeout %.0fs (manual)",petName,tick()-pollStart))
+                    dbg(string.format("[Swap] %s timeout %.0fs",petName,tick()-pollStart))
                 end
             end
 
@@ -2371,6 +2387,10 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
             equipPet(uuid)
+
+            -- Reset baseline ke tick sekarang (post-place) supaya cycle berikutnya
+            -- gak detect notif lama (yang text-nya masih ada di screen)
+            baseline=tick()
 
             task.wait(math.max(0,swapConfig.swapDelay or 0))
         end
