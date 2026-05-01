@@ -431,17 +431,17 @@ end
 
 -- Cek apakah pet match filter KG / Age
 -- filter format: "" / "0" = no filter; "-N" = kg/age <= N; "N" = kg/age >= N
-local function passKgFilter(item)
-    if sendKgFilter==nil or sendKgFilter=="" or sendKgFilter=="0" then return true end
-    local n=tonumber(sendKgFilter) if not n then return true end
+local function passKgFilter(item,filterStr)
+    if filterStr==nil or filterStr=="" or filterStr=="0" then return true end
+    local n=tonumber(filterStr) if not n then return true end
     local kg=getKG(item) if not kg then return true end
-    if n<0 and kg>(-n) then return false end  -- "-60" -> kg>60 reject
-    if n>0 and kg<n then return false end      -- "60" -> kg<60 reject
+    if n<0 and kg>(-n) then return false end
+    if n>0 and kg<n then return false end
     return true
 end
-local function passAgeFilter(item)
-    if sendAgeFilter==nil or sendAgeFilter=="" or sendAgeFilter=="0" then return true end
-    local n=tonumber(sendAgeFilter) if not n then return true end
+local function passAgeFilter(item,filterStr)
+    if filterStr==nil or filterStr=="" or filterStr=="0" then return true end
+    local n=tonumber(filterStr) if not n then return true end
     local age=getAgeFromKG(item) if not age then return true end
     if n<0 and age>(-n) then return false end
     if n>0 and age<n then return false end
@@ -611,14 +611,24 @@ local autoAccGift=d.autoAccGift or false
 local autoAccTrade=d.autoAccTrade or false
 local autoSendGift=d.autoSendGift or false
 local autoSendTrade=d.autoSendTrade or false
-local sendTargetName=d.sendTargetName or ""
-local sendPetTypes=d.sendPetTypes or {}  -- {[baseName]=true}
-local sendInterval=d.sendInterval or 30  -- detik
-local sendKgFilter=d.sendKgFilter or ""  -- "" / "-60" / "60"
-local sendAgeFilter=d.sendAgeFilter or ""  -- "" / "-100" / "70"
-local sendIncludeFav=d.sendIncludeFav or false  -- kirim pet di-love juga?
-local autoUnfav=d.autoUnfav or false  -- auto unfav pet
+local sendInterval=d.sendInterval or 30  -- detik (shared)
+-- 3 slot gift independen
+local giftSlots=d.giftSlots or {
+    {target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false},
+    {target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false},
+    {target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false},
+}
+-- Pastikan 3 slot
+for i=1,3 do
+    if not giftSlots[i] then giftSlots[i]={target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false} end
+    -- defaults untuk field yg mungkin missing
+    giftSlots[i].petTypes=giftSlots[i].petTypes or {}
+    giftSlots[i].target=giftSlots[i].target or ""
+    giftSlots[i].kg=giftSlots[i].kg or ""
+    giftSlots[i].age=giftSlots[i].age or ""
+end
 local antiAfk=(d.antiAfk~=false)  -- default ON (anti AFK kick)
+local showAllPets=d.showAllPets or false  -- workaround: tampilkan semua pet (bypass filter love)
 local isRunning=false
 local mainTask=nil local monitorTask=nil
 local isAR=false local arTask=nil
@@ -638,12 +648,9 @@ local function save()
     d.fromAge=fromAge d.toAge=toAge d.maxPetTarget=maxPetTarget
     d.autoStartEnabled=autoStartEnabled d.autoRejoin=autoRejoin
     d.autoAccGift=autoAccGift d.autoAccTrade=autoAccTrade
-    d.autoSendGift=autoSendGift d.autoSendTrade=autoSendTrade
-    d.sendTargetName=sendTargetName d.sendPetTypes=sendPetTypes
     d.sendInterval=sendInterval
-    d.sendKgFilter=sendKgFilter d.sendAgeFilter=sendAgeFilter
-    d.sendIncludeFav=sendIncludeFav d.autoUnfav=autoUnfav
-    d.antiAfk=antiAfk
+    d.giftSlots=giftSlots
+    d.antiAfk=antiAfk d.showAllPets=showAllPets
     d.swapPerPet=swapPerPet d.swapConfig=swapConfig
     saveToFile(d)
 end
@@ -694,6 +701,47 @@ buildTimList=function()
     corner(eqBox,5) stroke(eqBox,C.Dim,1)
     eqBox:GetPropertyChangedSignal("Text"):Connect(function()
         local v=tonumber(eqBox.Text) if v then config.equipInterval=math.max(1,v) save() end
+    end)
+
+    -- Toggle "Show all pets" + tombol Scan attribute (untuk debug favorite)
+    local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[1]})
+    corner(saRow,6) stroke(saRow,C.Dim,1.1)
+    lbl(saRow,"Tampilkan semua pet",9,C.Gray).Size=UDim2.new(0.55,0,0,14)
+    local saTxt=lbl(saRow,"(bypass filter love)",7,C.Dim) saTxt.Size=UDim2.new(0.55,0,0,11) saTxt.Position=UDim2.new(0,8,0,16)
+    local saTog=btn(saRow,showAllPets and "ON" or "OFF",9,showAllPets and C.TDim or C.Panel,showAllPets and C.Teal or C.Gray)
+    saTog.Size=UDim2.new(0,44,0,20) saTog.Position=UDim2.new(1,-50,0.5,-10)
+    local saTogStroke=stroke(saTog,showAllPets and C.Teal or C.Dim,1.1)
+    saTog.MouseButton1Click:Connect(function()
+        showAllPets=not showAllPets save()
+        saTog.Text=showAllPets and "ON" or "OFF"
+        saTog.BackgroundColor3=showAllPets and C.TDim or C.Panel
+        saTog.TextColor3=showAllPets and C.Teal or C.Gray
+        saTogStroke.Color=showAllPets and C.Teal or C.Dim
+        buildTimList()
+    end)
+
+    -- Tombol Scan Attribute (debug)
+    local scanBtn=btn(areas[1],"Scan Attr Pet (debug favorite)",9,C.Panel,C.Gold)
+    scanBtn.Size=UDim2.new(1,0,0,22) scanBtn.LayoutOrder=2 stroke(scanBtn,C.Gold,1.2)
+    scanBtn.MouseButton1Click:Connect(function()
+        local bp=player:FindFirstChild("Backpack")
+        if not bp then dbg("Backpack tidak ada") return end
+        dbg("=== SCAN PET ATTRIBUTES ===")
+        local cnt=0
+        for _,item in pairs(bp:GetChildren()) do
+            if isPet(item) and cnt<5 then
+                cnt=cnt+1
+                dbg("Pet "..cnt..": "..item.Name)
+                local attrs=item:GetAttributes()
+                local hasAttrs=false
+                for k,v in pairs(attrs) do
+                    hasAttrs=true
+                    dbg("  ["..k.."] = "..tostring(v).." ("..type(v)..")")
+                end
+                if not hasAttrs then dbg("  (no attributes)") end
+            end
+        end
+        dbg("=== END SCAN. Kasih ke Claude. ===")
     end)
 
     div(areas[1],1)
@@ -774,7 +822,7 @@ buildTimList=function()
         local n=0 local shown={} local favCount=0
         if bp then
             for _,item in pairs(bp:GetChildren()) do
-                if isPet(item) and isFavorite(item) then
+                if isPet(item) and (showAllPets or isFavorite(item)) then
                     favCount=favCount+1
                     local uuid=getPetUUID(item)
                     if uuid then
@@ -1210,7 +1258,7 @@ local function buildOtherSetting()
 end
 
 -- ============================================
--- TAB 5: AUTO GIFT (Send + Accept)
+-- TAB 5: AUTO GIFT (Send + Accept) - 3 Gift Slots
 -- ============================================
 local accStatusLbl=nil
 local sendStatusLbl=nil
@@ -1219,261 +1267,242 @@ local function buildAutoGift()
         if c:IsA("Frame") or c:IsA("TextLabel") or c:IsA("TextButton") then c:Destroy() end
     end
 
-    -- ============ AUTO SEND GIFT (atas) ============
-    local sendT=lbl(areas[5],"AUTO SEND GIFT / TRADE",9,C.Teal) sendT.Size=UDim2.new(1,0,0,14) sendT.LayoutOrder=0
-
-    -- Target username input
-    local trRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[5]})
-    corner(trRow,6) stroke(trRow,C.Dim,1.1)
-    lbl(trRow,"Target Username:",9,C.Gray).Size=UDim2.new(0.4,0,1,0)
-    local trBox=mk("TextBox",{Size=UDim2.new(0.55,-10,0,20),Position=UDim2.new(0.4,0,0.5,-10),BackgroundColor3=C.Panel,Text=sendTargetName,PlaceholderText="username",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,Parent=trRow})
-    corner(trBox,5) stroke(trBox,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=trBox})
-    trBox:GetPropertyChangedSignal("Text"):Connect(function() sendTargetName=trBox.Text save() end)
-
-    -- Interval input
-    local ivRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=2,Parent=areas[5]})
+    -- Interval global (shared 3 slot)
+    local ivRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=areas[5]})
     corner(ivRow,6) stroke(ivRow,C.Dim,1.1)
     lbl(ivRow,"Interval Send (dtk):",9,C.Gray).Size=UDim2.new(0.6,0,1,0)
     local ivBox=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(sendInterval),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ivRow})
     corner(ivBox,5) stroke(ivBox,C.Dim,1)
     ivBox:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(ivBox.Text) if v then sendInterval=math.max(5,v) save() end end)
 
-    -- Pet TYPE picker (multi-select per jenis, bukan per pet)
-    local pickerOpen=false
-    local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=3,Parent=areas[5]})
-    corner(pickRow,6) local pickStroke=stroke(pickRow,C.Dim,1.1)
-    local function countSendTypes()
-        local n=0 for _ in pairs(sendPetTypes) do n=n+1 end return n
+    -- Helper: bikin section collapsible (Gift 1/2/3 atau Accept)
+    local function makeCollapsible(title,layoutOrder)
+        -- Header (clickable)
+        local hdr=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=layoutOrder,Parent=areas[5]})
+        corner(hdr,7) local hdrStroke=stroke(hdr,C.Dim,1.2)
+        local titleLbl=lbl(hdr,title,11,C.White) titleLbl.Size=UDim2.new(0.85,0,1,0) titleLbl.Position=UDim2.new(0,12,0,0) titleLbl.Font=Enum.Font.GothamBold
+        local arrow=lbl(hdr,"v",11,C.Teal,Enum.TextXAlignment.Right) arrow.Size=UDim2.new(0,24,1,0) arrow.Position=UDim2.new(1,-30,0,0)
+        local cover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=hdr})
+        -- Content (initially collapsed)
+        local content=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=layoutOrder+0.5,ClipsDescendants=true,AutomaticSize=Enum.AutomaticSize.None,Parent=areas[5]})
+        corner(content,7) stroke(content,C.Dim,1)
+        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=content})
+        mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=content})
+        local open=false
+        cover.MouseButton1Click:Connect(function()
+            open=not open
+            content.Visible=open
+            if open then
+                content.AutomaticSize=Enum.AutomaticSize.Y
+                arrow.Text="^" hdrStroke.Color=C.Teal
+            else
+                content.AutomaticSize=Enum.AutomaticSize.None
+                content.Size=UDim2.new(1,0,0,0)
+                arrow.Text="v" hdrStroke.Color=C.Dim
+            end
+        end)
+        return content
     end
-    -- Hitung total pet matching selected types
-    local function countMatchingPets()
-        local n=0
-        local bp=player:FindFirstChild("Backpack")
-        if bp then
-            for _,item in pairs(bp:GetChildren()) do
-                if isPet(item) then
-                    local base=getBaseName(getPetName(item))
-                    if sendPetTypes[base] then n=n+1 end
+
+    -- Helper: bikin satu section Gift (slot)
+    local function buildGiftContent(slotIdx,parent)
+        local slot=giftSlots[slotIdx]
+
+        -- Target username
+        local trRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
+        corner(trRow,6) stroke(trRow,C.Dim,1.1)
+        lbl(trRow,"Target:",9,C.Gray).Size=UDim2.new(0.25,0,1,0).new(0,8,0,0)
+        local trBox=mk("TextBox",{Size=UDim2.new(0.7,-10,0,20),Position=UDim2.new(0.27,0,0.5,-10),BackgroundColor3=C.Panel,Text=slot.target,PlaceholderText="username",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,Parent=trRow})
+        corner(trBox,5) stroke(trBox,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=trBox})
+        trBox:GetPropertyChangedSignal("Text"):Connect(function() slot.target=trBox.Text save() end)
+
+        -- Helper count
+        local function countTypes() local n=0 for _ in pairs(slot.petTypes) do n=n+1 end return n end
+        local function countMatching()
+            local n=0 local bp=player:FindFirstChild("Backpack")
+            if bp then for _,it in pairs(bp:GetChildren()) do if isPet(it) and slot.petTypes[getBaseName(getPetName(it))] then n=n+1 end end end
+            return n
+        end
+
+        -- Pet TYPE picker (collapsible nested)
+        local pickerOpen=false
+        local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=2,Parent=parent})
+        corner(pickRow,6) local pickStroke=stroke(pickRow,C.Dim,1.1)
+        local pickLbl=lbl(pickRow,"Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)",9,C.White)
+        pickLbl.Size=UDim2.new(0.85,0,1,0) pickLbl.Position=UDim2.new(0,10,0,0)
+        local pickArrow=lbl(pickRow,"v",9,C.Teal,Enum.TextXAlignment.Right) pickArrow.Size=UDim2.new(0,20,1,0) pickArrow.Position=UDim2.new(1,-24,0,0)
+        local pickCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=pickRow})
+        local picker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.BG,BorderSizePixel=0,Visible=false,LayoutOrder=3,Parent=parent})
+        corner(picker,6) stroke(picker,C.Teal,1.2)
+        mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=picker})
+        local typeScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,140),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,Parent=picker})
+        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=typeScroll})
+
+        local function buildTypeList()
+            for _,c in pairs(typeScroll:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+            local types={}
+            local bp=player:FindFirstChild("Backpack")
+            if bp then
+                for _,it in pairs(bp:GetChildren()) do
+                    if isPet(it) then
+                        local name=getPetName(it) local base=getBaseName(name)
+                        if not types[base] then types[base]={count=0,mut=0} end
+                        types[base].count=types[base].count+1
+                        if name~=base then types[base].mut=types[base].mut+1 end
+                    end
                 end
             end
-        end
-        return n
-    end
-    local pickLbl=lbl(pickRow,"Pilih Jenis Pet  ("..countSendTypes().." jenis = "..countMatchingPets().." pet)",9,C.White)
-    pickLbl.Size=UDim2.new(0.85,0,1,0) pickLbl.Position=UDim2.new(0,10,0,0)
-    local pickArrow=lbl(pickRow,"v",9,C.Teal,Enum.TextXAlignment.Right)
-    pickArrow.Size=UDim2.new(0,20,1,0) pickArrow.Position=UDim2.new(1,-24,0,0)
-    local pickCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=pickRow})
-
-    local picker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=4,Parent=areas[5]})
-    corner(picker,7) stroke(picker,C.Teal,1.3)
-    mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=picker})
-    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=picker})
-
-    local typeScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,140),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=picker})
-    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=typeScroll})
-
-    local function buildTypeList()
-        for _,c in pairs(typeScroll:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
-        -- Aggregate by base name
-        local types={} -- {[baseName]={count, mutCount}}
-        local bp=player:FindFirstChild("Backpack")
-        if bp then
-            for _,item in pairs(bp:GetChildren()) do
-                if isPet(item) then
-                    local name=getPetName(item)
-                    local base=getBaseName(name)
-                    if not types[base] then types[base]={count=0,mutCount=0} end
-                    types[base].count=types[base].count+1
-                    if name~=base then types[base].mutCount=types[base].mutCount+1 end
-                end
+            local sorted={} for b,_ in pairs(types) do table.insert(sorted,b) end
+            table.sort(sorted,function(a,b) return types[a].count>types[b].count end)
+            local n=0
+            for _,base in ipairs(sorted) do
+                n=n+1 local data=types[base] local sel=slot.petTypes[base]==true
+                local row=mk("Frame",{Size=UDim2.new(1,0,0,24),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=typeScroll})
+                corner(row,5) if sel then stroke(row,C.Teal,1.1) end
+                local txt=base.." ("..data.count..(data.mut>0 and ", "..data.mut.." mut" or "")..")"
+                local nl=lbl(row,txt,8,sel and C.Teal or C.White) nl.Size=UDim2.new(0.72,0,1,0) nl.Position=UDim2.new(0,8,0,0)
+                local tb=btn(row,sel and "ON" or "OFF",8,sel and C.TDim or C.Panel,sel and C.Teal or C.Gray)
+                tb.Size=UDim2.new(0,44,0,18) tb.Position=UDim2.new(1,-48,0.5,-9)
+                local ts=stroke(tb,sel and C.Teal or C.Dim,1.1)
+                local cb=base
+                tb.MouseButton1Click:Connect(function()
+                    if slot.petTypes[cb] then slot.petTypes[cb]=nil else slot.petTypes[cb]=true end
+                    local now=slot.petTypes[cb]==true
+                    row.BackgroundColor3=now and C.TDim or C.Card
+                    local rs=row:FindFirstChildWhichIsA("UIStroke")
+                    if now then if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.1) end
+                    else if rs then rs:Destroy() end end
+                    nl.TextColor3=now and C.Teal or C.White
+                    tb.Text=now and "ON" or "OFF" tb.BackgroundColor3=now and C.TDim or C.Panel tb.TextColor3=now and C.Teal or C.Gray ts.Color=now and C.Teal or C.Dim
+                    pickLbl.Text="Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)"
+                    save()
+                end)
             end
+            if n==0 then local e=lbl(typeScroll,"Backpack kosong",8,C.Red,Enum.TextXAlignment.Center) e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=1 end
         end
-        -- Sort
-        local sorted={}
-        for b,_ in pairs(types) do table.insert(sorted,b) end
-        table.sort(sorted,function(a,b) return types[a].count>types[b].count end)
-        local n=0
-        for _,base in ipairs(sorted) do
-            n=n+1
-            local data=types[base]
-            local sel=sendPetTypes[base]==true
-            local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=typeScroll})
-            corner(row,5) if sel then stroke(row,C.Teal,1.1) end
-            local txt=base.." ("..data.count.." pet"
-            if data.mutCount>0 then txt=txt..", "..data.mutCount.." mutasi" end
-            txt=txt..")"
-            local nl=lbl(row,txt,8,sel and C.Teal or C.White) nl.Size=UDim2.new(0.72,0,1,0) nl.Position=UDim2.new(0,8,0,0)
-            local tb=btn(row,sel and "ON" or "OFF",8,sel and C.TDim or C.Panel,sel and C.Teal or C.Gray)
-            tb.Size=UDim2.new(0,44,0,18) tb.Position=UDim2.new(1,-48,0.5,-9)
-            local ts=stroke(tb,sel and C.Teal or C.Dim,1.1)
-            local cb=base
-            tb.MouseButton1Click:Connect(function()
-                if sendPetTypes[cb] then sendPetTypes[cb]=nil else sendPetTypes[cb]=true end
-                local now=sendPetTypes[cb]==true
-                row.BackgroundColor3=now and C.TDim or C.Card
-                local rs=row:FindFirstChildWhichIsA("UIStroke")
-                if now then if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.1) end
-                else if rs then rs:Destroy() end end
-                nl.TextColor3=now and C.Teal or C.White
-                tb.Text=now and "ON" or "OFF" tb.BackgroundColor3=now and C.TDim or C.Panel tb.TextColor3=now and C.Teal or C.Gray ts.Color=now and C.Teal or C.Dim
-                pickLbl.Text="Pilih Jenis Pet  ("..countSendTypes().." jenis = "..countMatchingPets().." pet)"
-                save()
-            end)
-        end
-        if n==0 then local e=lbl(typeScroll,"Tidak ada pet di backpack",8,C.Red,Enum.TextXAlignment.Center) e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=1 end
-    end
-    buildTypeList()
-    pickCover.MouseButton1Click:Connect(function()
-        pickerOpen=not pickerOpen
-        picker.Visible=pickerOpen
-        picker.Size=pickerOpen and UDim2.new(1,0,0,150) or UDim2.new(1,0,0,0)
-        pickArrow.Text=pickerOpen and "^" or "v"
-        pickStroke.Color=pickerOpen and C.Teal or C.Dim
-        if pickerOpen then buildTypeList() end
-    end)
+        buildTypeList()
+        pickCover.MouseButton1Click:Connect(function()
+            pickerOpen=not pickerOpen
+            picker.Visible=pickerOpen
+            picker.Size=pickerOpen and UDim2.new(1,0,0,148) or UDim2.new(1,0,0,0)
+            pickArrow.Text=pickerOpen and "^" or "v" pickStroke.Color=pickerOpen and C.Teal or C.Dim
+            if pickerOpen then buildTypeList() end
+        end)
 
-    -- Helper: ambil semua UUID pet di backpack yang match selected types + filters
-    local function getPetsToSend()
-        local list={}
-        local bp=player:FindFirstChild("Backpack")
-        if bp then
-            for _,item in pairs(bp:GetChildren()) do
-                if isPet(item) then
-                    local base=getBaseName(getPetName(item))
-                    if sendPetTypes[base] then
-                        -- Filter fav (kalau includeFav=false, skip pet di-love)
-                        if (not sendIncludeFav) and isFavorite(item) then
-                            -- skip
-                        elseif passKgFilter(item) and passAgeFilter(item) then
-                            local uuid=getPetUUID(item)
-                            if uuid then table.insert(list,tostring(uuid)) end
+        -- Filter KG
+        local kgRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=4,Parent=parent})
+        corner(kgRow,6) stroke(kgRow,C.Dim,1.1)
+        lbl(kgRow,"KG: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0).new(0,8,0,0)
+        local kgBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.kg,PlaceholderText="-60",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=kgRow})
+        corner(kgBox,5) stroke(kgBox,C.Dim,1)
+        kgBox:GetPropertyChangedSignal("Text"):Connect(function() slot.kg=kgBox.Text save() end)
+
+        -- Filter Age
+        local ageRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=parent})
+        corner(ageRow,6) stroke(ageRow,C.Dim,1.1)
+        lbl(ageRow,"Age: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0).new(0,8,0,0)
+        local ageBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.age,PlaceholderText="-100",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ageRow})
+        corner(ageBox,5) stroke(ageBox,C.Dim,1)
+        ageBox:GetPropertyChangedSignal("Text"):Connect(function() slot.age=ageBox.Text save() end)
+
+        -- Helper get pets sendable for this slot
+        local function getPetsForSlot()
+            local list={} local bp=player:FindFirstChild("Backpack")
+            if bp then
+                for _,it in pairs(bp:GetChildren()) do
+                    if isPet(it) then
+                        local base=getBaseName(getPetName(it))
+                        if slot.petTypes[base] then
+                            if (slot.includeFav or not isFavorite(it)) and passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                                local uuid=getPetUUID(it) if uuid then table.insert(list,tostring(uuid)) end
+                            end
                         end
                     end
                 end
             end
+            return list
         end
-        return list
-    end
 
-    -- Helper: pet match filter jenis+kg+age yang masih FAV (untuk auto unfav)
-    local function getPetsToUnfav()
-        local list={}
-        local bp=player:FindFirstChild("Backpack")
-        if bp then
-            for _,item in pairs(bp:GetChildren()) do
-                if isPet(item) and isFavorite(item) then
-                    local base=getBaseName(getPetName(item))
-                    if sendPetTypes[base] and passKgFilter(item) and passAgeFilter(item) then
-                        local uuid=getPetUUID(item)
-                        if uuid then table.insert(list,tostring(uuid)) end
-                    end
-                end
-            end
-        end
-        return list
-    end
-
-    -- Filter KG row
-    local kgRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=areas[5]})
-    corner(kgRow,6) stroke(kgRow,C.Dim,1.1)
-    local kgLbl=lbl(kgRow,"Filter KG:",9,C.Gray) kgLbl.Size=UDim2.new(0.3,0,0,14) kgLbl.Position=UDim2.new(0,8,0,2)
-    local kgHint=lbl(kgRow,"-N=bawah, N=atas, kosong=all",7,C.Dim) kgHint.Size=UDim2.new(0.6,0,0,11) kgHint.Position=UDim2.new(0,8,0,15)
-    local kgBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=sendKgFilter,PlaceholderText="-60",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=kgRow})
-    corner(kgBox,5) stroke(kgBox,C.Dim,1)
-    kgBox:GetPropertyChangedSignal("Text"):Connect(function() sendKgFilter=kgBox.Text save() end)
-
-    -- Filter Age row
-    local ageRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=6,Parent=areas[5]})
-    corner(ageRow,6) stroke(ageRow,C.Dim,1.1)
-    local ageLbl=lbl(ageRow,"Filter Age:",9,C.Gray) ageLbl.Size=UDim2.new(0.3,0,0,14) ageLbl.Position=UDim2.new(0,8,0,2)
-    local ageHint=lbl(ageRow,"-N=bawah, N=atas (1 lvl=1 age)",7,C.Dim) ageHint.Size=UDim2.new(0.6,0,0,11) ageHint.Position=UDim2.new(0,8,0,15)
-    local ageBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=sendAgeFilter,PlaceholderText="-100",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ageRow})
-    corner(ageBox,5) stroke(ageBox,C.Dim,1)
-    ageBox:GetPropertyChangedSignal("Text"):Connect(function() sendAgeFilter=ageBox.Text save() end)
-
-    -- Send Now button (test single shot)
-    local snBtn=btn(areas[5],"SEND GIFT SEKARANG (test)",9,C.TDim,C.Teal)
-    snBtn.Size=UDim2.new(1,0,0,22) snBtn.LayoutOrder=7 stroke(snBtn,C.Teal,1.3)
-    snBtn.MouseButton1Click:Connect(function()
-        if sendTargetName=="" then sendStatusLbl.Text="Isi target username dulu!" sendStatusLbl.TextColor3=C.Red return end
-        local pets=getPetsToSend()
-        if #pets==0 then sendStatusLbl.Text="Tidak ada pet match (jenis/kg/age/love)!" sendStatusLbl.TextColor3=C.Red return end
-        sendStatusLbl.Text="Test: kirim "..#pets.." pet ke "..sendTargetName.."..." sendStatusLbl.TextColor3=C.Teal
-        task.spawn(function()
-            for i,uuid in ipairs(pets) do
-                sendGiftToPlayer(sendTargetName,uuid)
-                print("[ZenxGift] Sending "..uuid.." to "..sendTargetName)
-                task.wait(0.4)
-            end
-            sendStatusLbl.Text="Test done: "..#pets.." pet ke "..sendTargetName sendStatusLbl.TextColor3=C.Teal
+        -- Send Now button
+        local snBtn=btn(parent,"SEND GIFT SEKARANG (test)",9,C.TDim,C.Teal)
+        snBtn.Size=UDim2.new(1,0,0,22) snBtn.LayoutOrder=6 stroke(snBtn,C.Teal,1.3)
+        snBtn.MouseButton1Click:Connect(function()
+            if slot.target=="" then sendStatusLbl.Text="Slot "..slotIdx..": isi target dulu" sendStatusLbl.TextColor3=C.Red return end
+            local pets=getPetsForSlot()
+            if #pets==0 then sendStatusLbl.Text="Slot "..slotIdx..": tidak ada pet match" sendStatusLbl.TextColor3=C.Red return end
+            sendStatusLbl.Text="Test slot "..slotIdx..": "..#pets.." pet -> "..slot.target sendStatusLbl.TextColor3=C.Teal
+            task.spawn(function()
+                for _,uuid in ipairs(pets) do sendGiftToPlayer(slot.target,uuid) print("[ZenxGift] slot "..slotIdx.." send "..uuid) task.wait(0.4) end
+                sendStatusLbl.Text="Test slot "..slotIdx.." done: "..#pets.." pet -> "..slot.target
+            end)
         end)
-    end)
 
-    -- Toggle: Kirim pet di-love juga
-    local _,fvTog,fvTogStroke,fvStroke=togRow(areas[5],"Kirim pet di-love juga","Default OFF: pet di-love di-skip",8)
-    local function setFvTog(v)
-        fvTog.Text=v and "ON" or "OFF" fvTog.BackgroundColor3=v and C.TDim or C.Panel fvTog.TextColor3=v and C.Teal or C.Gray fvTogStroke.Color=v and C.Teal or C.Dim fvStroke.Color=v and C.Teal or C.Dim
+        -- Toggles (4)
+        local function makeTog(lt,dt,lo,initVal,onTog)
+            local _,t,ts1,ss=togRow(parent,lt,dt,lo)
+            local function set(v) t.Text=v and "ON" or "OFF" t.BackgroundColor3=v and C.TDim or C.Panel t.TextColor3=v and C.Teal or C.Gray ts1.Color=v and C.Teal or C.Dim ss.Color=v and C.Teal or C.Dim end
+            set(initVal)
+            t.MouseButton1Click:Connect(function() onTog(not (initVal)) end)
+            return t,set
+        end
+
+        local _,fvTog,fvTS,fvSS=togRow(parent,"Kirim pet di-love juga","Default OFF: skip pet love",7)
+        local function setFv(v) fvTog.Text=v and "ON" or "OFF" fvTog.BackgroundColor3=v and C.TDim or C.Panel fvTog.TextColor3=v and C.Teal or C.Gray fvTS.Color=v and C.Teal or C.Dim fvSS.Color=v and C.Teal or C.Dim end
+        setFv(slot.includeFav)
+        fvTog.MouseButton1Click:Connect(function() slot.includeFav=not slot.includeFav setFv(slot.includeFav) save() end)
+
+        local _,sgTog,sgTS,sgSS=togRow(parent,"Auto Send Gift","Kirim gift otomatis",8)
+        local function setSg(v) sgTog.Text=v and "ON" or "OFF" sgTog.BackgroundColor3=v and C.TDim or C.Panel sgTog.TextColor3=v and C.Teal or C.Gray sgTS.Color=v and C.Teal or C.Dim sgSS.Color=v and C.Teal or C.Dim end
+        setSg(slot.autoSendGift)
+        sgTog.MouseButton1Click:Connect(function() slot.autoSendGift=not slot.autoSendGift setSg(slot.autoSendGift) save() end)
+
+        local _,stTog,stTS,stSS=togRow(parent,"Auto Send Trade","Kirim trade otomatis",9)
+        local function setSt(v) stTog.Text=v and "ON" or "OFF" stTog.BackgroundColor3=v and C.TDim or C.Panel stTog.TextColor3=v and C.Teal or C.Gray stTS.Color=v and C.Teal or C.Dim stSS.Color=v and C.Teal or C.Dim end
+        setSt(slot.autoSendTrade)
+        stTog.MouseButton1Click:Connect(function() slot.autoSendTrade=not slot.autoSendTrade setSt(slot.autoSendTrade) save() end)
+
+        local _,uvTog,uvTS,uvSS=togRow(parent,"Auto Unfav Pet","Auto unlove pet match filter",10)
+        local function setUv(v) uvTog.Text=v and "ON" or "OFF" uvTog.BackgroundColor3=v and C.TDim or C.Panel uvTog.TextColor3=v and C.Teal or C.Gray uvTS.Color=v and C.Teal or C.Dim uvSS.Color=v and C.Teal or C.Dim end
+        setUv(slot.autoUnfav)
+        uvTog.MouseButton1Click:Connect(function() slot.autoUnfav=not slot.autoUnfav setUv(slot.autoUnfav) save() end)
     end
-    setFvTog(sendIncludeFav)
-    fvTog.MouseButton1Click:Connect(function() sendIncludeFav=not sendIncludeFav setFvTog(sendIncludeFav) save() end)
 
-    -- Auto Send Gift toggle
-    local _,sgTog,sgTogStroke,sgStroke=togRow(areas[5],"Auto Send Gift","Kirim gift otomatis tiap interval",9)
-    local function setSgTog(v)
-        sgTog.Text=v and "ON" or "OFF" sgTog.BackgroundColor3=v and C.TDim or C.Panel sgTog.TextColor3=v and C.Teal or C.Gray sgTogStroke.Color=v and C.Teal or C.Dim sgStroke.Color=v and C.Teal or C.Dim
+    -- Buat 3 Gift slots
+    for i=1,3 do
+        local content=makeCollapsible("Gift "..i,i*10)
+        buildGiftContent(i,content)
     end
-    setSgTog(autoSendGift)
-    sgTog.MouseButton1Click:Connect(function() autoSendGift=not autoSendGift setSgTog(autoSendGift) save() end)
 
-    -- Auto Send Trade toggle
-    local _,stTog,stTogStroke,stStroke=togRow(areas[5],"Auto Send Trade","Kirim trade request otomatis",10)
-    local function setStTog(v)
-        stTog.Text=v and "ON" or "OFF" stTog.BackgroundColor3=v and C.TDim or C.Panel stTog.TextColor3=v and C.Teal or C.Gray stTogStroke.Color=v and C.Teal or C.Dim stStroke.Color=v and C.Teal or C.Dim
-    end
-    setStTog(autoSendTrade)
-    stTog.MouseButton1Click:Connect(function() autoSendTrade=not autoSendTrade setStTog(autoSendTrade) save() end)
-
-    -- Auto Unfav toggle
-    local _,uvTog,uvTogStroke,uvStroke=togRow(areas[5],"Auto Unfav Pet","Otomatis unlove pet match filter",11)
-    local function setUvTog(v)
-        uvTog.Text=v and "ON" or "OFF" uvTog.BackgroundColor3=v and C.TDim or C.Panel uvTog.TextColor3=v and C.Teal or C.Gray uvTogStroke.Color=v and C.Teal or C.Dim uvStroke.Color=v and C.Teal or C.Dim
-    end
-    setUvTog(autoUnfav)
-    uvTog.MouseButton1Click:Connect(function() autoUnfav=not autoUnfav setUvTog(autoUnfav) save() end)
-
-    sendStatusLbl=lbl(areas[5],"Send: idle",9,C.Gray,Enum.TextXAlignment.Center)
-    sendStatusLbl.Size=UDim2.new(1,0,0,18) sendStatusLbl.LayoutOrder=12 sendStatusLbl.BackgroundColor3=C.Panel sendStatusLbl.BackgroundTransparency=0
-    corner(sendStatusLbl,5) stroke(sendStatusLbl,C.Dim,1)
-
-    div(areas[5],13)
-
-    -- ============ AUTO ACCEPT (bawah) ============
-    local accT=lbl(areas[5],"AUTO ACCEPT GIFT / TRADE",9,C.Teal) accT.Size=UDim2.new(1,0,0,14) accT.LayoutOrder=14
-
-    local _,agTog,agTogStroke,agStroke=togRow(areas[5],"Auto Accept Gift","Auto terima gift masuk",15)
-    agTog.Text=autoAccGift and "ON" or "OFF" agTog.BackgroundColor3=autoAccGift and C.TDim or C.Panel agTog.TextColor3=autoAccGift and C.Teal or C.Gray agTogStroke.Color=autoAccGift and C.Teal or C.Dim agStroke.Color=autoAccGift and C.Teal or C.Dim
+    -- Auto Accept section (collapsible)
+    local accContent=makeCollapsible("Auto Accept Gift / Trade",40)
+    local _,agTog,agTS,agSS=togRow(accContent,"Auto Accept Gift","Auto terima gift masuk",1)
+    agTog.Text=autoAccGift and "ON" or "OFF" agTog.BackgroundColor3=autoAccGift and C.TDim or C.Panel agTog.TextColor3=autoAccGift and C.Teal or C.Gray agTS.Color=autoAccGift and C.Teal or C.Dim agSS.Color=autoAccGift and C.Teal or C.Dim
     agTog.MouseButton1Click:Connect(function()
         autoAccGift=not autoAccGift
-        if autoAccGift then agTog.Text="ON" agTog.BackgroundColor3=C.TDim agTog.TextColor3=C.Teal agTogStroke.Color=C.Teal agStroke.Color=C.Teal
-        else agTog.Text="OFF" agTog.BackgroundColor3=C.Panel agTog.TextColor3=C.Gray agTogStroke.Color=C.Dim agStroke.Color=C.Dim end
+        if autoAccGift then agTog.Text="ON" agTog.BackgroundColor3=C.TDim agTog.TextColor3=C.Teal agTS.Color=C.Teal agSS.Color=C.Teal
+        else agTog.Text="OFF" agTog.BackgroundColor3=C.Panel agTog.TextColor3=C.Gray agTS.Color=C.Dim agSS.Color=C.Dim end
         save()
     end)
 
-    local _,atTog,atTogStroke,atStroke=togRow(areas[5],"Auto Accept Trade","Auto terima trade masuk",16)
-    atTog.Text=autoAccTrade and "ON" or "OFF" atTog.BackgroundColor3=autoAccTrade and C.TDim or C.Panel atTog.TextColor3=autoAccTrade and C.Teal or C.Gray atTogStroke.Color=autoAccTrade and C.Teal or C.Dim atStroke.Color=autoAccTrade and C.Teal or C.Dim
+    local _,atTog,atTS,atSS=togRow(accContent,"Auto Accept Trade","Auto terima trade masuk",2)
+    atTog.Text=autoAccTrade and "ON" or "OFF" atTog.BackgroundColor3=autoAccTrade and C.TDim or C.Panel atTog.TextColor3=autoAccTrade and C.Teal or C.Gray atTS.Color=autoAccTrade and C.Teal or C.Dim atSS.Color=autoAccTrade and C.Teal or C.Dim
     atTog.MouseButton1Click:Connect(function()
         autoAccTrade=not autoAccTrade
-        if autoAccTrade then atTog.Text="ON" atTog.BackgroundColor3=C.TDim atTog.TextColor3=C.Teal atTogStroke.Color=C.Teal atStroke.Color=C.Teal
-        else atTog.Text="OFF" atTog.BackgroundColor3=C.Panel atTog.TextColor3=C.Gray atTogStroke.Color=C.Dim atStroke.Color=C.Dim end
+        if autoAccTrade then atTog.Text="ON" atTog.BackgroundColor3=C.TDim atTog.TextColor3=C.Teal atTS.Color=C.Teal atSS.Color=C.Teal
+        else atTog.Text="OFF" atTog.BackgroundColor3=C.Panel atTog.TextColor3=C.Gray atTS.Color=C.Dim atSS.Color=C.Dim end
         save()
     end)
 
+    -- Status (paling bawah)
+    sendStatusLbl=lbl(areas[5],"Send: idle",9,C.Gray,Enum.TextXAlignment.Center)
+    sendStatusLbl.Size=UDim2.new(1,0,0,18) sendStatusLbl.LayoutOrder=50 sendStatusLbl.BackgroundColor3=C.Panel sendStatusLbl.BackgroundTransparency=0
+    corner(sendStatusLbl,5) stroke(sendStatusLbl,C.Dim,1)
+
     accStatusLbl=lbl(areas[5],"Accept: idle",9,C.Gray,Enum.TextXAlignment.Center)
-    accStatusLbl.Size=UDim2.new(1,0,0,18) accStatusLbl.LayoutOrder=17
-    accStatusLbl.BackgroundColor3=C.Panel accStatusLbl.BackgroundTransparency=0
+    accStatusLbl.Size=UDim2.new(1,0,0,18) accStatusLbl.LayoutOrder=51 accStatusLbl.BackgroundColor3=C.Panel accStatusLbl.BackgroundTransparency=0
     corner(accStatusLbl,5) stroke(accStatusLbl,C.Dim,1)
 end
+
 
 buildTimList() buildTargetList() buildSwapList() buildOtherSetting() buildAutoGift()
 switchTab(1)
@@ -1536,17 +1565,17 @@ do
 end
 
 -- ============================================
--- AUTO SEND LOOP (background) - by jenis pet + filter
+-- AUTO SEND LOOP (background) - 3 gift slots
 -- ============================================
 task.spawn(function()
-    local function getPetsBackpack()
+    local function getPetsForSlot(slot)
         local list={}
         local bp=player:FindFirstChild("Backpack")
         if bp then
             for _,item in pairs(bp:GetChildren()) do
                 if isPet(item) then
                     local base=getBaseName(getPetName(item))
-                    if sendPetTypes[base] and passKgFilter(item) and passAgeFilter(item) then
+                    if slot.petTypes[base] and passKgFilter(item,slot.kg) and passAgeFilter(item,slot.age) then
                         local uuid=getPetUUID(item)
                         if uuid then table.insert(list,{uuid=tostring(uuid),fav=isFavorite(item)}) end
                     end
@@ -1557,57 +1586,53 @@ task.spawn(function()
     end
 
     while true do
-        if (autoSendGift or autoSendTrade or autoUnfav) and sendTargetName~="" then
-            local matched=getPetsBackpack()
-            if #matched>0 then
-                -- AUTO UNFAV first (kalau aktif)
-                if autoUnfav then
-                    local unfavCount=0
+        for slotIdx=1,3 do
+            local slot=giftSlots[slotIdx]
+            if slot and slot.target~="" and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
+                local matched=getPetsForSlot(slot)
+                if #matched>0 then
+                    -- AUTO UNFAV
+                    if slot.autoUnfav then
+                        local unfavCount=0
+                        for _,pet in ipairs(matched) do
+                            if pet.fav then
+                                unfavoritePet(pet.uuid)
+                                print("[ZenxUnfav] slot "..slotIdx.." unfav "..pet.uuid)
+                                unfavCount=unfavCount+1
+                                task.wait(0.2)
+                            end
+                        end
+                        if unfavCount>0 and sendStatusLbl then
+                            sendStatusLbl.Text="Slot "..slotIdx.." unfav "..unfavCount.." pet" sendStatusLbl.TextColor3=C.Gold
+                            task.wait(0.8)
+                        end
+                        matched=getPetsForSlot(slot)
+                    end
+
+                    local sendable={}
                     for _,pet in ipairs(matched) do
-                        if pet.fav then
-                            unfavoritePet(pet.uuid)
-                            print("[ZenxUnfav] Unfav "..pet.uuid)
-                            unfavCount=unfavCount+1
-                            task.wait(0.2)
+                        if slot.includeFav or (not pet.fav) then
+                            table.insert(sendable,pet.uuid)
                         end
                     end
-                    if unfavCount>0 and sendStatusLbl then
-                        sendStatusLbl.Text="Unfav: "..unfavCount.." pet" sendStatusLbl.TextColor3=C.Gold
-                        task.wait(1)
-                    end
-                    -- Re-scan setelah unfav
-                    matched=getPetsBackpack()
-                end
 
-                -- Filter pets yang akan di-gift (skip fav kalau includeFav=false)
-                local sendable={}
-                for _,pet in ipairs(matched) do
-                    if sendIncludeFav or (not pet.fav) then
-                        table.insert(sendable,pet.uuid)
-                    end
-                end
-
-                if #sendable>0 then
-                    if autoSendGift then
-                        if sendStatusLbl then sendStatusLbl.Text="Send: gift "..#sendable.." pet -> "..sendTargetName sendStatusLbl.TextColor3=C.Teal end
-                        for _,uuid in ipairs(sendable) do
-                            sendGiftToPlayer(sendTargetName,uuid)
-                            print("[ZenxGift] AUTO send gift "..uuid.." -> "..sendTargetName)
-                            task.wait(0.5)
+                    if #sendable>0 then
+                        if slot.autoSendGift then
+                            if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": gift "..#sendable.." -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
+                            for _,uuid in ipairs(sendable) do
+                                sendGiftToPlayer(slot.target,uuid)
+                                print("[ZenxGift] slot "..slotIdx.." gift "..uuid.." -> "..slot.target)
+                                task.wait(0.5)
+                            end
+                        end
+                        if slot.autoSendTrade then
+                            if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": trade -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
+                            sendTradeToPlayer(slot.target,sendable[1])
+                            print("[ZenxGift] slot "..slotIdx.." trade -> "..slot.target)
                         end
                     end
-                    if autoSendTrade then
-                        if sendStatusLbl then sendStatusLbl.Text="Send: trade -> "..sendTargetName sendStatusLbl.TextColor3=C.Teal end
-                        sendTradeToPlayer(sendTargetName,sendable[1])
-                        print("[ZenxGift] AUTO send trade -> "..sendTargetName)
-                    end
-                else
-                    if (autoSendGift or autoSendTrade) and sendStatusLbl then
-                        sendStatusLbl.Text="Send: tidak ada sendable (semua di-love?)" sendStatusLbl.TextColor3=C.Gray
-                    end
                 end
-            else
-                if sendStatusLbl then sendStatusLbl.Text="Send: tidak ada pet match filter" sendStatusLbl.TextColor3=C.Gray end
+                task.wait(1)  -- jeda antar slot
             end
         end
         task.wait(math.max(5,sendInterval))
@@ -1925,7 +1950,9 @@ closeBtn.MouseButton1Click:Connect(function()
     noBtn.Size=UDim2.new(0,120,0,28) noBtn.Position=UDim2.new(0.5,10,1,-40) noBtn.ZIndex=11 stroke(noBtn,C.Dim,1.5)
     noBtn.MouseButton1Click:Connect(function() overlay:Destroy() end)
     yaBtn.MouseButton1Click:Connect(function()
-        autoSendGift=false autoSendTrade=false
+        for _,slot in ipairs(giftSlots) do
+            slot.autoSendGift=false slot.autoSendTrade=false slot.autoUnfav=false
+        end
         autoAccGift=false autoAccTrade=false
         if isAR then stopAR() end
         if isRunning then doStop("Closed") end
