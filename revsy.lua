@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v3.3-cdparse"
+local SCRIPT_VERSION="v3.4-uicd"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -320,6 +320,73 @@ local function findPlacedPetByUUID(uuid)
 end
 
 -- Coba baca cooldown dari pet (return nil kalau ga ketemu)
+-- Parse CD text format "⏳ 1:25:10" / "⏳ 15:00" / "⏳ 30s" -> seconds
+local function parseCDText(txt)
+    if not txt then return nil end
+    local clean=txt:gsub("[^%d:]","")
+    local h,m,s=clean:match("^(%d+):(%d+):(%d+)$")
+    if h then return tonumber(h)*3600+tonumber(m)*60+tonumber(s) end
+    local m2,s2=clean:match("^(%d+):(%d+)$")
+    if m2 then return tonumber(m2)*60+tonumber(s2) end
+    return nil
+end
+
+-- Cache slot label per pet type biar gak loop ulang setiap kali
+local _uiCDSlotCache={}
+-- Read CD seconds dari Active Pets UI panel by pet type name
+-- Return: {cdSec, slotFrame} atau nil
+local function readUICDForPetType(petType)
+    local pg=player:FindFirstChild("PlayerGui")
+    if not pg then return nil end
+    local apUi=pg:FindFirstChild("ActivePetUI")
+    if not apUi then return nil end
+    local frame=apUi:FindFirstChild("Frame")
+    if not frame then return nil end
+
+    -- Cek cache: kalau slot udah di-cache & masih valid
+    local cached=_uiCDSlotCache[petType]
+    if cached and cached.cdLbl and cached.cdLbl.Parent then
+        local ok,txt=pcall(function() return cached.cdLbl.Text end)
+        if ok then
+            local sec=parseCDText(txt)
+            if sec then return sec, cached.slot end
+        end
+    end
+
+    -- Scan: cari TextLabel yang match petType (atau sub-string match)
+    local petTypeLow=petType:lower()
+    for _,d in ipairs(frame:GetDescendants()) do
+        if d:IsA("TextLabel") then
+            local ok,txt=pcall(function() return d.Text end)
+            if ok and txt then
+                local txtLow=txt:lower()
+                if txtLow==petTypeLow or txtLow:find(petTypeLow,1,true) then
+                    -- Walk up cari CD label di slot
+                    local slot=d.Parent
+                    for h=1,6 do
+                        if not slot then break end
+                        for _,sib in ipairs(slot:GetDescendants()) do
+                            if sib:IsA("TextLabel") and sib~=d then
+                                local ok2,t2=pcall(function() return sib.Text end)
+                                if ok2 and t2 then
+                                    local cd=parseCDText(t2)
+                                    if cd then
+                                        -- Cache hasil
+                                        _uiCDSlotCache[petType]={slot=slot,cdLbl=sib,nameLbl=d}
+                                        return cd, slot
+                                    end
+                                end
+                            end
+                        end
+                        slot=slot.Parent
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local function readPetCooldown(petModel)
     if not petModel then return nil end
     local names={"TimeUntilReady","Cooldown","CooldownLeft","CooldownRemaining","CD","SkillCooldown","AbilityCooldown","NextSkillIn","SkillReady"}
@@ -1849,7 +1916,10 @@ local function startSwapForPet(uuid)
             -- Debug dump pertama kali
             if cycle==1 then debugDumpPet(uuid,petName,item,placed) end
 
-            -- Cari AnimationController di pet model
+            -- Pet TYPE buat lookup CD dari UI
+            local petType=getBaseName(petName)
+
+            -- Cari AnimationController fallback
             local animCtrl=nil
             if placed then
                 animCtrl=placed:FindFirstChildOfClass("AnimationController")
@@ -1860,31 +1930,43 @@ local function startSwapForPet(uuid)
                 end
             end
 
-            -- Wait sampai pet skill animasi play (= skill fired = CD selesai)
-            -- Atau timeout fallback: 2x pickup field
-            local maxWait=math.max(5,(ps.pickup or 0.6)*2)
+            -- TUNGGU SAMPAI CD READY (via UI panel)
+            local cdSec=readUICDForPetType(petType)
+            if cycle==1 then
+                if cdSec then dbg("[Swap] "..petName.." UI-CD: "..cdSec.."s ("..petType..")")
+                else dbg("[Swap] "..petName.." UI-CD: NOT FOUND ("..petType..")") end
+            end
+
             local skillFired=false
-            if animCtrl then
-                if cycle==1 then dbg("[Swap] "..petName.." AUTO via animation (timeout "..math.floor(maxWait).."s)") end
-                local conn=animCtrl.AnimationPlayed:Connect(function(track)
-                    skillFired=true
-                end)
+            local fallbackTimeout=math.max(10,(ps.pickup or 1)*3)
+
+            if cdSec then
+                -- Mode UI: poll CD sampai <=1
+                local pollStart=tick()
+                while isRunning and ps and ps.enabled do
+                    local cur=readUICDForPetType(petType)
+                    if cur==nil then break end  -- pet ilang dr panel?
+                    if cur<=1 then break end  -- ready!
+                    -- Sleep proporsional dgn CD remaining (max 5s, min 0.5s)
+                    task.wait(math.max(0.5,math.min(5,cur*0.3)))
+                    ps=swapPerPet[uuid]
+                end
+                if cycle<=2 then dbg(string.format("[Swap] %s ready! waited %.1fs",petName,tick()-pollStart)) end
+            elseif animCtrl then
+                -- Fallback: Animation event
+                if cycle==1 then dbg("[Swap] "..petName.." fallback animation event") end
+                local conn=animCtrl.AnimationPlayed:Connect(function() skillFired=true end)
                 local startT=tick()
                 while isRunning and ps and ps.enabled do
                     if skillFired then break end
-                    if tick()-startT>maxWait then break end
+                    if tick()-startT>fallbackTimeout then break end
                     task.wait(0.1)
                     ps=swapPerPet[uuid]
                 end
                 pcall(function() conn:Disconnect() end)
-                if cycle<=2 then
-                    if skillFired then dbg(string.format("[Swap] %s skill fired! (%.1fs)",petName,tick()-startT))
-                    else dbg(string.format("[Swap] %s timeout, force pickup",petName)) end
-                end
-                -- Tunggu animasi selesai dulu (pickup config = post-skill delay)
-                if ps and ps.pickup>0 then task.wait(ps.pickup) end
             else
-                if cycle==1 then dbg("[Swap] "..petName.." NO AnimationCtrl, manual "..tostring(ps.pickup).."s") end
+                -- Last fallback: manual timer
+                if cycle==1 then dbg("[Swap] "..petName.." manual timer "..tostring(ps.pickup).."s") end
                 local pkWait=math.max(0.05,ps.pickup)
                 local elapsed=0
                 while elapsed<pkWait do
@@ -1895,6 +1977,9 @@ local function startSwapForPet(uuid)
                     if not p2 or not p2.enabled then break end
                 end
             end
+
+            -- Buffer setelah CD ready (offset)
+            if ps and ps.pickup>0 then task.wait(ps.pickup) end
 
             if not isRunning then break end
             ps=swapPerPet[uuid]
@@ -1981,6 +2066,7 @@ end
 local function doStart()
     dbg("[doStart] dipanggil")
     cooldownDebugDone={}  -- reset biar dump pet attribute fresh tiap restart
+    _uiCDSlotCache={}  -- reset UI CD cache (panel mungkin ke-rebuild)
     if isRunning then dbg("[doStart] sudah running, skip") return end
     if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
