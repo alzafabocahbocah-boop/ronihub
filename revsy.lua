@@ -1140,68 +1140,92 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan Workspace (debug)
-    local scanCDBtn=btn(dc,"SCAN WORKSPACE NOW (debug)",9,C.Panel,C.Gold)
+    -- Tombol Scan Farm Important (debug v3) - eksplorasi struktur farm player
+    local scanCDBtn=btn(dc,"SCAN FARM IMPORTANT (debug)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
-        dbg("[SCAN] BUTTON CLICKED")
-        -- Clear log
-        _dbgLines={"> [SCAN] Starting..."}
-        if debugLbl then debugLbl.Text="> [SCAN] Starting..." end
+        dbg("[SCAN] CLICKED")
+        _dbgLines={"> [SCAN] running..."}
+        if debugLbl then debugLbl.Text="> [SCAN] running..." end
 
-        local fileBuf={"=== ZENX WORKSPACE SCAN ==="}
+        local fileBuf={"=== ZENX FARM SCAN ==="}
         local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
 
-        -- Dump workspace top-level
-        logBoth("=== workspace top ===")
-        local cnt=0
-        for _,c in ipairs(workspace:GetChildren()) do
-            cnt=cnt+1
-            if cnt<=20 then logBoth(cnt.." "..c.Name.." ("..c.ClassName..")") end
-        end
-        logBoth("total workspace children: "..cnt)
+        local farmRoot=workspace:FindFirstChild("Farm")
+        if not farmRoot then logBoth("NO workspace.Farm!") return end
 
-        -- Cek folder umum tempat pet placed
-        for _,name in ipairs({"Pets","PlacedPets","ActivePets","PetMovers","Farm","Players","Map","PetsActive","Garden"}) do
-            local f=workspace:FindFirstChild(name)
-            if f then
-                logBoth("== workspace."..name.." ("..#f:GetChildren()..") ==")
-                for i,c in ipairs(f:GetChildren()) do
-                    if i<=4 then
-                        logBoth("  "..c.Name.." ("..c.ClassName..")")
-                        -- Dump anak folder pertama
-                        for j,cc in ipairs(c:GetChildren()) do
-                            if j<=3 then logBoth("    > "..cc.Name.." ("..cc.ClassName..")") end
+        -- Cari farm player (cek owner di tiap Important.Data)
+        local myFarm=nil
+        for _,fm in ipairs(farmRoot:GetChildren()) do
+            local imp=fm:FindFirstChild("Important")
+            if imp then
+                local data=imp:FindFirstChild("Data")
+                if data then
+                    -- Cek Owner / Player / Username
+                    for _,c in ipairs(data:GetChildren()) do
+                        if c:IsA("StringValue") or c:IsA("ObjectValue") then
+                            local v=tostring(c.Value or "")
+                            if v==player.Name or v:find(player.Name) then
+                                myFarm=fm break
+                            end
                         end
                     end
                 end
             end
+            if myFarm then break end
+        end
+        -- Fallback: pakai farm pertama
+        if not myFarm and #farmRoot:GetChildren()>0 then
+            myFarm=farmRoot:GetChildren()[1]
+            logBoth("WARN: pakai farm pertama (owner check fail)")
+        end
+        if not myFarm then logBoth("NO farm found") return end
+
+        local imp=myFarm:FindFirstChild("Important")
+        logBoth("My farm path: "..myFarm:GetFullName())
+        if not imp then logBoth("NO Important!") return end
+
+        -- Dump Important children
+        logBoth("=== Important children ===")
+        for _,c in ipairs(imp:GetChildren()) do
+            logBoth("- "..c.Name.." ("..c.ClassName..")")
         end
 
-        -- Brute force: cari model dengan PET_UUID di seluruh workspace
-        logBoth("=== brute force PET_UUID ===")
-        local found=0
-        local function recurse(parent,depth)
-            if depth>6 then return end
-            for _,m in ipairs(parent:GetChildren()) do
-                local ok,uid=pcall(function() return m:GetAttribute("PET_UUID") end)
-                if ok and uid then
-                    found=found+1
-                    if found<=2 then
-                        logBoth("[#"..found.."] "..m:GetFullName())
-                        for k,v in pairs(m:GetAttributes()) do
-                            logBoth("  ["..k.."]="..tostring(v))
-                        end
-                    end
+        -- Cari folder yang berisi pet (apa pun nama-nya)
+        logBoth("=== cari pet dalam Important ===")
+        local petCandidates={}
+        for _,c in ipairs(imp:GetChildren()) do
+            if c:IsA("Folder") or c:IsA("Configuration") or c:IsA("Model") then
+                local nm=c.Name:lower()
+                if nm:find("pet") or nm:find("animal") then
+                    table.insert(petCandidates,c)
+                    logBoth("CANDIDATE: "..c.Name.." ("..#c:GetChildren()..")")
                 end
-                pcall(function() recurse(m,depth+1) end)
             end
         end
-        pcall(function() recurse(workspace,0) end)
-        logBoth("Total PET_UUID found: "..found)
+
+        -- Dump tiap candidate dgn detail child pertama
+        for _,pc in ipairs(petCandidates) do
+            logBoth("== "..pc.Name.." ==")
+            for i,m in ipairs(pc:GetChildren()) do
+                if i<=2 then
+                    logBoth(i..". "..m.Name.." ("..m.ClassName..")")
+                    -- Dump attributes
+                    local cnt=0
+                    for k,v in pairs(m:GetAttributes()) do
+                        cnt=cnt+1
+                        if cnt<=8 then logBoth("  ["..k.."]="..tostring(v)) end
+                    end
+                    -- Dump children
+                    for j,ch in ipairs(m:GetChildren()) do
+                        if j<=4 then logBoth("  child:"..ch.Name.." ("..ch.ClassName..")") end
+                    end
+                end
+            end
+        end
 
         logBoth("=== END ===")
-        pcall(function() if writefile then writefile("zenx_workspace_dump.txt",table.concat(fileBuf,"\n")) end end)
+        pcall(function() if writefile then writefile("zenx_farm_dump.txt",table.concat(fileBuf,"\n")) end end)
         dbg("DONE")
     end)
 
