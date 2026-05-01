@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v3.4-uicd"
+local SCRIPT_VERSION="v3.5-retry"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -1941,17 +1941,37 @@ local function startSwapForPet(uuid)
             local fallbackTimeout=math.max(10,(ps.pickup or 1)*3)
 
             if cdSec then
-                -- Mode UI: poll CD sampai <=1
+                -- Mode UI: poll CD sampai <=1, dengan retry jika nil
                 local pollStart=tick()
+                local nilCount=0
+                local minWaitTime=5  -- minimum wait 5 dtk safety (anti-spam loop)
                 while isRunning and ps and ps.enabled do
+                    if tick()-pollStart>7200 then break end  -- 2hr max
                     local cur=readUICDForPetType(petType)
-                    if cur==nil then break end  -- pet ilang dr panel?
-                    if cur<=1 then break end  -- ready!
-                    -- Sleep proporsional dgn CD remaining (max 5s, min 0.5s)
-                    task.wait(math.max(0.5,math.min(5,cur*0.3)))
+                    if cur==nil then
+                        -- Pet sementara ilang dari panel? Clear cache, retry
+                        _uiCDSlotCache[petType]=nil
+                        nilCount=nilCount+1
+                        if nilCount>10 then
+                            -- Beneran ilang, bail out tapi tetep wait minimum
+                            local elapsed=tick()-pollStart
+                            if elapsed<minWaitTime then task.wait(minWaitTime-elapsed) end
+                            break
+                        end
+                        task.wait(2)
+                    else
+                        nilCount=0
+                        if cur<=1 then
+                            -- Ready! Tapi pastikan minimum wait juga
+                            local elapsed=tick()-pollStart
+                            if elapsed<minWaitTime then task.wait(minWaitTime-elapsed) end
+                            break
+                        end
+                        task.wait(math.max(0.5,math.min(5,cur*0.3)))
+                    end
                     ps=swapPerPet[uuid]
                 end
-                if cycle<=2 then dbg(string.format("[Swap] %s ready! waited %.1fs",petName,tick()-pollStart)) end
+                if cycle<=3 then dbg(string.format("[Swap] %s ready! waited %.1fs (nilCnt=%d)",petName,tick()-pollStart,nilCount)) end
             elseif animCtrl then
                 -- Fallback: Animation event
                 if cycle==1 then dbg("[Swap] "..petName.." fallback animation event") end
