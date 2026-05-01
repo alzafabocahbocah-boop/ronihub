@@ -59,10 +59,10 @@ do
     print("[ZenxLvl] debug GUI parent: "..tostring(parentResult))
 
     local fr = Instance.new("Frame")
-    fr.Size = UDim2.new(0,360,0,140)
-    fr.Position = UDim2.new(0,10,1,-150)
+    fr.Size = UDim2.new(0,420,0,360)
+    fr.Position = UDim2.new(0,10,1,-370)
     fr.BackgroundColor3 = Color3.fromRGB(0,0,0)
-    fr.BackgroundTransparency = 0.25
+    fr.BackgroundTransparency = 0.15
     fr.BorderSizePixel = 0
     fr.Active = true
     fr.Draggable = true
@@ -112,7 +112,7 @@ local _dbgLines = {}
 local function dbg(msg)
     print("[ZenxDbg] "..msg)
     table.insert(_dbgLines, "> "..msg)
-    while #_dbgLines > 8 do table.remove(_dbgLines, 1) end
+    while #_dbgLines > 30 do table.remove(_dbgLines, 1) end
     if debugLbl then debugLbl.Text = table.concat(_dbgLines, "\n") end
 end
 dbg("Step 1 OK: services + playerGui")
@@ -333,23 +333,34 @@ local function debugDumpPet(uuid,petName,item,placedModel)
     if cooldownDebugDone[uuid] then return end
     cooldownDebugDone[uuid]=true
     print("====== [ZenxSwap-Debug] "..petName.." ======")
+    dbg("=== Swap Debug "..petName.." ===")
     if item then
         print("-- Tool attributes:")
-        for k,v in pairs(item:GetAttributes()) do print("  ["..k.."] = "..tostring(v).." ("..type(v)..")") end
-        print("-- Tool children:")
-        for _,c in ipairs(item:GetChildren()) do print("  ["..c.Name.."] "..c.ClassName) end
+        dbg("Tool attrs:")
+        for k,v in pairs(item:GetAttributes()) do
+            local line="  ["..k.."] = "..tostring(v).." ("..type(v)..")"
+            print(line) dbg(line)
+        end
     else
         print("-- Tool not in backpack (probably equipped)")
+        dbg("Tool: not in backpack")
     end
     if placedModel then
         print("-- Placed pet: "..placedModel:GetFullName())
-        print("-- Placed attributes:")
-        for k,v in pairs(placedModel:GetAttributes()) do print("  ["..k.."] = "..tostring(v).." ("..type(v)..")") end
-        print("-- Placed children:")
-        for _,c in ipairs(placedModel:GetChildren()) do print("  ["..c.Name.."] "..c.ClassName) end
+        dbg("Placed: "..placedModel.Name)
+        for k,v in pairs(placedModel:GetAttributes()) do
+            local line="  ["..k.."] = "..tostring(v).." ("..type(v)..")"
+            print(line) dbg(line)
+        end
+        for _,c in ipairs(placedModel:GetChildren()) do
+            local line="  child:["..c.Name.."] "..c.ClassName
+            print(line) dbg(line)
+        end
     else
         print("-- Placed pet: NOT FOUND in workspace")
+        dbg("Placed: NOT FOUND")
     end
+    dbg("=== Kasih output ini ke Claude ===")
     print("================================")
 end
 
