@@ -7,7 +7,7 @@ local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HS = game:GetService("HttpService")
 local TS = game:GetService("TeleportService")
-local player = Players.LocalPlayer
+local player = Players.LocalPlayer 
 local playerGui = player:WaitForChild("PlayerGui",10)
 print("[ZenxLvl] step 1 OK - services loaded")
 
