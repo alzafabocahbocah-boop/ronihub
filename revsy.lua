@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v2.5-scan5"
+local SCRIPT_VERSION="v2.6-scan6"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -1141,97 +1141,77 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan v5: equip + scan SELURUH workspace by nama match
-    local scanCDBtn=btn(dc,"EQUIP + SCAN ALL WORKSPACE (debug)",9,C.Panel,C.Gold)
+    -- Tombol Scan v6: dump model "DEFAULT" near player (placed pet di GAG)
+    local scanCDBtn=btn(dc,"DUMP DEFAULT MODELS (debug v6)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
-        dbg("[SCAN v5] CLICKED")
+        dbg("[SCAN v6] CLICKED")
         scanCDBtn.Text="Equipping..."
         task.spawn(function()
-            -- Step 1: equip pet TIM, kumpulkan nama base buat match
-            local teamNames={}
+            -- Equip dulu
             for uuid,_ in pairs(teamPetUUIDs) do
                 pcall(function() equipPet(uuid) end)
-                local info=teamPetInfoCache[uuid]
-                local nm=info and info.name or ""
-                local base=getBaseName(nm)
-                if base~="" then teamNames[base:lower()]=true end
                 task.wait(0.25)
             end
             task.wait(2)
 
-            _dbgLines={"> [SCAN v5] scanning workspace..."}
-            if debugLbl then debugLbl.Text="> [SCAN v5] scanning workspace..." end
+            _dbgLines={"> [SCAN v6] mencari DEFAULT..."}
+            if debugLbl then debugLbl.Text="> [SCAN v6] mencari DEFAULT..." end
 
-            local fileBuf={"=== ZENX SCAN v5 ==="}
+            local fileBuf={"=== ZENX SCAN v6 ==="}
             local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
 
-            -- Cari model di workspace yang nama-nya match team pet
-            logBoth("Looking for: ")
-            local nm_list={}
-            for k,_ in pairs(teamNames) do table.insert(nm_list,k) end
-            logBoth("  "..table.concat(nm_list,", "))
+            local char=player.Character
+            local hrp=char and char:FindFirstChild("HumanoidRootPart")
+            if not hrp then logBoth("no character") return end
 
-            local matched={}
-            local function recurse(parent,depth)
-                if depth>7 then return end
-                for _,m in ipairs(parent:GetChildren()) do
-                    if m:IsA("Model") then
-                        local mn=m.Name:lower()
-                        if teamNames[mn] then
-                            table.insert(matched,m)
-                        end
+            -- Cari model DEFAULT dalam radius 50 stud
+            local defaults={}
+            for _,m in ipairs(workspace:GetDescendants()) do
+                if m:IsA("Model") and m.Name=="DEFAULT" then
+                    local ok,piv=pcall(function() return m:GetPivot() end)
+                    if ok and piv then
+                        local d=(piv.Position-hrp.Position).Magnitude
+                        if d<60 then table.insert(defaults,{m=m,d=d}) end
                     end
-                    pcall(function() recurse(m,depth+1) end)
                 end
             end
-            recurse(workspace,0)
+            table.sort(defaults,function(a,b) return a.d<b.d end)
 
-            logBoth("=== matched pet models: "..#matched.." ===")
-            for i,m in ipairs(matched) do
+            logBoth("DEFAULT found: "..#defaults)
+            for i,e in ipairs(defaults) do
                 if i<=2 then
-                    logBoth("[#"..i.."] "..m.Name)
-                    local p=m:GetFullName()
-                    logBoth("  "..(#p>60 and "..."..p:sub(-57) or p))
+                    local m=e.m
+                    logBoth("=== #"..i.." dist:"..math.floor(e.d).." ===")
+                    -- Parent chain (3 level up)
+                    local par=m.Parent
+                    if par then logBoth("Parent: "..par.Name.." ("..par.ClassName..")") end
+                    if par and par.Parent then logBoth("ParPar: "..par.Parent.Name) end
                     -- Semua attribute
                     local cnt=0
                     for k,v in pairs(m:GetAttributes()) do
                         cnt=cnt+1
-                        if cnt<=10 then logBoth("  ["..k.."]="..tostring(v)) end
+                        if cnt<=12 then logBoth("  ["..k.."]="..tostring(v)) end
                     end
-                    -- Children
+                    if cnt==0 then logBoth("  (no attrs)") end
+                    -- Children (4 first)
                     for j,ch in ipairs(m:GetChildren()) do
-                        if j<=4 then logBoth("  >"..ch.Name) end
-                    end
-                end
-            end
-
-            -- Kalau nggak ada yg match, dump model di workspace yg deket player
-            if #matched==0 then
-                logBoth("=== fallback: model dekat player ===")
-                local char=player.Character
-                local hrp=char and char:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local nearMs={}
-                    for _,m in ipairs(workspace:GetDescendants()) do
-                        if m:IsA("Model") and m~=char then
-                            local ok,piv=pcall(function() return m:GetPivot() end)
-                            if ok and piv then
-                                local d=(piv.Position-hrp.Position).Magnitude
-                                if d<30 then table.insert(nearMs,{m=m,d=d}) end
+                        if j<=5 then
+                            logBoth("  >"..ch.Name.." ("..ch.ClassName..")")
+                            -- Cek attribute child juga
+                            local cc=0
+                            for k,v in pairs(ch:GetAttributes()) do
+                                cc=cc+1
+                                if cc<=3 then logBoth("    ["..k.."]="..tostring(v)) end
                             end
                         end
-                    end
-                    table.sort(nearMs,function(a,b) return a.d<b.d end)
-                    for i,e in ipairs(nearMs) do
-                        if i<=8 then logBoth("near: "..e.m.Name.." ("..math.floor(e.d).." stud)") end
                     end
                 end
             end
 
             logBoth("=== END ===")
-            pcall(function() if writefile then writefile("zenx_scan_v5.txt",table.concat(fileBuf,"\n")) end end)
-            scanCDBtn.Text="EQUIP + SCAN ALL WORKSPACE (debug)"
+            pcall(function() if writefile then writefile("zenx_scan_v6.txt",table.concat(fileBuf,"\n")) end end)
+            scanCDBtn.Text="DUMP DEFAULT MODELS (debug v6)"
         end)
     end)
 
