@@ -609,8 +609,8 @@ end)
 -- closeBtn handler dipindah ke bawah (setelah semua local var declared)
 
 -- DATA
-local teamPetUUIDs={}
-local teamPetInfoCache={}
+local teamPetUUIDs=d.teamPetUUIDs or {}  -- restore dari file (biar gak hilang setelah rejoin)
+local teamPetInfoCache=d.teamPetInfoCache or {}  -- cache nama+kg pet supaya bisa display walau belum scan
 local config=d.config or {equipInterval=5,rejoinMinutes=30}
 local targetPetTypes=d.targetPetTypes or {}
 local fromAge=d.fromAge or 1
@@ -663,6 +663,7 @@ local function save()
     d.giftSlots=giftSlots
     d.antiAfk=antiAfk d.showAllPets=showAllPets
     d.swapPerPet=swapPerPet d.swapConfig=swapConfig
+    d.teamPetUUIDs=teamPetUUIDs d.teamPetInfoCache=teamPetInfoCache
     saveToFile(d)
 end
 
@@ -811,6 +812,7 @@ buildTimList=function()
                     teamPetUUIDs[cu]=nil pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
                     buildPickerContent(pickSearch.Text) updatePreview()
                     syncSwapTab()
+                    save()
                 end)
             end
         end
@@ -868,6 +870,7 @@ buildTimList=function()
                                 pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
                                 updatePreview()
                                 syncSwapTab()
+                                save()  -- simpan biar gak hilang setelah rejoin
                             end)
                         end
                     end
@@ -890,6 +893,7 @@ buildTimList=function()
                         teamPetUUIDs[cu]=nil pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
                         buildPickerContent(pickSearch.Text) updatePreview()
                         syncSwapTab()
+                        save()
                     end)
                 end
             end
@@ -1989,4 +1993,3 @@ if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
 print("ZenxLvl loaded! Swap Skill v2 (UUID-keyed, per-pet tasks)")
-
