@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v4.1-monitor"
+local SCRIPT_VERSION="v4.3-chat"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -354,21 +354,39 @@ local function readUICDForPetType(petType)
 
     -- Cek cache: kalau slot udah di-cache & masih valid
     local cached=_uiCDSlotCache[petType]
-    if cached and cached.cdLbl and cached.cdLbl.Parent and cached.nameLbl and cached.nameLbl.Parent then
-        local ok1,nameTxt=pcall(function() return cached.nameLbl.Text end)
-        if ok1 and nameTxt and nameTxt:lower():find(petType:lower(),1,true) then
-            local ok2,txt=pcall(function() return cached.cdLbl.Text end)
-            if ok2 then
-                local sec=parseCDText(txt)
-                if sec then return sec, cached.slot end
-            end
+    if cached and cached.cdLbl and cached.cdLbl.Parent then
+        local ok2,txt=pcall(function() return cached.cdLbl.Text end)
+        if ok2 then
+            local sec=parseCDText(txt)
+            if sec then return sec, cached.slot end
         end
-        -- Cache invalid, drop
         _uiCDSlotCache[petType]=nil
     end
 
-    -- Cari TextLabel dengan match (priority: exact > substring)
-    local petTypeLow=petType:lower()
+    -- Cari TextLabel dengan match (priority: exact > substring) - multi candidate
+    -- Generate candidate names: full, base, last-N-word
+    local candidates={}
+    local fullLow=petType:lower()
+    table.insert(candidates,fullLow)
+    -- Base (strip mutations)
+    local base=getBaseName(petType):lower()
+    if base~=fullLow then table.insert(candidates,base) end
+    -- Last 1-2 words
+    local words={}
+    for w in petType:gmatch("%S+") do table.insert(words,w:lower()) end
+    if #words>=1 then
+        local lastW=words[#words]
+        local seen=false
+        for _,c in ipairs(candidates) do if c==lastW then seen=true break end end
+        if not seen then table.insert(candidates,lastW) end
+    end
+    if #words>=2 then
+        local last2=words[#words-1].." "..words[#words]
+        local seen=false
+        for _,c in ipairs(candidates) do if c==last2 then seen=true break end end
+        if not seen then table.insert(candidates,last2) end
+    end
+
     local exactMatch=nil
     local looseMatch=nil
     for _,d in ipairs(frame:GetDescendants()) do
@@ -376,10 +394,12 @@ local function readUICDForPetType(petType)
             local ok,txt=pcall(function() return d.Text end)
             if ok and txt then
                 local txtLow=txt:lower()
-                if txtLow==petTypeLow then
-                    exactMatch=exactMatch or d
-                elseif txtLow:find(petTypeLow,1,true) and #txt<60 then
-                    looseMatch=looseMatch or d
+                for _,cand in ipairs(candidates) do
+                    if txtLow==cand then
+                        exactMatch=exactMatch or d
+                    elseif txtLow:find(cand,1,true) and #txt<60 then
+                        looseMatch=looseMatch or d
+                    end
                 end
             end
         end
@@ -582,12 +602,26 @@ local MUTATION_PREFIXES={
     "Lunar ","Plasma ","Angelic ","Corrupt ","Crystal ",
     "Verdant ","Blazing ","Icy ","Storm ","Shadow ",
     "Celestial ","Infernal ","Ancient ","Mythic ","Divine ",
+    "Venom ","Mimic ","Cosmic ","Galactic ","Stellar ",
+    "Toxic ","Radiant ","Mystic ","Phantom ","Spectral ",
+    "Eldritch ","Primal ","Ethereal ","Astral ","Chromatic ",
+    "Prismatic ","Volcanic ","Glacial ","Tempest ","Solar ",
 }
 local function getBaseName(name)
-    for _,prefix in ipairs(MUTATION_PREFIXES) do
-        if name:sub(1,#prefix)==prefix then return name:sub(#prefix+1) end
+    -- Strip multiple mutation prefixes (recursive)
+    local result=name
+    local changed=true
+    while changed do
+        changed=false
+        for _,prefix in ipairs(MUTATION_PREFIXES) do
+            if result:sub(1,#prefix)==prefix then
+                result=result:sub(#prefix+1)
+                changed=true
+                break
+            end
+        end
     end
-    return name
+    return result
 end
 
 local maxKGCache={}
@@ -1206,7 +1240,7 @@ buildSwapList=function()
     end
 
     -- Card setting global delay
-    local dc=mk("Frame",{Size=UDim2.new(1,0,0,200),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
+    local dc=mk("Frame",{Size=UDim2.new(1,0,0,260),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
     corner(dc,7) stroke(dc,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=dc})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=dc})
@@ -1234,6 +1268,56 @@ buildSwapList=function()
             swapPerPet[uuid].place=swapConfig.placeDelay
         end
         save() buildSwapList()
+    end)
+
+    -- Tombol Skill Detector Log
+    local skLogBtn=btn(dc,"SKILL DETECTOR LOG",9,C.Card,C.Gold)
+    skLogBtn.Size=UDim2.new(1,0,0,22) skLogBtn.LayoutOrder=3 stroke(skLogBtn,C.Gold,1.2)
+    skLogBtn.MouseButton1Click:Connect(function()
+        pcall(initSkillDetector)
+        pcall(updateSkillWatchTypes)
+        local lines={"[SkillDetector] Watching:"}
+        local cnt=0
+        for t,_ in pairs(SkillDetector.watchTypes) do cnt=cnt+1 table.insert(lines,"  - "..t) end
+        if cnt==0 then table.insert(lines,"  (kosong - klik Refresh Tim atau add tim dulu)") end
+        table.insert(lines,"")
+        table.insert(lines,"Recent matched notifs ("..#SkillDetector.notifLog.."):")
+        for i=1,math.min(15,#SkillDetector.notifLog) do
+            table.insert(lines,"  "..SkillDetector.notifLog[i])
+        end
+        if #SkillDetector.notifLog==0 then
+            table.insert(lines,"  (kosong - belum ada match)")
+            table.insert(lines,"")
+            table.insert(lines,"Klik 'RAW NOTIF LOG' biar lihat semua text yg muncul")
+        end
+        _dbgLines={}
+        for _,l in ipairs(lines) do table.insert(_dbgLines,1,"> "..l) end
+        if debugLbl then debugLbl.Text=table.concat(lines,"\n") end
+    end)
+
+    -- Tombol Raw Notif Log (toggle)
+    local rawLogBtn=btn(dc,"RAW NOTIF LOG (toggle)",9,C.Card,C.Blue)
+    rawLogBtn.Size=UDim2.new(1,0,0,22) rawLogBtn.LayoutOrder=3 stroke(rawLogBtn,C.Blue,1.2)
+    rawLogBtn.MouseButton1Click:Connect(function()
+        pcall(initSkillDetector)
+        if not SkillDetector.rawLogEnabled then
+            SkillDetector.rawLogEnabled=true
+            SkillDetector.rawLog={}
+            rawLogBtn.Text="RAW LOG ON - klik utk show"
+            dbg("[Raw] ON - tunggu pet skill fire, klik lagi buat lihat log")
+        else
+            -- Show log
+            local lines={"[Raw] last 30 TextLabels added/changed:"}
+            for i=1,math.min(30,#SkillDetector.rawLog) do
+                table.insert(lines,SkillDetector.rawLog[i])
+            end
+            if #SkillDetector.rawLog==0 then table.insert(lines,"(kosong - belum ada text muncul)") end
+            _dbgLines={}
+            for _,l in ipairs(lines) do table.insert(_dbgLines,1,"> "..l) end
+            if debugLbl then debugLbl.Text=table.concat(lines,"\n") end
+            SkillDetector.rawLogEnabled=false
+            rawLogBtn.Text="RAW NOTIF LOG (toggle)"
+        end
     end)
 
     -- Tombol CD Live Monitor (real-time CD viewer)
@@ -2015,9 +2099,94 @@ local function unequipTeam()
     end
 end
 
--- Cycle swap untuk 1 pet (1 task per pet)
--- pickup field per-pet sekarang berfungsi sebagai OFFSET (default 0.6 dtk)
--- Script auto-detect cooldown dari pet model di workspace
+-- ===== SKILL DETECTOR (chat/notification based) =====
+-- Listen ke PlayerGui DescendantAdded buat catch notif skill fire
+local SkillDetector={
+    lastFire={},        -- [petTypeLow] = tick when fired
+    watchTypes={},      -- [petTypeLow] = true (which types we watch)
+    notifLog={},        -- recent matched notifs (debug)
+    rawLog={},          -- ALL TextLabel additions (debug)
+    rawLogEnabled=false,
+    initialized=false,
+}
+
+local function _skillDetectorCheckText(text)
+    if not text or text=="" or #text>200 then return end
+    local low=text:lower()
+    for petType,_ in pairs(SkillDetector.watchTypes) do
+        if low:find(petType,1,true) then
+            SkillDetector.lastFire[petType]=tick()
+            -- Keep recent log
+            table.insert(SkillDetector.notifLog,1,os.date("%X").." | "..petType.." | "..text:sub(1,60))
+            if #SkillDetector.notifLog>20 then table.remove(SkillDetector.notifLog) end
+            break  -- 1 match cukup
+        end
+    end
+end
+
+local function _skillDetectorRawLog(text,path)
+    if not SkillDetector.rawLogEnabled then return end
+    if not text or text=="" or #text>120 then return end
+    table.insert(SkillDetector.rawLog,1,os.date("%X").." | "..text:sub(1,60).." @ "..path)
+    if #SkillDetector.rawLog>50 then table.remove(SkillDetector.rawLog) end
+end
+
+local function _skillDetectorHookLabel(d)
+    if not d or not d:IsA("TextLabel") then return end
+    -- Initial text check (delayed sedikit untuk text di-set)
+    task.spawn(function()
+        task.wait(0.05)
+        local ok,t=pcall(function() return d.Text end)
+        if ok and t then
+            _skillDetectorCheckText(t)
+            _skillDetectorRawLog(t,d:GetFullName():gsub(".*PlayerGui%.",""))
+        end
+    end)
+    -- Listen text changes
+    pcall(function()
+        d:GetPropertyChangedSignal("Text"):Connect(function()
+            local ok,t=pcall(function() return d.Text end)
+            if ok and t then
+                _skillDetectorCheckText(t)
+                _skillDetectorRawLog(t,d:GetFullName():gsub(".*PlayerGui%.",""))
+            end
+        end)
+    end)
+end
+
+local function initSkillDetector()
+    if SkillDetector.initialized then return end
+    SkillDetector.initialized=true
+    -- Hook semua TextLabel yang udah ada di PlayerGui
+    for _,d in ipairs(playerGui:GetDescendants()) do
+        if d:IsA("TextLabel") then _skillDetectorHookLabel(d) end
+    end
+    -- Hook future ones
+    playerGui.DescendantAdded:Connect(function(d)
+        if d:IsA("TextLabel") then _skillDetectorHookLabel(d) end
+    end)
+    dbg("[SkillDetector] init OK")
+end
+
+-- Update watched pet types (panggil setiap team berubah)
+local function updateSkillWatchTypes()
+    SkillDetector.watchTypes={}
+    for uuid,_ in pairs(teamPetUUIDs) do
+        local info=teamPetInfoCache[uuid]
+        if info and info.name then
+            local base=getBaseName(info.name):lower()
+            SkillDetector.watchTypes[base]=true
+            -- Last word juga (kalau base masih multi-word, e.g. "French Fry Ferret")
+            local words={}
+            for w in base:gmatch("%S+") do table.insert(words,w) end
+            if #words>1 then
+                SkillDetector.watchTypes[words[#words]]=true
+            end
+        end
+    end
+end
+
+
 local function startSwapForPet(uuid)
     if swapTasks[uuid] then return end
     local petInfo=getTeamPetInfo(uuid)
@@ -2028,6 +2197,21 @@ local function startSwapForPet(uuid)
         equipPet(uuid)
         task.wait(0.5)
         local cycle=0
+
+        -- Identify watch keys for this pet (base name + last word)
+        local petType=getBaseName(petName):lower()
+        local petTypeLast=petType
+        local words={}
+        for w in petType:gmatch("%S+") do table.insert(words,w) end
+        if #words>1 then petTypeLast=words[#words] end
+
+        if cycle==0 then
+            dbg("[Swap] "..petName.." watch: "..petType..(petTypeLast~=petType and ", "..petTypeLast or ""))
+        end
+
+        -- Baseline: kapan terakhir skill fire (sebelum swap mulai)
+        local baseline=math.max(SkillDetector.lastFire[petType] or 0,SkillDetector.lastFire[petTypeLast] or 0)
+
         while isRunning do
             local ps=swapPerPet[uuid]
             if not ps or not ps.enabled then
@@ -2036,52 +2220,35 @@ local function startSwapForPet(uuid)
             end
             cycle=cycle+1
 
-            local petType=getBaseName(petName)
-            local cdSec=readUICDForPetType(petType)
+            -- TUNGGU SKILL FIRE: detect dari notif, atau timeout manual
+            local pollStart=tick()
+            local maxWait=math.max(5,ps.pickup or 60)  -- timeout = manual CD (= pet's max CD)
+            local detected=false
 
-            if cycle==1 then
-                if cdSec then dbg("[Swap] "..petName.." UI-CD: "..cdSec.."s ("..petType..")")
-                else dbg("[Swap] "..petName.." MANUAL fallback "..tostring(ps.pickup).."s") end
+            while isRunning do
+                if not isRunning then break end
+                ps=swapPerPet[uuid]
+                if not ps or not ps.enabled then break end
+
+                -- Check skill detector
+                local f1=SkillDetector.lastFire[petType] or 0
+                local f2=SkillDetector.lastFire[petTypeLast] or 0
+                local latest=math.max(f1,f2)
+                if latest>baseline+0.1 then
+                    detected=true
+                    baseline=latest  -- update baseline biar nggak repeated trigger
+                    break
+                end
+
+                if tick()-pollStart>=maxWait then break end  -- timeout
+                task.wait(0.15)
             end
 
-            -- TUNGGU PET READY
-            if cdSec then
-                -- Mode UI: poll CD sampai <=1
-                local pollStart=tick()
-                local nilCount=0
-                while isRunning and ps and ps.enabled do
-                    if tick()-pollStart>7200 then break end
-                    local cur=readUICDForPetType(petType)
-                    if cur==nil then
-                        _uiCDSlotCache[petType]=nil
-                        nilCount=nilCount+1
-                        if nilCount>5 then
-                            -- UI panel kehilangan pet → fallback manual
-                            local elapsed=tick()-pollStart
-                            local remain=math.max(0,(ps.pickup or 15)-elapsed)
-                            if remain>0 then task.wait(remain) end
-                            break
-                        end
-                        task.wait(2)
-                    else
-                        nilCount=0
-                        if cur<=1 then break end  -- READY!
-                        -- Adaptive sleep based on remaining CD
-                        task.wait(math.max(0.3,math.min(5,cur*0.25)))
-                    end
-                    ps=swapPerPet[uuid]
-                end
-                if cycle<=3 then dbg(string.format("[Swap] %s READY (waited %.1fs)",petName,tick()-pollStart)) end
-            else
-                -- MANUAL fallback: tunggu pickup field detik penuh (= pet's CD value)
-                local waitSec=math.max(0.1,ps.pickup or 15)
-                local elapsed=0
-                while elapsed<waitSec do
-                    if not isRunning then break end
-                    local step=math.min(0.5,waitSec-elapsed)
-                    task.wait(step) elapsed=elapsed+step
-                    local p2=swapPerPet[uuid]
-                    if not p2 or not p2.enabled then break end
+            if cycle<=3 then
+                if detected then
+                    dbg(string.format("[Swap] %s skill fired! waited %.1fs",petName,tick()-pollStart))
+                else
+                    dbg(string.format("[Swap] %s timeout %.0fs (no notif)",petName,tick()-pollStart))
                 end
             end
 
@@ -2089,7 +2256,7 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- QUICK SWAP: pickup → small wait → place
+            -- QUICK SWAP: pickup → wait → place
             pickupPet(uuid)
             task.wait(math.max(0.05,ps.place or 0.3))
             if not isRunning then break end
@@ -2175,6 +2342,10 @@ local function doStart()
 
     isRunning=true setRunning(true)
     statusLbl.Text="Berjalan... Q:"..#queue statusLbl.TextColor3=C.Teal
+
+    -- Init skill detector (chat/notif)
+    pcall(initSkillDetector)
+    pcall(updateSkillWatchTypes)
 
     -- Diagnostic: hitung pet TIM & yang swap-enabled
     local teamCnt,swapCnt=0,0
