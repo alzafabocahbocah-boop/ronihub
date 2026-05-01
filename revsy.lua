@@ -226,10 +226,14 @@ local function isPet(item) return item:FindFirstChild("PetToolLocal") or item:Fi
 -- Cek apakah pet di-love/hearted di game (tanda love icon)
 -- Brute force banyak attribute name biar match versi game
 local function isFavorite(item)
+    -- Coba berbagai attribute name standar
     for _,attr in ipairs({"Loved","IsLoved","Heart","Hearted","Liked","IsLiked","IsHeart","Love","HeartIcon","Favorited","Favourited","Favorite","Favourite","IsFavorited","IsFavourited"}) do
         local v=item:GetAttribute(attr)
         if v==true then return true end
     end
+    -- Game ini pakai obfuscated single-letter attrs - "d" diduga favorite
+    local d=item:GetAttribute("d")
+    if d==true then return true end
     return false
 end
 local function getAge(item)
@@ -1136,62 +1140,67 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan Cooldown (debug)
-    local scanCDBtn=btn(dc,"SCAN COOLDOWN ATTRIBUTE (debug)",9,C.Panel,C.Gold)
+    -- Tombol Scan Cooldown (debug) - auto-equip dulu baru scan workspace
+    local scanCDBtn=btn(dc,"EQUIP & SCAN WORKSPACE (debug)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
-        -- Clear log dulu biar fresh
-        _dbgLines={}
-        if debugLbl then debugLbl.Text="" end
-        dbg("=== SCAN COOLDOWN ===")
-
-        local fileBuf={"=== ZENX PET DUMP ==="}
-        local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
-
-        -- Scan workspace structure dulu
-        logBoth("workspace top-level:")
-        for _,c in ipairs(workspace:GetChildren()) do
-            logBoth("  "..c.Name.." ("..c.ClassName..")")
-        end
-
-        local cnt=0
-        for uuid,_ in pairs(teamPetUUIDs) do
-            cnt=cnt+1 if cnt>3 then logBoth("(skip sisanya, max 3 pet)") break end
-            local info=teamPetInfoCache[uuid]
-            local petName=(info and info.name) or "?"
-            logBoth("--- Pet "..cnt..": "..petName.." ---")
-            logBoth("UUID: "..tostring(uuid))
-
-            -- Cek backpack
-            local bpItem=findPetInBackpack(uuid)
-            if bpItem then
-                logBoth("In backpack: YES")
-                for k,v in pairs(bpItem:GetAttributes()) do
-                    logBoth("  bp:["..k.."]="..tostring(v))
-                end
-            else logBoth("In backpack: no") end
-
-            -- Cek workspace
-            local ws=findPlacedPetByUUID(uuid)
-            if ws then
-                logBoth("In workspace: "..ws:GetFullName())
-                for k,v in pairs(ws:GetAttributes()) do
-                    logBoth("  ws:["..k.."]="..tostring(v))
-                end
-                for _,ch in ipairs(ws:GetChildren()) do
-                    logBoth("  child: "..ch.Name.." ("..ch.ClassName..")")
-                end
-            else
-                logBoth("In workspace: NOT FOUND")
+        scanCDBtn.Text="Equipping pet TIM..."
+        task.spawn(function()
+            -- Equip dulu semua pet TIM biar muncul di workspace
+            for uuid,_ in pairs(teamPetUUIDs) do
+                pcall(function() equipPet(uuid) end)
+                task.wait(0.3)
             end
-        end
-        logBoth("=== END ===")
+            task.wait(2)  -- tunggu pet placed di workspace
 
-        -- Tulis ke file
-        local ok=pcall(function()
-            if writefile then writefile("zenx_pet_dump.txt",table.concat(fileBuf,"\n")) end
+            -- Clear log dulu
+            _dbgLines={}
+            if debugLbl then debugLbl.Text="" end
+            dbg("=== SCAN WORKSPACE PETS ===")
+            local fileBuf={"=== ZENX WORKSPACE DUMP ==="}
+            local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
+
+            -- Cari semua model di workspace yang punya PET_UUID attribute (apapun nilainya)
+            local petsFound=0
+            local function scanForPets(parent,depth,maxDepth)
+                if depth>maxDepth then return end
+                for _,m in ipairs(parent:GetChildren()) do
+                    local ok,uid=pcall(function() return m:GetAttribute("PET_UUID") end)
+                    if ok and uid then
+                        petsFound=petsFound+1
+                        if petsFound<=3 then
+                            logBoth("--- placed #"..petsFound.." ---")
+                            logBoth("Path: "..m:GetFullName())
+                            logBoth("Name: "..m.Name)
+                            logBoth("PET_UUID: "..tostring(uid))
+                            for k,v in pairs(m:GetAttributes()) do
+                                logBoth("  ["..k.."]="..tostring(v).." ("..type(v)..")")
+                            end
+                        end
+                    end
+                    pcall(function() scanForPets(m,depth+1,maxDepth) end)
+                end
+            end
+            scanForPets(workspace,0,5)
+            logBoth("Total pet placed: "..petsFound)
+
+            -- Cek juga path-path umum
+            for _,name in ipairs({"Pets","PlacedPets","ActivePets","PetMovers","Farm"}) do
+                local f=workspace:FindFirstChild(name)
+                if f then
+                    logBoth("workspace."..name.." ada ("..#f:GetChildren().." child)")
+                    for i,c in ipairs(f:GetChildren()) do
+                        if i<=3 then logBoth("  "..c.Name.." ("..c.ClassName..")") end
+                    end
+                end
+            end
+
+            logBoth("=== END SCAN ===")
+            local ok=pcall(function() if writefile then writefile("zenx_workspace_dump.txt",table.concat(fileBuf,"\n")) end end)
+            if ok then dbg("File: zenx_workspace_dump.txt") end
+
+            scanCDBtn.Text="EQUIP & SCAN WORKSPACE (debug)"
         end)
-        if ok then dbg("Tersimpan: zenx_pet_dump.txt (Delta workspace)") end
     end)
 
     div(areas[3],1)
