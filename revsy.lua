@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v3.2-uiscan2"
+local SCRIPT_VERSION="v3.3-cdparse"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -1135,94 +1135,102 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan v9: scan semua "Active Pets" panel di PlayerGui
-    local scanCDBtn=btn(dc,"SCAN ACTIVE PETS UI v2 (debug)",9,C.Panel,C.Gold)
+    -- Tombol Scan v10: parse format CD dengan emoji ⏰
+    local scanCDBtn=btn(dc,"PARSE CD WITH EMOJI (debug)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
-        dbg("[SCAN UI v2] CLICKED")
-        _dbgLines={"> [SCAN UI v2] mulai..."}
-        if debugLbl then debugLbl.Text="> [SCAN UI v2] mulai..." end
+        dbg("[SCAN UI v3] CLICKED")
+        _dbgLines={"> [SCAN UI v3] mulai..."}
+        if debugLbl then debugLbl.Text="> [SCAN UI v3] mulai..." end
 
-        local fileBuf={"=== ZENX UI SCAN v2 ==="}
+        local fileBuf={"=== ZENX UI SCAN v3 ==="}
         local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
 
         local pg=player:FindFirstChild("PlayerGui")
         if not pg then logBoth("NO PlayerGui!") return end
 
-        -- Cari ActivePetUI ScreenGui
-        local apUi=pg:FindFirstChild("ActivePetUI")
-        if apUi then
-            logBoth("ActivePetUI children:")
-            for _,c in ipairs(apUi:GetChildren()) do
-                local vis=true
-                if c:IsA("Frame") or c:IsA("ScrollingFrame") then vis=c.Visible end
-                logBoth("  "..c.Name.." ("..c.ClassName..") vis="..tostring(vis))
-            end
-        else
-            logBoth("NO ActivePetUI ScreenGui in PlayerGui")
+        -- Helper: parse CD text "⏰ 1:25:10" / "⏰ 15:00" / "10:06m" -> seconds
+        local function parseCD(txt)
+            if not txt then return nil end
+            -- Strip non-digit non-colon chars
+            local clean=txt:gsub("[^%d:]","")
+            -- HH:MM:SS
+            local a,b,c=clean:match("^(%d+):(%d+):(%d+)$")
+            if a then return tonumber(a)*3600+tonumber(b)*60+tonumber(c) end
+            -- MM:SS
+            local m,s=clean:match("^(%d+):(%d+)$")
+            if m then return tonumber(m)*60+tonumber(s) end
+            -- Just digits = MAXED maybe
+            return nil
         end
 
-        -- Cari semua TextLabel "Active Pets" (bisa lebih dari 1 panel)
-        logBoth("=== Semua label 'Active Pets' ===")
-        local panels={}
-        for _,d in ipairs(pg:GetDescendants()) do
+        local apUi=pg:FindFirstChild("ActivePetUI")
+        if not apUi then logBoth("NO ActivePetUI!") return end
+        local frame=apUi:FindFirstChild("Frame")
+        if not frame then logBoth("NO Frame in ActivePetUI!") return end
+
+        logBoth("Frame.Visible: "..tostring(frame.Visible))
+
+        -- Cari semua TextLabel dengan format CD
+        logBoth("=== CD labels (parsed) ===")
+        local cdEntries={}
+        for _,d in ipairs(frame:GetDescendants()) do
             if d:IsA("TextLabel") then
                 local ok,txt=pcall(function() return d.Text end)
-                if ok and txt and txt:lower():find("active pets") then
-                    -- Walk up to find parent Frame
-                    local par=d
-                    while par.Parent and not par.Parent:IsA("ScreenGui") do par=par.Parent end
-                    table.insert(panels,{label=d,frame=par,text=txt})
+                if ok and txt then
+                    local sec=parseCD(txt)
+                    if sec then
+                        table.insert(cdEntries,{lbl=d,txt=txt,sec=sec})
+                    end
                 end
             end
         end
-        logBoth("Found: "..#panels.." panel(s)")
-        for i,p in ipairs(panels) do
-            logBoth("[#"..i.."] '"..p.text.."' fr="..p.frame.Name.." vis="..tostring(p.frame.Visible))
-        end
-
-        -- Untuk tiap panel, scan TextLabel dengan format CD
-        for i,p in ipairs(panels) do
-            if i<=2 then
-                logBoth("--- panel #"..i.." ("..p.frame.Name..") ---")
-                local cdCnt=0
-                for _,d in ipairs(p.frame:GetDescendants()) do
-                    if d:IsA("TextLabel") then
-                        local ok,txt=pcall(function() return d.Text end)
-                        if ok and txt then
-                            -- Cek format CD (10:06m, 3:13m, 1:23, 00:30s, dll)
-                            if txt:match("^%d+:%d+m?$") or txt:match("^%d+m %d+s$") or txt:match("^%d+m$") then
-                                cdCnt=cdCnt+1
-                                if cdCnt<=4 then
-                                    logBoth("CD: '"..txt.."'")
-                                    local rel=d:GetFullName():gsub(".*PlayerGui%.","")
-                                    logBoth("  "..rel:sub(1,55))
-                                end
+        logBoth("CD labels: "..#cdEntries)
+        for i,e in ipairs(cdEntries) do
+            if i<=4 then
+                logBoth("[#"..i.."] '"..e.txt.."' = "..e.sec.."s")
+                -- Cari slot parent (Frame yg punya nama pet sibling)
+                local slot=e.lbl.Parent
+                for h=1,4 do
+                    if not slot then break end
+                    -- Cek nama pet di siblings
+                    local petName=nil
+                    for _,sib in ipairs(slot:GetDescendants()) do
+                        if sib:IsA("TextLabel") and sib~=e.lbl then
+                            local ok2,t2=pcall(function() return sib.Text end)
+                            if ok2 and t2 and #t2>3 and #t2<30 and not t2:find("⏰") and not t2:lower():find("age") and not t2:find("MAXED") then
+                                petName=t2 break
                             end
                         end
                     end
-                end
-                logBoth("CD labels: "..cdCnt)
-
-                -- Dump 8 TextLabel pertama (mungkin nama pet)
-                local labels={}
-                for _,d in ipairs(p.frame:GetDescendants()) do
-                    if d:IsA("TextLabel") then
-                        local ok,txt=pcall(function() return d.Text end)
-                        if ok and txt and #txt>0 and #txt<35 then
-                            table.insert(labels,txt)
-                        end
+                    if petName then
+                        logBoth("  Pet: '"..petName.."'")
+                        logBoth("  Slot: "..slot.Name)
+                        break
                     end
-                end
-                logBoth("All texts ("..#labels.."): ")
-                for j,t in ipairs(labels) do
-                    if j<=10 then logBoth("  "..j.." '"..t.."'") end
+                    slot=slot.Parent
                 end
             end
         end
 
+        -- Dump 25 text pertama panel
+        logBoth("=== ALL TEXTS (panel) ===")
+        local labels={}
+        for _,d in ipairs(frame:GetDescendants()) do
+            if d:IsA("TextLabel") then
+                local ok,txt=pcall(function() return d.Text end)
+                if ok and txt and #txt>0 and #txt<40 then
+                    table.insert(labels,txt)
+                end
+            end
+        end
+        for i,t in ipairs(labels) do
+            if i<=20 then logBoth(i..". '"..t.."'") end
+        end
+        logBoth("(total "..#labels.." labels)")
+
         logBoth("=== END ===")
-        pcall(function() if writefile then writefile("zenx_ui_scan2.txt",table.concat(fileBuf,"\n")) end end)
+        pcall(function() if writefile then writefile("zenx_ui_scan3.txt",table.concat(fileBuf,"\n")) end end)
     end)
 
     div(areas[3],1)
