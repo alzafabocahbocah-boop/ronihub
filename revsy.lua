@@ -4,7 +4,7 @@ warn("[ZenxLvl] kalau pesan ini muncul tapi GUI nggak, lanjut baca console")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local HS = game:GetService("HttpService"
+local HS = game:GetService("HttpService")
 local TS = game:GetService("TeleportService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui",10)
@@ -1140,15 +1140,15 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    -- Tombol Scan v4: equip dulu, scan placed by name match
-    local scanCDBtn=btn(dc,"EQUIP & SCAN PLACED PET (debug)",9,C.Panel,C.Gold)
+    -- Tombol Scan v5: equip + scan SELURUH workspace by nama match
+    local scanCDBtn=btn(dc,"EQUIP + SCAN ALL WORKSPACE (debug)",9,C.Panel,C.Gold)
     scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
     scanCDBtn.MouseButton1Click:Connect(function()
-        dbg("[SCAN v4] CLICKED")
+        dbg("[SCAN v5] CLICKED")
         scanCDBtn.Text="Equipping..."
         task.spawn(function()
-            -- Step 1: equip pet TIM
-            local teamNames={}  -- nama base buat match
+            -- Step 1: equip pet TIM, kumpulkan nama base buat match
+            local teamNames={}
             for uuid,_ in pairs(teamPetUUIDs) do
                 pcall(function() equipPet(uuid) end)
                 local info=teamPetInfoCache[uuid]
@@ -1157,82 +1157,80 @@ buildSwapList=function()
                 if base~="" then teamNames[base:lower()]=true end
                 task.wait(0.25)
             end
-            task.wait(2)  -- tunggu placement
+            task.wait(2)
 
-            _dbgLines={"> [SCAN v4] scanning..."}
-            if debugLbl then debugLbl.Text="> [SCAN v4] scanning..." end
+            _dbgLines={"> [SCAN v5] scanning workspace..."}
+            if debugLbl then debugLbl.Text="> [SCAN v5] scanning workspace..." end
 
-            local fileBuf={"=== ZENX SCAN v4 ==="}
+            local fileBuf={"=== ZENX SCAN v5 ==="}
             local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
 
-            -- Cari farm punya player
-            local farmRoot=workspace:FindFirstChild("Farm")
-            local myFarm=nil
-            if farmRoot then
-                for _,fm in ipairs(farmRoot:GetChildren()) do
-                    local imp=fm:FindFirstChild("Important")
-                    if imp then
-                        local data=imp:FindFirstChild("Data")
-                        if data then
-                            for _,c in ipairs(data:GetChildren()) do
-                                if c:IsA("StringValue") or c:IsA("ObjectValue") then
-                                    local v=tostring(c.Value or "")
-                                    if v==player.Name or v:find(player.Name) then
-                                        myFarm=fm break
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    if myFarm then break end
-                end
-                if not myFarm then myFarm=farmRoot:GetChildren()[1] end
-            end
+            -- Cari model di workspace yang nama-nya match team pet
+            logBoth("Looking for: ")
+            local nm_list={}
+            for k,_ in pairs(teamNames) do table.insert(nm_list,k) end
+            logBoth("  "..table.concat(nm_list,", "))
 
-            if not myFarm then logBoth("NO Farm!") return end
-            local imp=myFarm:FindFirstChild("Important")
-            if not imp then logBoth("NO Important!") return end
-
-            logBoth("Farm: "..myFarm.Name)
-            -- Dump Important children
-            for _,c in ipairs(imp:GetChildren()) do
-                logBoth("- "..c.Name.." ("..#c:GetChildren().." child)")
-            end
-
-            -- Cari semua model di Important yang nama-nya match pet team
             local matched={}
             local function recurse(parent,depth)
-                if depth>5 then return end
+                if depth>7 then return end
                 for _,m in ipairs(parent:GetChildren()) do
                     if m:IsA("Model") then
-                        if teamNames[m.Name:lower()] then
+                        local mn=m.Name:lower()
+                        if teamNames[mn] then
                             table.insert(matched,m)
                         end
                     end
                     pcall(function() recurse(m,depth+1) end)
                 end
             end
-            recurse(imp,0)
+            recurse(workspace,0)
 
-            logBoth("=== matched placed pets: "..#matched.." ===")
+            logBoth("=== matched pet models: "..#matched.." ===")
             for i,m in ipairs(matched) do
                 if i<=2 then
                     logBoth("[#"..i.."] "..m.Name)
-                    logBoth("  Path: "..m:GetFullName():sub(-60))
+                    local p=m:GetFullName()
+                    logBoth("  "..(#p>60 and "..."..p:sub(-57) or p))
                     -- Semua attribute
+                    local cnt=0
                     for k,v in pairs(m:GetAttributes()) do
-                        logBoth("  ATTR "..k.."="..tostring(v))
+                        cnt=cnt+1
+                        if cnt<=10 then logBoth("  ["..k.."]="..tostring(v)) end
                     end
-                    -- Children top-level
+                    -- Children
                     for j,ch in ipairs(m:GetChildren()) do
-                        if j<=4 then logBoth("  ch:"..ch.Name.." ("..ch.ClassName..")") end
+                        if j<=4 then logBoth("  >"..ch.Name) end
+                    end
+                end
+            end
+
+            -- Kalau nggak ada yg match, dump model di workspace yg deket player
+            if #matched==0 then
+                logBoth("=== fallback: model dekat player ===")
+                local char=player.Character
+                local hrp=char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local nearMs={}
+                    for _,m in ipairs(workspace:GetDescendants()) do
+                        if m:IsA("Model") and m~=char then
+                            local ok,piv=pcall(function() return m:GetPivot() end)
+                            if ok and piv then
+                                local d=(piv.Position-hrp.Position).Magnitude
+                                if d<30 then table.insert(nearMs,{m=m,d=d}) end
+                            end
+                        end
+                    end
+                    table.sort(nearMs,function(a,b) return a.d<b.d end)
+                    for i,e in ipairs(nearMs) do
+                        if i<=8 then logBoth("near: "..e.m.Name.." ("..math.floor(e.d).." stud)") end
                     end
                 end
             end
 
             logBoth("=== END ===")
-            pcall(function() if writefile then writefile("zenx_placed_dump.txt",table.concat(fileBuf,"\n")) end end)
-            scanCDBtn.Text="EQUIP & SCAN PLACED PET (debug)"
+            pcall(function() if writefile then writefile("zenx_scan_v5.txt",table.concat(fileBuf,"\n")) end end)
+            scanCDBtn.Text="EQUIP + SCAN ALL WORKSPACE (debug)"
         end)
     end)
 
