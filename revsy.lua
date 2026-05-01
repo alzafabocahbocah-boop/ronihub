@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v3.8-spam"
+local SCRIPT_VERSION="v4.0-ready"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -743,7 +743,7 @@ local arTog2,arTogStroke2,arStroke2,cdLbl2
 
 -- SWAP SKILL state (UUID-keyed)
 local swapPerPet=d.swapPerPet or {}  -- [uuid] = {pickup, place, enabled}
-local swapConfig=d.swapConfig or {swapDelay=0,pickupDelay=0.6,placeDelay=0.3}
+local swapConfig=d.swapConfig or {swapDelay=0,pickupDelay=15,placeDelay=0.3}
 local swapTasks={}  -- [uuid] = thread (1 task per pet)
 
 -- Forward declarations supaya bisa cross-call antar tab
@@ -1212,8 +1212,8 @@ buildSwapList=function()
         corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(math.max(0,v)) save() end end)
     end
-    ngRow(dc,"Place→Pickup","Tunggu setelah place (dtk, default 0.6)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
-    ngRow(dc,"Pickup→Place","Tunggu setelah pickup (dtk, default 0.3)",swapConfig.placeDelay,2,function(v) swapConfig.placeDelay=v end)
+    ngRow(dc,"Manual CD","Tunggu CD manual kalau UI ga ada (dtk)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
+    ngRow(dc,"Pickup→Place","Wait swap (pickup ke place, default 0.3)",swapConfig.placeDelay,2,function(v) swapConfig.placeDelay=v end)
     ngRow(dc,"Gap","Gap antar cycle (dtk, default 0)",swapConfig.swapDelay,3,function(v) swapConfig.swapDelay=v end)
 
     local applyBtn=btn(dc,"Apply Global ke Semua Pet",9,C.TDim,C.Teal)
@@ -1932,47 +1932,68 @@ local function startSwapForPet(uuid)
                 break
             end
             cycle=cycle+1
+
+            local petType=getBaseName(petName)
+            local cdSec=readUICDForPetType(petType)
+
             if cycle==1 then
-                dbg("[Swap] "..petName.." cycle 1: pickup="..tostring(ps.pickup).."s, place="..tostring(ps.place).."s")
+                if cdSec then dbg("[Swap] "..petName.." UI-CD: "..cdSec.."s ("..petType..")")
+                else dbg("[Swap] "..petName.." MANUAL fallback "..tostring(ps.pickup).."s") end
             end
 
-            -- Wait setelah place (biar skill fire / animasi mulai)
-            local pkWait=math.max(0.05,ps.pickup or 0.6)
-            local elapsed=0
-            while elapsed<pkWait do
-                if not isRunning then break end
-                local step=math.min(0.2,pkWait-elapsed)
-                task.wait(step) elapsed=elapsed+step
-                local p2=swapPerPet[uuid]
-                if not p2 or not p2.enabled then break end
+            -- TUNGGU PET READY
+            if cdSec then
+                -- Mode UI: poll CD sampai <=1
+                local pollStart=tick()
+                local nilCount=0
+                while isRunning and ps and ps.enabled do
+                    if tick()-pollStart>7200 then break end
+                    local cur=readUICDForPetType(petType)
+                    if cur==nil then
+                        _uiCDSlotCache[petType]=nil
+                        nilCount=nilCount+1
+                        if nilCount>5 then
+                            -- UI panel kehilangan pet → fallback manual
+                            local elapsed=tick()-pollStart
+                            local remain=math.max(0,(ps.pickup or 15)-elapsed)
+                            if remain>0 then task.wait(remain) end
+                            break
+                        end
+                        task.wait(2)
+                    else
+                        nilCount=0
+                        if cur<=1 then break end  -- READY!
+                        -- Adaptive sleep based on remaining CD
+                        task.wait(math.max(0.3,math.min(5,cur*0.25)))
+                    end
+                    ps=swapPerPet[uuid]
+                end
+                if cycle<=3 then dbg(string.format("[Swap] %s READY (waited %.1fs)",petName,tick()-pollStart)) end
+            else
+                -- MANUAL fallback: tunggu pickup field detik penuh (= pet's CD value)
+                local waitSec=math.max(0.1,ps.pickup or 15)
+                local elapsed=0
+                while elapsed<waitSec do
+                    if not isRunning then break end
+                    local step=math.min(0.5,waitSec-elapsed)
+                    task.wait(step) elapsed=elapsed+step
+                    local p2=swapPerPet[uuid]
+                    if not p2 or not p2.enabled then break end
+                end
             end
 
             if not isRunning then break end
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- PICKUP (cancel animation, prep untuk re-place)
+            -- QUICK SWAP: pickup → small wait → place
             pickupPet(uuid)
-
-            -- Wait sebelum re-place
-            local plWait=math.max(0.05,ps.place or 0.3)
-            elapsed=0
-            while elapsed<plWait do
-                if not isRunning then break end
-                local step=math.min(0.2,plWait-elapsed)
-                task.wait(step) elapsed=elapsed+step
-                local p2=swapPerPet[uuid]
-                if not p2 or not p2.enabled then break end
-            end
-
+            task.wait(math.max(0.05,ps.place or 0.3))
             if not isRunning then break end
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
-
-            -- PLACE lagi (trigger skill baru)
             equipPet(uuid)
 
-            -- Gap antar cycle
             task.wait(math.max(0,swapConfig.swapDelay or 0))
         end
         swapTasks[uuid]=nil
