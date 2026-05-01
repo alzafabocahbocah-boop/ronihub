@@ -312,6 +312,11 @@ local function findPlacedPetByUUID(uuid)
             if m:GetAttribute("PET_UUID")==uuid then return m end
         end
     end
+    -- BRUTE FORCE: scan seluruh workspace (last resort)
+    for _,m in ipairs(workspace:GetDescendants()) do
+        local ok,uid=pcall(function() return m:GetAttribute("PET_UUID") end)
+        if ok and uid==uuid then return m end
+    end
     return nil
 end
 
@@ -1101,7 +1106,7 @@ buildSwapList=function()
     end
 
     -- Card setting global delay
-    local dc=mk("Frame",{Size=UDim2.new(1,0,0,140),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
+    local dc=mk("Frame",{Size=UDim2.new(1,0,0,170),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
     corner(dc,7) stroke(dc,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=dc})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=dc})
@@ -1129,6 +1134,64 @@ buildSwapList=function()
             swapPerPet[uuid].place=swapConfig.placeDelay
         end
         save() buildSwapList()
+    end)
+
+    -- Tombol Scan Cooldown (debug)
+    local scanCDBtn=btn(dc,"SCAN COOLDOWN ATTRIBUTE (debug)",9,C.Panel,C.Gold)
+    scanCDBtn.Size=UDim2.new(1,0,0,22) scanCDBtn.LayoutOrder=5 stroke(scanCDBtn,C.Gold,1.2)
+    scanCDBtn.MouseButton1Click:Connect(function()
+        -- Clear log dulu biar fresh
+        _dbgLines={}
+        if debugLbl then debugLbl.Text="" end
+        dbg("=== SCAN COOLDOWN ===")
+
+        local fileBuf={"=== ZENX PET DUMP ==="}
+        local function logBoth(s) dbg(s) table.insert(fileBuf,s) end
+
+        -- Scan workspace structure dulu
+        logBoth("workspace top-level:")
+        for _,c in ipairs(workspace:GetChildren()) do
+            logBoth("  "..c.Name.." ("..c.ClassName..")")
+        end
+
+        local cnt=0
+        for uuid,_ in pairs(teamPetUUIDs) do
+            cnt=cnt+1 if cnt>3 then logBoth("(skip sisanya, max 3 pet)") break end
+            local info=teamPetInfoCache[uuid]
+            local petName=(info and info.name) or "?"
+            logBoth("--- Pet "..cnt..": "..petName.." ---")
+            logBoth("UUID: "..tostring(uuid))
+
+            -- Cek backpack
+            local bpItem=findPetInBackpack(uuid)
+            if bpItem then
+                logBoth("In backpack: YES")
+                for k,v in pairs(bpItem:GetAttributes()) do
+                    logBoth("  bp:["..k.."]="..tostring(v))
+                end
+            else logBoth("In backpack: no") end
+
+            -- Cek workspace
+            local ws=findPlacedPetByUUID(uuid)
+            if ws then
+                logBoth("In workspace: "..ws:GetFullName())
+                for k,v in pairs(ws:GetAttributes()) do
+                    logBoth("  ws:["..k.."]="..tostring(v))
+                end
+                for _,ch in ipairs(ws:GetChildren()) do
+                    logBoth("  child: "..ch.Name.." ("..ch.ClassName..")")
+                end
+            else
+                logBoth("In workspace: NOT FOUND")
+            end
+        end
+        logBoth("=== END ===")
+
+        -- Tulis ke file
+        local ok=pcall(function()
+            if writefile then writefile("zenx_pet_dump.txt",table.concat(fileBuf,"\n")) end
+        end)
+        if ok then dbg("Tersimpan: zenx_pet_dump.txt (Delta workspace)") end
     end)
 
     div(areas[3],1)
@@ -1739,7 +1802,7 @@ local function startSwapForPet(uuid)
                 break
             end
             cycle=cycle+1
-            dbg("[Swap] "..petName.." cycle "..cycle.." mulai")
+            if cycle<=2 then dbg("[Swap] "..petName.." cycle "..cycle.." mulai") end
 
             -- Cari pet model di workspace (placed)
             local placed=findPlacedPetByUUID(uuid)
@@ -1762,7 +1825,7 @@ local function startSwapForPet(uuid)
                     task.wait(0.2)
                     ps=swapPerPet[uuid]
                 end
-                dbg(string.format("[Swap] %s ready! waited %.1fs",petName,tick()-pollStart))
+                if cycle<=2 then dbg(string.format("[Swap] %s ready! waited %.1fs",petName,tick()-pollStart)) end
                 if ps and ps.pickup>0 then task.wait(ps.pickup) end
             else
                 if cycle==1 then dbg("[Swap] "..petName.." auto-detect FAILED, manual "..tostring(ps.pickup).."s") end
@@ -1781,7 +1844,7 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            dbg("[Swap] "..petName.." PICKUP")
+            if cycle<=2 then dbg("[Swap] "..petName.." PICKUP") end
             pickupPet(uuid)
 
             local plWait=math.max(0.15,ps.place)
@@ -1790,7 +1853,7 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            dbg("[Swap] "..petName.." PLACE")
+            if cycle<=2 then dbg("[Swap] "..petName.." PLACE") end
             equipPet(uuid)
 
             task.wait(math.max(0.1,swapConfig.swapDelay))
@@ -1861,6 +1924,7 @@ end
 
 local function doStart()
     dbg("[doStart] dipanggil")
+    cooldownDebugDone={}  -- reset biar dump pet attribute fresh tiap restart
     if isRunning then dbg("[doStart] sudah running, skip") return end
     if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
