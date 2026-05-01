@@ -1722,7 +1722,8 @@ local function startSwapForPet(uuid)
     local petInfo=getTeamPetInfo(uuid)
     local petName=petInfo and petInfo.name or "?"
     local offset=swapPerPet[uuid] and swapPerPet[uuid].pickup or 0.6
-    print("[ZenxSwap] START "..petName.." | Offset="..tostring(offset).."s (auto-detect CD)")
+    dbg("[Swap] START "..petName)
+    print("[ZenxSwap] START "..petName.." | Offset="..tostring(offset).."s")
     swapTasks[uuid] = task.spawn(function()
         equipPet(uuid)
         task.wait(0.6)
@@ -1730,10 +1731,11 @@ local function startSwapForPet(uuid)
         while isRunning do
             local ps=swapPerPet[uuid]
             if not ps or not ps.enabled then
-                print("[ZenxSwap] STOP "..petName.." (toggle off)")
+                dbg("[Swap] "..petName.." STOP (toggle off)")
                 break
             end
             cycle=cycle+1
+            dbg("[Swap] "..petName.." cycle "..cycle.." mulai")
 
             -- Cari pet model di workspace (placed)
             local placed=findPlacedPetByUUID(uuid)
@@ -1746,10 +1748,9 @@ local function startSwapForPet(uuid)
             if cd==nil and item then cd,attrName=readPetCooldown(item) end
 
             if cd~=nil then
-                -- Mode AUTO-DETECT: poll cooldown sampai 0
-                if cycle==1 then print("[ZenxSwap] "..petName.." auto-detect ON via attribute: "..tostring(attrName)) end
+                if cycle==1 then dbg("[Swap] "..petName.." AUTO-DETECT via: "..tostring(attrName)) end
                 local pollStart=tick()
-                local maxPoll=120  -- max 2 menit polling, safety
+                local maxPoll=120
                 while isRunning and ps and ps.enabled do
                     if tick()-pollStart>maxPoll then break end
                     local cur=readPetCooldown(placed) or readPetCooldown(item)
@@ -1757,12 +1758,10 @@ local function startSwapForPet(uuid)
                     task.wait(0.2)
                     ps=swapPerPet[uuid]
                 end
-                print(string.format("[ZenxSwap] %s cycle %d: skill READY (waited %.1fs)",petName,cycle,tick()-pollStart))
-                -- Offset (buffer kecil)
+                dbg(string.format("[Swap] %s ready! waited %.1fs",petName,tick()-pollStart))
                 if ps and ps.pickup>0 then task.wait(ps.pickup) end
             else
-                -- Mode MANUAL FALLBACK: tunggu sesuai pickup field
-                if cycle==1 then print("[ZenxSwap] "..petName.." auto-detect FAILED, fallback ke manual "..tostring(ps.pickup).."s. Set field 'Cooldown' ke nilai CD pet kamu.") end
+                if cycle==1 then dbg("[Swap] "..petName.." auto-detect FAILED, manual "..tostring(ps.pickup).."s") end
                 local pkWait=math.max(0.05,ps.pickup)
                 local elapsed=0
                 while elapsed<pkWait do
@@ -1778,26 +1777,22 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- PICKUP
-            print("[ZenxSwap] "..petName.." cycle "..cycle.." -> PICKUP")
+            dbg("[Swap] "..petName.." PICKUP")
             pickupPet(uuid)
 
-            -- Re-place delay
             local plWait=math.max(0.15,ps.place)
             task.wait(plWait)
             if not isRunning then break end
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- PLACE lagi
-            print("[ZenxSwap] "..petName.." cycle "..cycle.." -> PLACE")
+            dbg("[Swap] "..petName.." PLACE")
             equipPet(uuid)
 
-            -- Gap antar cycle
             task.wait(math.max(0.1,swapConfig.swapDelay))
         end
         swapTasks[uuid]=nil
-        print("[ZenxSwap] END "..petName)
+        dbg("[Swap] "..petName.." END")
         if isRunning then
             pcall(function() equipPet(uuid) end)
         end
@@ -1861,19 +1856,33 @@ local function doStop(reason)
 end
 
 local function doStart()
-    if isRunning then return end
-    if next(teamPetUUIDs)==nil then statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
+    dbg("[doStart] dipanggil")
+    if isRunning then dbg("[doStart] sudah running, skip") return end
+    if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
     local queue=getQueue()
-    if #queue==0 then statusLbl.Text="Tidak ada pet target!" statusLbl.TextColor3=C.Red return end
+    if #queue==0 then dbg("[doStart] FAIL: queue kosong") statusLbl.Text="Tidak ada pet target!" statusLbl.TextColor3=C.Red return end
 
     isRunning=true setRunning(true)
     statusLbl.Text="Berjalan... Q:"..#queue statusLbl.TextColor3=C.Teal
+
+    -- Diagnostic: hitung pet TIM & yang swap-enabled
+    local teamCnt,swapCnt=0,0
+    for uuid,_ in pairs(teamPetUUIDs) do
+        teamCnt=teamCnt+1
+        if isPetInSwap(uuid) then swapCnt=swapCnt+1 end
+    end
+    dbg("[doStart] team="..teamCnt.." swap-enabled="..swapCnt)
+    if swapCnt==0 then
+        dbg("[doStart] NO swap pets - cek toggle ON di Tab Swap")
+    end
 
     -- Mulai swap task untuk pet TIM yang swap-enabled (stagger biar nggak burst)
     local stagger=0
     for uuid,_ in pairs(teamPetUUIDs) do
         if isPetInSwap(uuid) then
+            local info=getTeamPetInfo(uuid)
+            dbg("[doStart] launching swap "..((info and info.name) or "?"))
             local cu=uuid local sg=stagger
             task.delay(sg,function() if isRunning then startSwapForPet(cu) end end)
             stagger=stagger+0.3
@@ -1980,3 +1989,4 @@ if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
 print("ZenxLvl loaded! Swap Skill v2 (UUID-keyed, per-pet tasks)")
+
