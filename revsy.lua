@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v4.7-rapid"
+local SCRIPT_VERSION="v4.8-cd-detect"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -1363,7 +1363,7 @@ buildSwapList=function()
     corner(dc,7) stroke(dc,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=dc})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=dc})
-    lbl(dc,"Global Delay (RAPID MODE)",9,C.Teal).Size=UDim2.new(1,0,0,13)
+    lbl(dc,"Detection: CD-jump (UI cooldown)",9,C.Teal).Size=UDim2.new(1,0,0,13)
 
     local function ngRow(parent,lt,dt,def,lo,onChange)
         local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
@@ -1374,7 +1374,7 @@ buildSwapList=function()
         corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(math.max(0,v)) save() end end)
     end
-    ngRow(dc,"Manual CD","Timeout pickup (default 0.6 = pickup max tiap 0.6s)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
+    ngRow(dc,"Post-Skill Delay","Jeda setelah skill fire baru pickup (default 0.6s)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
     ngRow(dc,"Pickup→Place","Jeda pickup ke place (default 0 = instant)",swapConfig.placeDelay,2,function(v) swapConfig.placeDelay=v end)
     ngRow(dc,"Gap","Gap antar cycle (dtk, default 0)",swapConfig.swapDelay,3,function(v) swapConfig.swapDelay=v end)
 
@@ -1553,7 +1553,7 @@ buildSwapList=function()
     local thead=mk("Frame",{Size=UDim2.new(1,0,0,18),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=3,Parent=areas[3]})
     corner(thead,5)
     lbl(thead,"PET",8,C.Gray).Size=UDim2.new(0.40,0,1,0)
-    local tp=lbl(thead,"Timeout",8,C.Gray,Enum.TextXAlignment.Center) tp.Size=UDim2.new(0.18,0,1,0) tp.Position=UDim2.new(0.40,0,0,0)
+    local tp=lbl(thead,"PostSkill",8,C.Gray,Enum.TextXAlignment.Center) tp.Size=UDim2.new(0.18,0,1,0) tp.Position=UDim2.new(0.40,0,0,0)
     local tpl=lbl(thead,"Place",8,C.Gray,Enum.TextXAlignment.Center) tpl.Size=UDim2.new(0.18,0,1,0) tpl.Position=UDim2.new(0.58,0,0,0)
     local ton=lbl(thead,"ON/OFF",8,C.Gray,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.24,0,1,0) ton.Position=UDim2.new(0.76,0,0,0)
 
@@ -2128,6 +2128,12 @@ local function startSwapForPet(uuid)
         end
 
         local baseline=tick()
+        local lastCD=readUICDForPetType(petType) or 0
+        local cdAvailable=(readUICDForPetType(petType)~=nil)
+
+        if cycle==0 then
+            dbg("[Swap] "..petName.." CD-detect: "..(cdAvailable and "OK" or "FAIL (UI gak ke-baca)"))
+        end
 
         while isRunning do
             local ps=swapPerPet[uuid]
@@ -2137,52 +2143,58 @@ local function startSwapForPet(uuid)
             end
             cycle=cycle+1
 
-            -- POLL FOR SKILL FIRE (detect = instant pickup, atau timeout fallback)
+            -- POLL: CD jump = primary, anim/notif = backup, timeout = sanity
             local pollStart=tick()
-            local maxWait=math.max(0.1,ps.pickup or 0.6)  -- timeout pickup (default 0.6s)
+            local maxWait=90  -- sanity timeout (CD-based, bukan timer)
             local detected=false
             local detectVia=""
-            -- Min wait minimal: skip notif lama yg masih nyangkut di GUI
-            local minWait=0.05
 
             while isRunning do
-                if not isRunning then break end
                 ps=swapPerPet[uuid]
                 if not ps or not ps.enabled then break end
 
-                if tick()-pollStart<minWait then
-                    task.wait(0.03)
-                else
-                    -- Cek anim spy (paling cepet, awal skill animation)
-                    local a1=AnimSpy.skillFire[petType] or 0
-                    local a2=AnimSpy.skillFire[petTypeLast] or 0
-                    local animLatest=math.max(a1,a2)
-                    if animLatest>baseline+0.1 then
-                        detected=true detectVia="ANIM"
-                        baseline=animLatest
+                task.wait(0.1)
+
+                -- PRIMARY: CD jump (UI cooldown timer)
+                local currentCD=readUICDForPetType(petType)
+                if currentCD then
+                    -- Skill fire = CD melonjak naik (e.g. 0→30, atau 5→30)
+                    if currentCD>(lastCD or 0)+2 then
+                        detected=true detectVia="CD"
+                        lastCD=currentCD
                         break
                     end
-
-                    -- Cek skill detector (notif text)
-                    local f1=SkillDetector.lastFire[petType] or 0
-                    local f2=SkillDetector.lastFire[petTypeLast] or 0
-                    local latest=math.max(f1,f2)
-                    if latest>baseline+0.1 then
-                        detected=true detectVia="NOTIF"
-                        baseline=latest
-                        break
-                    end
-
-                    if tick()-pollStart>=maxWait then break end
-                    task.wait(0.03)
+                    lastCD=currentCD
                 end
+
+                -- SECONDARY: anim spy
+                local a1=AnimSpy.skillFire[petType] or 0
+                local a2=AnimSpy.skillFire[petTypeLast] or 0
+                local animLatest=math.max(a1,a2)
+                if animLatest>baseline+0.1 then
+                    detected=true detectVia="ANIM"
+                    baseline=animLatest
+                    break
+                end
+
+                -- TERTIARY: notif text
+                local f1=SkillDetector.lastFire[petType] or 0
+                local f2=SkillDetector.lastFire[petTypeLast] or 0
+                local latest=math.max(f1,f2)
+                if latest>baseline+0.1 then
+                    detected=true detectVia="NOTIF"
+                    baseline=latest
+                    break
+                end
+
+                if tick()-pollStart>=maxWait then break end
             end
 
-            if cycle<=5 then
+            if cycle<=10 then
                 if detected then
-                    dbg(string.format("[Swap] %s fire via %s (%.2fs)",petName,detectVia,tick()-pollStart))
+                    dbg(string.format("[Swap] %s fire via %s (%.1fs)",petName,detectVia,tick()-pollStart))
                 else
-                    dbg(string.format("[Swap] %s timeout %.2fs",petName,tick()-pollStart))
+                    dbg(string.format("[Swap] %s timeout %.1fs (no detect)",petName,tick()-pollStart))
                 end
             end
 
@@ -2190,15 +2202,25 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- RAPID SWAP: pickup → instant wait → place
+            -- DETECTED: tunggu ps.pickup detik (post-skill delay) baru pickup
+            -- TIMEOUT: pickup langsung (no extra delay)
+            if detected then
+                task.wait(ps.pickup or 0.6)
+            end
+            if not isRunning then break end
+            ps=swapPerPet[uuid]
+            if not ps or not ps.enabled then break end
             pickupPet(uuid)
-            task.wait(ps.place or 0)  -- default 0 = instant, no wait
+            task.wait(ps.place or 0)
             if not isRunning then break end
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
             equipPet(uuid)
 
             baseline=tick()
+            -- Update lastCD setelah place ulang (CD masih jalan dari skill barusan)
+            task.wait(0.3)  -- delay biar CD UI sync setelah re-place
+            lastCD=readUICDForPetType(petType) or 0
 
             task.wait(math.max(0,swapConfig.swapDelay or 0))
         end
@@ -2396,4 +2418,4 @@ task.wait(1)
 if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
-print("ZenxLvl loaded! Swap Skill RAPID MODE (pickup=0.6 timeout, place=0 instant)")
+print("ZenxLvl loaded! Swap mode = CD-jump detection (UI cooldown). Pickup = post-skill delay")
