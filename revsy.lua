@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v5.1-fxdetect"
+local SCRIPT_VERSION="v5.2-rescan"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -855,6 +855,13 @@ local function _animSpyHookModel(model)
     if AnimSpy.hooked[model] then return end
     AnimSpy.hooked[model]=true
 
+    -- Debug: log when model is hooked + check if matched to team pet
+    local matchedPet=nil
+    for uuid,info in pairs(teamPetInfoCache) do
+        if model.Name:find(uuid,1,true) then matchedPet=info.name break end
+    end
+    dbg("[AnimSpy] hook "..model.Name:sub(2,9).." -> "..(matchedPet or "(no team match)"))
+
     -- 1) Hook Animator: name-based filter
     task.spawn(function()
         for i=1,10 do
@@ -887,7 +894,7 @@ local function _animSpyHookModel(model)
         end
     end)
 
-    -- 2) Hook DescendantAdded: skill effects (any FX class + named parts)
+    -- 2) Hook DescendantAdded: skill effects
     pcall(function()
         model.DescendantAdded:Connect(function(d)
             local cls=d.ClassName
@@ -921,6 +928,24 @@ local function initAnimSpy()
         end)
     end)
     dbg("[AnimSpy] init OK")
+
+    -- Periodic rescan: catch any missed models (e.g. spawned during loading)
+    task.spawn(function()
+        while true do
+            task.wait(3)
+            local pmm=workspace:FindFirstChild("PetsPhysical")
+            if pmm then pmm=pmm:FindFirstChild("PetMover") end
+            if pmm then
+                local count=0
+                for _,m in ipairs(pmm:GetChildren()) do
+                    if m:IsA("Model") and not AnimSpy.hooked[m] then
+                        _animSpyHookModel(m)
+                        count=count+1
+                    end
+                end
+            end
+        end
+    end)
 end
 
 local config=d.config or {equipInterval=5,rejoinMinutes=30}
