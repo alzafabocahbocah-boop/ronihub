@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v5.3-spydiag"
+local SCRIPT_VERSION="v5.4-detectonly"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -182,19 +182,19 @@ if d.swapPerPetVersion < 3 then
     end
     d.swapPerPetVersion = 3
 end
--- v6 migration: detection-based mode. pickup=60 (timeout), place=0.6 (post-skill delay)
-if d.swapPerPetVersion < 6 then
+-- v7 migration: detection-only mode. Default timeout 1800s (30min, cover long-CD pets like Ferret 20min)
+if d.swapPerPetVersion < 7 then
     if d.swapConfig then
-        d.swapConfig.pickupDelay = 60
+        d.swapConfig.pickupDelay = 1800
         d.swapConfig.placeDelay = 0.6
     end
     if d.swapPerPet then
         for _,cfg in pairs(d.swapPerPet) do
-            cfg.pickup = 60
+            cfg.pickup = 1800
             cfg.place = 0.6
         end
     end
-    d.swapPerPetVersion = 6
+    d.swapPerPetVersion = 7
 end
 
 local C={
@@ -981,7 +981,7 @@ local arTog2,arTogStroke2,arStroke2,cdLbl2
 
 -- SWAP SKILL state (UUID-keyed) - rapid pickup mode
 local swapPerPet=d.swapPerPet or {}
-local swapConfig=d.swapConfig or {swapDelay=0,pickupDelay=60,placeDelay=0.6}
+local swapConfig=d.swapConfig or {swapDelay=0,pickupDelay=1800,placeDelay=0.6}
 local swapTasks={}
 
 local buildSwapList
@@ -1441,8 +1441,8 @@ buildSwapList=function()
         corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(math.max(0,v)) save() end end)
     end
-    ngRow(dc,"Skill Timeout","Max tunggu skill detect (default 60s)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
-    ngRow(dc,"Post-Skill Delay","Jeda setelah skill detect baru pickup (default 0.6s)",swapConfig.placeDelay,2,function(v) swapConfig.placeDelay=v end)
+    ngRow(dc,"Skill Timeout","Max tunggu skill detect (default 1800s = 30min)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
+    ngRow(dc,"Pickup Delay","Pickup setelah pet mulai skill (default 0.6s)",swapConfig.placeDelay,2,function(v) swapConfig.placeDelay=v end)
     ngRow(dc,"Gap","Gap antar cycle (dtk, default 0)",swapConfig.swapDelay,3,function(v) swapConfig.swapDelay=v end)
 
     local applyBtn=btn(dc,"APPLY GLOBAL KE SEMUA PET",10,C.BG,C.White)
@@ -1656,7 +1656,7 @@ buildSwapList=function()
     corner(thead,5)
     lbl(thead,"PET",8,C.Gray).Size=UDim2.new(0.40,0,1,0)
     local tp=lbl(thead,"Timeout",8,C.Gray,Enum.TextXAlignment.Center) tp.Size=UDim2.new(0.18,0,1,0) tp.Position=UDim2.new(0.40,0,0,0)
-    local tpl=lbl(thead,"PostSkill",8,C.Gray,Enum.TextXAlignment.Center) tpl.Size=UDim2.new(0.18,0,1,0) tpl.Position=UDim2.new(0.58,0,0,0)
+    local tpl=lbl(thead,"Delay",8,C.Gray,Enum.TextXAlignment.Center) tpl.Size=UDim2.new(0.18,0,1,0) tpl.Position=UDim2.new(0.58,0,0,0)
     local ton=lbl(thead,"ON/OFF",8,C.Gray,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.24,0,1,0) ton.Position=UDim2.new(0.76,0,0,0)
 
     local n=3
@@ -2270,7 +2270,7 @@ local function startSwapForPet(uuid)
                 if detected then
                     dbg(string.format("[Swap] %s skill fire (%.2fs)",petName,tick()-pollStart))
                 else
-                    dbg(string.format("[Swap] %s timeout %.1fs (no skill detected)",petName,tick()-pollStart))
+                    dbg(string.format("[Swap] %s timeout %.0fs (no skill - reset & retry)",petName,tick()-pollStart))
                 end
             end
 
@@ -2278,24 +2278,28 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- POST-SKILL DELAY: tunggu user-config detik setelah skill detect, baru pickup
-            -- ps.place = post-skill delay (default 0.6 detik, sesuai request user)
-            -- Kalau timeout (gak detected), pickup langsung (no delay)
-            if detected then
+            -- HANYA pickup kalau skill BENERAN ke-detect.
+            -- Kalau timeout (gak detected), reset baseline & lanjut polling -- jangan pickup paksa
+            if not detected then
+                baseline=tick()
+                task.wait(0.3)
+                -- skip pickup, lanjut iter berikutnya buat polling lagi
+            else
+                -- POST-SKILL DELAY: tunggu user-config detik setelah skill detect, baru pickup
                 task.wait(ps.place or 0.6)
-            end
-            if not isRunning then break end
-            ps=swapPerPet[uuid]
-            if not ps or not ps.enabled then break end
-            pickupPet(uuid)
-            task.wait(0.05)  -- minimal delay biar server register pickup
-            if not isRunning then break end
-            ps=swapPerPet[uuid]
-            if not ps or not ps.enabled then break end
-            equipPet(uuid)
+                if not isRunning then break end
+                ps=swapPerPet[uuid]
+                if not ps or not ps.enabled then break end
+                pickupPet(uuid)
+                task.wait(0.05)  -- minimal delay biar server register pickup
+                if not isRunning then break end
+                ps=swapPerPet[uuid]
+                if not ps or not ps.enabled then break end
+                equipPet(uuid)
 
-            baseline=tick()  -- reset baseline supaya skill fire lama gak ke-detect lagi
-            task.wait(math.max(0.3,swapConfig.swapDelay or 0))  -- min 0.3s biar pet sempet placed sebelum poll lagi
+                baseline=tick()  -- reset baseline supaya skill fire lama gak ke-detect lagi
+                task.wait(math.max(0.3,swapConfig.swapDelay or 0))  -- min 0.3s biar pet sempet placed sebelum poll lagi
+            end
         end
         swapTasks[uuid]=nil
         dbg("[Swap] "..petName.." END")
