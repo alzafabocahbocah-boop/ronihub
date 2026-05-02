@@ -1416,7 +1416,7 @@ buildSwapList=function()
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(math.max(0,v)) save() end end)
     end
     ngRow(dc,"Poll Interval","Cek CD tiap N detik (default 0.1)",swapConfig.pollInterval,1,function(v) swapConfig.pollInterval=math.max(0.05,v) end)
-    ngRow(dc,"Equip Burst","Spam equip N kali tiap cycle (default 3)",swapConfig.equipBurst,2,function(v) swapConfig.equipBurst=math.max(1,math.floor(v)) end)
+    ngRow(dc,"Burst Delay","Jeda unequip→equip (default 0.05)",swapConfig.burstDelay,2,function(v) swapConfig.burstDelay=math.max(0,v) end)
 
     local applyBtn=btn(dc,"APPLY GLOBAL KE SEMUA PET",10,C.BG,C.White)
     applyBtn.Size=UDim2.new(1,0,0,26) applyBtn.LayoutOrder=4 applyBtn.Font=Enum.Font.GothamBold stroke(applyBtn,C.Teal,1.5)
@@ -2040,19 +2040,13 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- BURST: pickup spam + equip burst (v78 pattern)
-            pickupPet(uuid)
+            -- SWAP PATTERN (sc temen): UnequipPet → EquipPet, NO pickup variants
+            unequipPet(uuid)
             task.wait(swapConfig.burstDelay or 0.05)
             if not isRunning then break end
-
-            local burst=swapConfig.equipBurst or 3
-            for i=1,burst do
-                if not isRunning then break end
-                ps=swapPerPet[uuid]
-                if not ps or not ps.enabled then break end
-                equipPet(uuid)
-                if i<burst then task.wait(swapConfig.burstDelay or 0.05) end
-            end
+            ps=swapPerPet[uuid]
+            if not ps or not ps.enabled then break end
+            equipPet(uuid)
 
             skillFiredOnce=false
             lastCD=nil
