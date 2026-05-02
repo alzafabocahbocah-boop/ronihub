@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v4.8-cd-detect"
+local SCRIPT_VERSION="v5.0-fxdetect"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -182,19 +182,19 @@ if d.swapPerPetVersion < 3 then
     end
     d.swapPerPetVersion = 3
 end
--- v4 migration: rapid pickup (pickup=0.6 timeout, place=0 instant)
-if d.swapPerPetVersion < 4 then
+-- v6 migration: detection-based mode. pickup=60 (timeout), place=0.6 (post-skill delay)
+if d.swapPerPetVersion < 6 then
     if d.swapConfig then
-        d.swapConfig.pickupDelay = 0.6
-        d.swapConfig.placeDelay = 0
+        d.swapConfig.pickupDelay = 60
+        d.swapConfig.placeDelay = 0.6
     end
     if d.swapPerPet then
         for _,cfg in pairs(d.swapPerPet) do
-            cfg.pickup = 0.6
-            cfg.place = 0
+            cfg.pickup = 60
+            cfg.place = 0.6
         end
     end
-    d.swapPerPetVersion = 4
+    d.swapPerPetVersion = 6
 end
 
 local C={
@@ -815,48 +815,78 @@ local function _animSpyFindAnimator(model)
     return nil
 end
 
+-- Skill detection: name-filtered animation + skill effect spawning (ParticleEmitter, Zone Part, Beam, Trail)
+local SKILL_FX_NAMES={Zone=true,Aoe=true,AOE=true,Skill=true,SkillFx=true,SkillEffect=true,Effect=true}
+local SKIP_ANIM_NAMES={Walk=true,Idle=true,Run=true,Stand=true,Move=true,Sit=true,Sleep=true,Eat=true,Jump=true,Fall=true,Land=true,Swim=true,Climb=true}
+
+local function _animSpyMarkFire(model,reason)
+    for uuid,info in pairs(teamPetInfoCache) do
+        if model.Name:find(uuid,1,true) then
+            local base=getBaseName(info.name):lower()
+            AnimSpy.skillFire[base]=tick()
+            local words={}
+            for w in base:gmatch("%S+") do table.insert(words,w) end
+            if #words>1 then AnimSpy.skillFire[words[#words]]=tick() end
+            if AnimSpy.enabled then
+                local entry=os.date("%X").." | "..base.." | "..reason
+                table.insert(AnimSpy.log,1,entry)
+                if #AnimSpy.log>50 then table.remove(AnimSpy.log) end
+            end
+            return
+        end
+    end
+end
+
 local function _animSpyHookModel(model)
     if AnimSpy.hooked[model] then return end
     AnimSpy.hooked[model]=true
+
+    -- 1) Hook Animator: name-based filter (Walk/Idle excluded, anything else = potential skill)
     task.spawn(function()
         for i=1,10 do
             local an=_animSpyFindAnimator(model)
             if an then
                 pcall(function()
                     an.AnimationPlayed:Connect(function(track)
-                        local name="?" local id="?" local len=0 local looped=true
+                        local name="?"
                         pcall(function()
-                            if track.Animation then
-                                name=track.Animation.Name
-                                id=track.Animation.AnimationId or "?"
-                            end
-                            len=track.Length or 0
-                            looped=track.Looped
+                            if track.Animation then name=track.Animation.Name end
                         end)
                         if AnimSpy.enabled then
+                            local len=0 local looped=true
+                            pcall(function() len=track.Length or 0 looped=track.Looped end)
                             local entry=string.format("%s|%s|%.1fs|loop=%s|%s",
                                 os.date("%X"),model.Name:sub(2,9),len,tostring(looped),name:sub(1,15))
                             table.insert(AnimSpy.log,1,entry)
                             if #AnimSpy.log>50 then table.remove(AnimSpy.log) end
                         end
-                        if not looped and len>=AnimSpy.minLength then
-                            for uuid,info in pairs(teamPetInfoCache) do
-                                if model.Name:find(uuid,1,true) then
-                                    local base=getBaseName(info.name):lower()
-                                    AnimSpy.skillFire[base]=tick()
-                                    local words={}
-                                    for w in base:gmatch("%S+") do table.insert(words,w) end
-                                    if #words>1 then AnimSpy.skillFire[words[#words]]=tick() end
-                                    break
-                                end
-                            end
-                        end
+                        -- Skip movement/idle animations
+                        if name=="" or name=="?" then return end
+                        if SKIP_ANIM_NAMES[name] then return end
+                        local nameLower=name:lower()
+                        if nameLower:find("walk") or nameLower:find("idle") or nameLower:find("run") then return end
+                        -- Anything else = skill
+                        _animSpyMarkFire(model,"ANIM:"..name)
                     end)
                 end)
-                return
+                break
             end
             task.wait(0.5)
         end
+    end)
+
+    -- 2) Hook DescendantAdded: skill effects (ParticleEmitter, Zone Part, Beam, Trail)
+    pcall(function()
+        model.DescendantAdded:Connect(function(d)
+            local cls=d.ClassName
+            if cls=="ParticleEmitter" or cls=="Beam" or cls=="Trail" then
+                _animSpyMarkFire(model,"FX:"..cls..":"..d.Name)
+            elseif cls=="Part" then
+                if SKILL_FX_NAMES[d.Name] then
+                    _animSpyMarkFire(model,"PART:"..d.Name)
+                end
+            end
+        end)
     end)
 end
 
@@ -914,7 +944,7 @@ local arTog2,arTogStroke2,arStroke2,cdLbl2
 
 -- SWAP SKILL state (UUID-keyed) - rapid pickup mode
 local swapPerPet=d.swapPerPet or {}
-local swapConfig=d.swapConfig or {swapDelay=0,pickupDelay=0.6,placeDelay=0}
+local swapConfig=d.swapConfig or {swapDelay=0,pickupDelay=60,placeDelay=0.6}
 local swapTasks={}
 
 local buildSwapList
@@ -1359,27 +1389,27 @@ buildSwapList=function()
         if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
     end
 
-    local dc=mk("Frame",{Size=UDim2.new(1,0,0,260),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
+    local dc=mk("Frame",{Size=UDim2.new(1,0,0,310),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
     corner(dc,7) stroke(dc,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=dc})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=dc})
-    lbl(dc,"Detection: CD-jump (UI cooldown)",9,C.Teal).Size=UDim2.new(1,0,0,13)
+    local detLbl=lbl(dc,"DETECTION: SKILL FX SPAWN",10,C.White) detLbl.Size=UDim2.new(1,0,0,16) detLbl.Font=Enum.Font.GothamBold
 
     local function ngRow(parent,lt,dt,def,lo,onChange)
-        local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
+        local r=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
         corner(r,6) stroke(r,C.Dim,1.1)
-        local ll=lbl(r,lt,9,C.White) ll.Size=UDim2.new(0.5,0,0,14) ll.Position=UDim2.new(0,8,0,1)
-        local dl=lbl(r,dt,7,C.Dim) dl.Size=UDim2.new(0.6,0,0,11) dl.Position=UDim2.new(0,8,0,14)
-        local box=mk("TextBox",{Size=UDim2.new(0,56,0,20),Position=UDim2.new(1,-62,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(def),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
-        corner(box,5) stroke(box,C.Dim,1)
+        local ll=lbl(r,lt,11,C.White) ll.Size=UDim2.new(0.55,0,0,16) ll.Position=UDim2.new(0,10,0,2) ll.Font=Enum.Font.GothamBold
+        local dl=lbl(r,dt,8,Color3.fromRGB(150,150,150)) dl.Size=UDim2.new(0.65,0,0,12) dl.Position=UDim2.new(0,10,0,17)
+        local box=mk("TextBox",{Size=UDim2.new(0,60,0,22),Position=UDim2.new(1,-66,0.5,-11),BackgroundColor3=C.BG,Text=tostring(def),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=12,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
+        corner(box,5) stroke(box,C.Teal,1.2)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(math.max(0,v)) save() end end)
     end
-    ngRow(dc,"Post-Skill Delay","Jeda setelah skill fire baru pickup (default 0.6s)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
-    ngRow(dc,"Pickup→Place","Jeda pickup ke place (default 0 = instant)",swapConfig.placeDelay,2,function(v) swapConfig.placeDelay=v end)
+    ngRow(dc,"Skill Timeout","Max tunggu skill detect (default 60s)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
+    ngRow(dc,"Post-Skill Delay","Jeda setelah skill detect baru pickup (default 0.6s)",swapConfig.placeDelay,2,function(v) swapConfig.placeDelay=v end)
     ngRow(dc,"Gap","Gap antar cycle (dtk, default 0)",swapConfig.swapDelay,3,function(v) swapConfig.swapDelay=v end)
 
-    local applyBtn=btn(dc,"Apply Global ke Semua Pet",9,C.TDim,C.Teal)
-    applyBtn.Size=UDim2.new(1,0,0,20) applyBtn.LayoutOrder=4 stroke(applyBtn,C.Teal,1.2)
+    local applyBtn=btn(dc,"APPLY GLOBAL KE SEMUA PET",10,C.BG,C.White)
+    applyBtn.Size=UDim2.new(1,0,0,26) applyBtn.LayoutOrder=4 applyBtn.Font=Enum.Font.GothamBold stroke(applyBtn,C.Teal,1.5)
     applyBtn.MouseButton1Click:Connect(function()
         for uuid,_ in pairs(teamPetUUIDs) do
             if not swapPerPet[uuid] then swapPerPet[uuid]={pickup=swapConfig.pickupDelay,place=swapConfig.placeDelay,enabled=false} end
@@ -1389,8 +1419,8 @@ buildSwapList=function()
         save() buildSwapList()
     end)
 
-    local skLogBtn=btn(dc,"SKILL DETECTOR LOG",9,C.Card,C.Gold)
-    skLogBtn.Size=UDim2.new(1,0,0,22) skLogBtn.LayoutOrder=3 stroke(skLogBtn,C.Gold,1.2)
+    local skLogBtn=btn(dc,"SKILL DETECTOR LOG",10,C.BG,C.White)
+    skLogBtn.Size=UDim2.new(1,0,0,26) skLogBtn.LayoutOrder=5 skLogBtn.Font=Enum.Font.GothamBold stroke(skLogBtn,C.Gold,1.5)
     skLogBtn.MouseButton1Click:Connect(function()
         pcall(initSkillDetector)
         pcall(updateSkillWatchTypes)
@@ -1405,16 +1435,14 @@ buildSwapList=function()
         end
         if #SkillDetector.notifLog==0 then
             table.insert(lines,"  (kosong - belum ada match)")
-            table.insert(lines,"")
-            table.insert(lines,"Klik 'RAW NOTIF LOG' biar lihat semua text yg muncul")
         end
         _dbgLines={}
         for _,l in ipairs(lines) do table.insert(_dbgLines,1,"> "..l) end
         if debugLbl then debugLbl.Text=table.concat(lines,"\n") end
     end)
 
-    local animSpyBtn=btn(dc,"ANIM SPY (toggle)",9,C.Card,C.Blue)
-    animSpyBtn.Size=UDim2.new(1,0,0,22) animSpyBtn.LayoutOrder=3 stroke(animSpyBtn,C.Blue,1.2)
+    local animSpyBtn=btn(dc,"ANIM SPY (toggle)",10,C.BG,C.White)
+    animSpyBtn.Size=UDim2.new(1,0,0,26) animSpyBtn.LayoutOrder=6 animSpyBtn.Font=Enum.Font.GothamBold stroke(animSpyBtn,C.Blue,1.5)
     animSpyBtn.MouseButton1Click:Connect(function()
         pcall(initAnimSpy)
         if not AnimSpy.enabled then
@@ -1447,8 +1475,8 @@ buildSwapList=function()
         end
     end)
 
-    local cdMonBtn=btn(dc,"CD LIVE MONITOR",9,C.TDim,C.Teal)
-    cdMonBtn.Size=UDim2.new(1,0,0,22) cdMonBtn.LayoutOrder=4 stroke(cdMonBtn,C.Teal,1.3)
+    local cdMonBtn=btn(dc,"CD LIVE MONITOR",10,C.BG,C.White)
+    cdMonBtn.Size=UDim2.new(1,0,0,26) cdMonBtn.LayoutOrder=7 cdMonBtn.Font=Enum.Font.GothamBold stroke(cdMonBtn,C.Teal,1.5)
     cdMonBtn.MouseButton1Click:Connect(function()
         local container=getGuiContainer()
         local existing=container:FindFirstChild("ZenxCDMon")
@@ -1550,12 +1578,12 @@ buildSwapList=function()
         return
     end
 
-    local thead=mk("Frame",{Size=UDim2.new(1,0,0,18),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=3,Parent=areas[3]})
+    local thead=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=3,Parent=areas[3]})
     corner(thead,5)
-    lbl(thead,"PET",8,C.Gray).Size=UDim2.new(0.40,0,1,0)
-    local tp=lbl(thead,"PostSkill",8,C.Gray,Enum.TextXAlignment.Center) tp.Size=UDim2.new(0.18,0,1,0) tp.Position=UDim2.new(0.40,0,0,0)
-    local tpl=lbl(thead,"Place",8,C.Gray,Enum.TextXAlignment.Center) tpl.Size=UDim2.new(0.18,0,1,0) tpl.Position=UDim2.new(0.58,0,0,0)
-    local ton=lbl(thead,"ON/OFF",8,C.Gray,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.24,0,1,0) ton.Position=UDim2.new(0.76,0,0,0)
+    local hpet=lbl(thead,"PET",10,C.White) hpet.Size=UDim2.new(0.40,0,1,0) hpet.Position=UDim2.new(0,8,0,0) hpet.Font=Enum.Font.GothamBold
+    local tp=lbl(thead,"TIMEOUT",10,C.White,Enum.TextXAlignment.Center) tp.Size=UDim2.new(0.18,0,1,0) tp.Position=UDim2.new(0.40,0,0,0) tp.Font=Enum.Font.GothamBold
+    local tpl=lbl(thead,"DELAY",10,C.White,Enum.TextXAlignment.Center) tpl.Size=UDim2.new(0.18,0,1,0) tpl.Position=UDim2.new(0.58,0,0,0) tpl.Font=Enum.Font.GothamBold
+    local ton=lbl(thead,"ON/OFF",10,C.White,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.24,0,1,0) ton.Position=UDim2.new(0.76,0,0,0) ton.Font=Enum.Font.GothamBold
 
     local n=3
     for uuid,_ in pairs(teamPetUUIDs) do
@@ -1566,41 +1594,41 @@ buildSwapList=function()
         local ps=swapPerPet[uuid]
         local petInfo=getTeamPetInfo(uuid).info
 
-        local row=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=ps.enabled and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=areas[3]})
+        local row=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=ps.enabled and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=areas[3]})
         corner(row,5) if ps.enabled then stroke(row,C.Teal,1.2) end
-        local pl=lbl(row,petInfo,8,ps.enabled and C.White or C.Gray) pl.Size=UDim2.new(0.39,0,1,0) pl.Position=UDim2.new(0,4,0,0)
+        local pl=lbl(row,petInfo,10,ps.enabled and C.White or Color3.fromRGB(180,180,180)) pl.Size=UDim2.new(0.39,0,1,0) pl.Position=UDim2.new(0,8,0,0) pl.Font=Enum.Font.GothamBold
 
-        local pkBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,18),Position=UDim2.new(0.40,2,0.5,-9),BackgroundColor3=C.Panel,Text=tostring(ps.pickup),TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=9,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
-        corner(pkBox,4) stroke(pkBox,C.Dim,1)
+        local pkBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,22),Position=UDim2.new(0.40,2,0.5,-11),BackgroundColor3=C.BG,Text=tostring(ps.pickup),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=11,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
+        corner(pkBox,4) stroke(pkBox,C.Teal,1.2)
         local cu1=uuid
         pkBox:GetPropertyChangedSignal("Text"):Connect(function()
             local v=tonumber(pkBox.Text) if v then swapPerPet[cu1].pickup=math.max(0,v) save() end
         end)
 
-        local plBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,18),Position=UDim2.new(0.58,2,0.5,-9),BackgroundColor3=C.Panel,Text=tostring(ps.place),TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=9,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
-        corner(plBox,4) stroke(plBox,C.Dim,1)
+        local plBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,22),Position=UDim2.new(0.58,2,0.5,-11),BackgroundColor3=C.BG,Text=tostring(ps.place),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=11,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
+        corner(plBox,4) stroke(plBox,C.Teal,1.2)
         plBox:GetPropertyChangedSignal("Text"):Connect(function()
             local v=tonumber(plBox.Text) if v then swapPerPet[cu1].place=math.max(0,v) save() end
         end)
 
-        local selTog=btn(row,ps.enabled and "ON" or "OFF",8,ps.enabled and C.TDim or C.Panel,ps.enabled and C.Teal or C.Gray)
-        selTog.Size=UDim2.new(0.22,0,0,18) selTog.Position=UDim2.new(0.77,2,0.5,-9)
-        local selStroke=stroke(selTog,ps.enabled and C.Teal or C.Dim,1.1)
+        local selTog=btn(row,ps.enabled and "ON" or "OFF",11,ps.enabled and C.BG or C.Panel,ps.enabled and Color3.fromRGB(70,255,170) or Color3.fromRGB(180,180,180))
+        selTog.Size=UDim2.new(0.22,0,0,22) selTog.Position=UDim2.new(0.77,2,0.5,-11) selTog.Font=Enum.Font.GothamBold
+        local selStroke=stroke(selTog,ps.enabled and C.Teal or C.Dim,1.5)
         selTog.MouseButton1Click:Connect(function()
             local p=swapPerPet[cu1] if not p then return end
             p.enabled=not p.enabled
             if p.enabled then
-                selTog.Text="ON" selTog.BackgroundColor3=C.TDim selTog.TextColor3=C.Teal selStroke.Color=C.Teal
+                selTog.Text="ON" selTog.BackgroundColor3=C.BG selTog.TextColor3=Color3.fromRGB(70,255,170) selStroke.Color=C.Teal
                 row.BackgroundColor3=C.TDim
                 local rs=row:FindFirstChildWhichIsA("UIStroke")
                 if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.2) end
                 pl.TextColor3=C.White
             else
-                selTog.Text="OFF" selTog.BackgroundColor3=C.Panel selTog.TextColor3=C.Gray selStroke.Color=C.Dim
+                selTog.Text="OFF" selTog.BackgroundColor3=C.Panel selTog.TextColor3=Color3.fromRGB(180,180,180) selStroke.Color=C.Dim
                 row.BackgroundColor3=C.Card
                 local rs=row:FindFirstChildWhichIsA("UIStroke")
                 if rs then rs:Destroy() end
-                pl.TextColor3=C.Gray
+                pl.TextColor3=Color3.fromRGB(180,180,180)
             end
             save()
             if isRunning and _G.ZenxStartSwap and _G.ZenxStopSwap then
@@ -2128,11 +2156,8 @@ local function startSwapForPet(uuid)
         end
 
         local baseline=tick()
-        local lastCD=readUICDForPetType(petType) or 0
-        local cdAvailable=(readUICDForPetType(petType)~=nil)
-
         if cycle==0 then
-            dbg("[Swap] "..petName.." CD-detect: "..(cdAvailable and "OK" or "FAIL (UI gak ke-baca)"))
+            dbg("[Swap] "..petName.." mode: detection-based (FX/Zone/anim spawn)")
         end
 
         while isRunning do
@@ -2143,9 +2168,9 @@ local function startSwapForPet(uuid)
             end
             cycle=cycle+1
 
-            -- POLL: CD jump = primary, anim/notif = backup, timeout = sanity
+            -- POLL: detection only (anim/FX spawn). Timeout = sanity (60s default).
             local pollStart=tick()
-            local maxWait=90  -- sanity timeout (CD-based, bukan timer)
+            local maxWait=math.max(5,ps.pickup or 60)  -- max wait kalau detection miss (ps.pickup = sanity timeout)
             local detected=false
             local detectVia=""
 
@@ -2153,37 +2178,14 @@ local function startSwapForPet(uuid)
                 ps=swapPerPet[uuid]
                 if not ps or not ps.enabled then break end
 
-                task.wait(0.1)
+                task.wait(0.05)
 
-                -- PRIMARY: CD jump (UI cooldown timer)
-                local currentCD=readUICDForPetType(petType)
-                if currentCD then
-                    -- Skill fire = CD melonjak naik (e.g. 0→30, atau 5→30)
-                    if currentCD>(lastCD or 0)+2 then
-                        detected=true detectVia="CD"
-                        lastCD=currentCD
-                        break
-                    end
-                    lastCD=currentCD
-                end
-
-                -- SECONDARY: anim spy
                 local a1=AnimSpy.skillFire[petType] or 0
                 local a2=AnimSpy.skillFire[petTypeLast] or 0
                 local animLatest=math.max(a1,a2)
                 if animLatest>baseline+0.1 then
-                    detected=true detectVia="ANIM"
+                    detected=true detectVia="DETECT"
                     baseline=animLatest
-                    break
-                end
-
-                -- TERTIARY: notif text
-                local f1=SkillDetector.lastFire[petType] or 0
-                local f2=SkillDetector.lastFire[petTypeLast] or 0
-                local latest=math.max(f1,f2)
-                if latest>baseline+0.1 then
-                    detected=true detectVia="NOTIF"
-                    baseline=latest
                     break
                 end
 
@@ -2192,9 +2194,9 @@ local function startSwapForPet(uuid)
 
             if cycle<=10 then
                 if detected then
-                    dbg(string.format("[Swap] %s fire via %s (%.1fs)",petName,detectVia,tick()-pollStart))
+                    dbg(string.format("[Swap] %s skill fire (%.2fs)",petName,tick()-pollStart))
                 else
-                    dbg(string.format("[Swap] %s timeout %.1fs (no detect)",petName,tick()-pollStart))
+                    dbg(string.format("[Swap] %s timeout %.1fs (no skill detected)",petName,tick()-pollStart))
                 end
             end
 
@@ -2202,27 +2204,24 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- DETECTED: tunggu ps.pickup detik (post-skill delay) baru pickup
-            -- TIMEOUT: pickup langsung (no extra delay)
+            -- POST-SKILL DELAY: tunggu user-config detik setelah skill detect, baru pickup
+            -- ps.place = post-skill delay (default 0.6 detik, sesuai request user)
+            -- Kalau timeout (gak detected), pickup langsung (no delay)
             if detected then
-                task.wait(ps.pickup or 0.6)
+                task.wait(ps.place or 0.6)
             end
             if not isRunning then break end
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
             pickupPet(uuid)
-            task.wait(ps.place or 0)
+            task.wait(0.05)  -- minimal delay biar server register pickup
             if not isRunning then break end
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
             equipPet(uuid)
 
-            baseline=tick()
-            -- Update lastCD setelah place ulang (CD masih jalan dari skill barusan)
-            task.wait(0.3)  -- delay biar CD UI sync setelah re-place
-            lastCD=readUICDForPetType(petType) or 0
-
-            task.wait(math.max(0,swapConfig.swapDelay or 0))
+            baseline=tick()  -- reset baseline supaya skill fire lama gak ke-detect lagi
+            task.wait(math.max(0.3,swapConfig.swapDelay or 0))  -- min 0.3s biar pet sempet placed sebelum poll lagi
         end
         swapTasks[uuid]=nil
         dbg("[Swap] "..petName.." END")
@@ -2418,4 +2417,4 @@ task.wait(1)
 if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
-print("ZenxLvl loaded! Swap mode = CD-jump detection (UI cooldown). Pickup = post-skill delay")
+print("ZenxLvl v5.0-fxdetect loaded! Detection = skill FX spawn (Particle/Zone/non-Walk anim)")
