@@ -1960,7 +1960,11 @@ end
 local function equipTeam()
     for uuid,_ in pairs(teamPetUUIDs) do
         if not isPetInSwap(uuid) then
-            equipPet(uuid) task.wait(0.3)
+            -- cek apakah pet masih di garden; kalau gak ada, re-equip
+            if not findPlacedPetByUUID(uuid) then
+                equipPet(uuid)
+                task.wait(0.1)
+            end
         end
     end
 end
@@ -2154,7 +2158,7 @@ local function doStart()
     end
 
     mainTask=task.spawn(function()
-        while isRunning do equipTeam() task.wait(config.equipInterval) end
+        while isRunning do equipTeam() task.wait(1) end
     end)
 
     monitorTask=task.spawn(function()
