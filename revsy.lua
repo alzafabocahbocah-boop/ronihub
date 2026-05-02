@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v5.4-detectonly"
+local SCRIPT_VERSION="v5.5-patched"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -41,7 +41,6 @@ pcall(function()
     if guiContainer:FindFirstChild("ZenxDebug") then guiContainer.ZenxDebug:Destroy() end
 end)
 
--- ON-SCREEN DEBUG OVERLAY
 local debugSg, debugLbl
 do
     debugSg = Instance.new("ScreenGui")
@@ -111,10 +110,15 @@ local function dbg(msg)
 end
 dbg("Step 1 OK: services + playerGui")
 
+-- ===== PATCH 1: + GetPetCooldown remote =====
 local equipRE = nil
+local getCooldownRF = nil
 for _,v in pairs(RS:GetDescendants()) do
     if v.Name=="PetsService" and (v:IsA("RemoteEvent") or v:IsA("RemoteFunction")) then
-        equipRE=v break
+        equipRE=v
+    end
+    if v.Name=="GetPetCooldown" and v:IsA("RemoteFunction") then
+        getCooldownRF=v
     end
 end
 local gameEvents = RS:WaitForChild("GameEvents",10)
@@ -137,7 +141,7 @@ if not petLeadRE then
     end
 end
 if not equipRE then equipRE = petLeadRE end
-dbg("Step 2 OK: remotes ("..tostring(equipRE.Name)..", "..tostring(petLeadRE.Name)..")")
+dbg("Step 2 OK: remotes ("..tostring(equipRE.Name)..", "..tostring(petLeadRE.Name)..", CD="..(getCooldownRF and "OK" or "no")..")")
 
 local DATA_FILE="ZenxLvlData.json"
 local function loadData()
@@ -168,12 +172,10 @@ end
 local d=getgenv().ZenxData
 dbg("Step 3 OK: data loaded")
 
--- MIGRATION: swapPerPet sekarang di-key pakai UUID, bukan name|kg
 if not d.swapPerPetVersion or d.swapPerPetVersion < 2 then
     d.swapPerPet = {}
     d.swapPerPetVersion = 2
 end
--- v3 migration: kalau pickup < 1, reset ke 15 (default new mode)
 if d.swapPerPetVersion < 3 then
     if d.swapPerPet then
         for uuid,cfg in pairs(d.swapPerPet) do
@@ -182,7 +184,6 @@ if d.swapPerPetVersion < 3 then
     end
     d.swapPerPetVersion = 3
 end
--- v7 migration: detection-only mode. Default timeout 1800s (30min, cover long-CD pets like Ferret 20min)
 if d.swapPerPetVersion < 7 then
     if d.swapConfig then
         d.swapConfig.pickupDelay = 1800
@@ -257,10 +258,12 @@ local function fmtUUID(uuid)
     if s:sub(1,1)~="{" then s="{"..s.."}" end
     return s
 end
+
+-- ===== PATCH 2: equipPet dengan nil arg ke-3 =====
 local function equipPet(uuid)
     local u=fmtUUID(uuid)
-    pcall(function() equipRE:FireServer("EquipPet",u) end)
-    pcall(function() petLeadRE:FireServer("EquipPet",u) end)
+    pcall(function() equipRE:FireServer("EquipPet",u,nil) end)
+    pcall(function() petLeadRE:FireServer("EquipPet",u,nil) end)
 end
 local function unequipPet(uuid)
     local u=fmtUUID(uuid)
@@ -277,6 +280,29 @@ local function pickupPet(uuid)
     pcall(function() petLeadRE:FireServer("PickPetUp",u) end)
     pcall(function() equipRE:FireServer("PickUpPet",u) end)
     pcall(function() petLeadRE:FireServer("PickUpPet",u) end)
+end
+
+-- ===== PATCH 3: getPetCD helper =====
+local function getPetCD(uuid)
+    if not getCooldownRF then return nil end
+    local u=fmtUUID(uuid)
+    local ok,res=pcall(function() return getCooldownRF:InvokeServer(u) end)
+    if not ok then return nil end
+    if type(res)=="number" then return res end
+    if type(res)=="boolean" then return res and 0 or nil end
+    if type(res)=="table" then
+        if next(res)==nil then return nil end
+        local sub=res[1]
+        if type(sub)=="number" then return sub end
+        if type(sub)=="table" then
+            for _,k in ipairs({"cooldown","cd","remaining","time","CD","Cooldown","Remaining","Time"}) do
+                if type(sub[k])=="number" then return sub[k] end
+            end
+            if type(sub[1])=="number" then return sub[1] end
+            if type(sub[2])=="number" then return sub[2] end
+        end
+    end
+    return nil
 end
 
 -- ============================================
@@ -704,20 +730,11 @@ minBtn.MouseButton1Click:Connect(function()
     minBtn.Text=minimized and "+" or "-"
 end)
 
--- DATA
 local teamPetUUIDs=d.teamPetUUIDs or {}
 local teamPetInfoCache=d.teamPetInfoCache or {}
 
--- ===== SKILL DETECTOR (chat/notification based) =====
-local SkillDetector={
-    lastFire={},
-    watchTypes={},
-    notifLog={},
-    rawLog={},
-    rawLogEnabled=false,
-    initialized=false,
-}
-
+-- ===== SKILL DETECTOR (kept as in original) =====
+local SkillDetector={lastFire={},watchTypes={},notifLog={},rawLog={},rawLogEnabled=false,initialized=false}
 local function _skillDetectorCheckText(text)
     if not text or text=="" or #text>200 then return end
     local low=text:lower()
@@ -725,9 +742,7 @@ local function _skillDetectorCheckText(text)
         if low:find(petType,1,true) then
             local lastTxt=SkillDetector.lastText and SkillDetector.lastText[petType]
             local lastT=SkillDetector.lastFire[petType] or 0
-            if lastTxt==text and (tick()-lastT)<2 then
-                return
-            end
+            if lastTxt==text and (tick()-lastT)<2 then return end
             SkillDetector.lastFire[petType]=tick()
             SkillDetector.lastText=SkillDetector.lastText or {}
             SkillDetector.lastText[petType]=text
@@ -737,14 +752,12 @@ local function _skillDetectorCheckText(text)
         end
     end
 end
-
 local function _skillDetectorRawLog(text,path)
     if not SkillDetector.rawLogEnabled then return end
     if not text or text=="" or #text>120 then return end
     table.insert(SkillDetector.rawLog,1,os.date("%X").." | "..text:sub(1,60).." @ "..path)
     if #SkillDetector.rawLog>50 then table.remove(SkillDetector.rawLog) end
 end
-
 local function _skillDetectorHookLabel(lbl)
     if not lbl or not lbl:IsA("TextLabel") then return end
     task.spawn(function()
@@ -769,7 +782,6 @@ local function _skillDetectorHookLabel(lbl)
         end)
     end)
 end
-
 local function initSkillDetector()
     if SkillDetector.initialized then return end
     SkillDetector.initialized=true
@@ -783,7 +795,6 @@ local function initSkillDetector()
     end)
     dbg("[SkillDetector] init OK")
 end
-
 local function updateSkillWatchTypes()
     SkillDetector.watchTypes={}
     for uuid,_ in pairs(teamPetUUIDs) do
@@ -799,39 +810,16 @@ local function updateSkillWatchTypes()
 end
 
 -- ===== ANIMATION SPY =====
-local AnimSpy={
-    log={},
-    hooked={},
-    skillFire={},
-    minLength=1.0,
-    enabled=false,
-    initialized=false,
-}
-
+local AnimSpy={log={},hooked={},skillFire={},minLength=1.0,enabled=false,initialized=false}
 local function _animSpyFindAnimator(model)
     for _,d in ipairs(model:GetDescendants()) do
         if d:IsA("Animator") then return d end
     end
     return nil
 end
-
--- Skill detection: aggressive multi-signal detection
--- Triggers: anim (non-walk/idle), particle/beam/trail, sounds, lights, surface guis, named parts
-local SKILL_FX_NAMES={
-    Zone=true,Aoe=true,AOE=true,Skill=true,SkillFx=true,SkillEffect=true,
-    Effect=true,Field=true,Aura=true,Range=true,Cast=true,Cast1=true,
-    Web=true,Spit=true,Shoot=true,Spray=true,Wave=true,Blast=true,
-    Hitbox=true,Damage=true,Beam=true,Slash=true,
-}
+local SKILL_FX_NAMES={Zone=true,Aoe=true,AOE=true,Skill=true,SkillFx=true,SkillEffect=true,Effect=true,Field=true,Aura=true,Range=true,Cast=true,Cast1=true,Web=true,Spit=true,Shoot=true,Spray=true,Wave=true,Blast=true,Hitbox=true,Damage=true,Beam=true,Slash=true}
 local SKIP_ANIM_NAMES={Walk=true,Idle=true,Run=true,Stand=true,Move=true,Sit=true,Sleep=true,Eat=true,Jump=true,Fall=true,Land=true,Swim=true,Climb=true}
--- ClassNames yg auto-trigger (skill FX)
-local SKILL_FX_CLASSES={
-    ParticleEmitter=true, Beam=true, Trail=true,
-    Sound=true,
-    PointLight=true, SpotLight=true, SurfaceLight=true,
-    SurfaceGui=true, BillboardGui=true,
-    Explosion=true, Fire=true, Smoke=true, Sparkles=true,
-}
+local SKILL_FX_CLASSES={ParticleEmitter=true,Beam=true,Trail=true,Sound=true,PointLight=true,SpotLight=true,SurfaceLight=true,SurfaceGui=true,BillboardGui=true,Explosion=true,Fire=true,Smoke=true,Sparkles=true}
 
 local function _animSpyMarkFire(model,reason)
     for uuid,info in pairs(teamPetInfoCache) do
@@ -854,15 +842,11 @@ end
 local function _animSpyHookModel(model)
     if AnimSpy.hooked[model] then return end
     AnimSpy.hooked[model]=true
-
-    -- Debug: log when model is hooked + check if matched to team pet
     local matchedPet=nil
     for uuid,info in pairs(teamPetInfoCache) do
         if model.Name:find(uuid,1,true) then matchedPet=info.name break end
     end
     dbg("[AnimSpy] hook "..model.Name:sub(2,9).." -> "..(matchedPet or "(no team match)"))
-
-    -- 1) Hook Animator: name-based filter
     task.spawn(function()
         for i=1,10 do
             local an=_animSpyFindAnimator(model)
@@ -870,14 +854,11 @@ local function _animSpyHookModel(model)
                 pcall(function()
                     an.AnimationPlayed:Connect(function(track)
                         local name="?"
-                        pcall(function()
-                            if track.Animation then name=track.Animation.Name end
-                        end)
+                        pcall(function() if track.Animation then name=track.Animation.Name end end)
                         if AnimSpy.enabled then
                             local len=0 local looped=true
                             pcall(function() len=track.Length or 0 looped=track.Looped end)
-                            local entry=string.format("%s|%s|%.1fs|loop=%s|%s",
-                                os.date("%X"),model.Name:sub(2,9),len,tostring(looped),name:sub(1,15))
+                            local entry=string.format("%s|%s|%.1fs|loop=%s|%s",os.date("%X"),model.Name:sub(2,9),len,tostring(looped),name:sub(1,15))
                             table.insert(AnimSpy.log,1,entry)
                             if #AnimSpy.log>50 then table.remove(AnimSpy.log) end
                         end
@@ -893,17 +874,13 @@ local function _animSpyHookModel(model)
             task.wait(0.5)
         end
     end)
-
-    -- 2) Hook DescendantAdded: skill effects
     pcall(function()
         model.DescendantAdded:Connect(function(d)
             local cls=d.ClassName
             if SKILL_FX_CLASSES[cls] then
                 _animSpyMarkFire(model,"FX:"..cls..":"..d.Name)
             elseif cls=="Part" or cls=="MeshPart" then
-                if SKILL_FX_NAMES[d.Name] then
-                    _animSpyMarkFire(model,"PART:"..d.Name)
-                end
+                if SKILL_FX_NAMES[d.Name] then _animSpyMarkFire(model,"PART:"..d.Name) end
             end
         end)
     end)
@@ -921,27 +898,18 @@ local function initAnimSpy()
             if m:IsA("Model") then _animSpyHookModel(m) end
         end
         pm.ChildAdded:Connect(function(m)
-            if m:IsA("Model") then
-                task.wait(0.3)
-                _animSpyHookModel(m)
-            end
+            if m:IsA("Model") then task.wait(0.3) _animSpyHookModel(m) end
         end)
     end)
     dbg("[AnimSpy] init OK")
-
-    -- Periodic rescan: catch any missed models (e.g. spawned during loading)
     task.spawn(function()
         while true do
             task.wait(3)
             local pmm=workspace:FindFirstChild("PetsPhysical")
             if pmm then pmm=pmm:FindFirstChild("PetMover") end
             if pmm then
-                local count=0
                 for _,m in ipairs(pmm:GetChildren()) do
-                    if m:IsA("Model") and not AnimSpy.hooked[m] then
-                        _animSpyHookModel(m)
-                        count=count+1
-                    end
+                    if m:IsA("Model") and not AnimSpy.hooked[m] then _animSpyHookModel(m) end
                 end
             end
         end
@@ -979,7 +947,6 @@ local mainTask=nil local monitorTask=nil
 local isAR=false local arTask=nil
 local arTog2,arTogStroke2,arStroke2,cdLbl2
 
--- SWAP SKILL state (UUID-keyed) - rapid pickup mode
 local swapPerPet=d.swapPerPet or {}
 local swapConfig=d.swapConfig or {swapDelay=0,pickupDelay=1800,placeDelay=0.6}
 local swapTasks={}
@@ -1000,19 +967,14 @@ local function save()
     saveToFile(d)
 end
 
-local function teamCount()
-    local n=0 for _ in pairs(teamPetUUIDs) do n=n+1 end return n
-end
-local function selCount()
-    local n=0 for _ in pairs(targetPetTypes) do n=n+1 end return n
-end
+local function teamCount() local n=0 for _ in pairs(teamPetUUIDs) do n=n+1 end return n end
+local function selCount() local n=0 for _ in pairs(targetPetTypes) do n=n+1 end return n end
 local function isTargetPet(name)
     if selCount()==0 then return true end
     if targetPetTypes[name] then return true end
     if targetPetTypes[getBaseName(name)] then return true end
     return false
 end
-
 local function getTeamPetInfo(uuid)
     if teamPetInfoCache[uuid] then return teamPetInfoCache[uuid] end
     local item=findPetInBackpack(uuid)
@@ -1430,7 +1392,7 @@ buildSwapList=function()
     corner(dc,7) stroke(dc,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=dc})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=dc})
-    lbl(dc,"Detection: skill FX/anim spawn (auto)",9,C.Teal).Size=UDim2.new(1,0,0,13)
+    lbl(dc,"Detection: skill FX/anim spawn + CD remote",9,C.Teal).Size=UDim2.new(1,0,0,13)
 
     local function ngRow(parent,lt,dt,def,lo,onChange)
         local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
@@ -1489,8 +1451,6 @@ buildSwapList=function()
             dbg("[AnimSpy] ON - tunggu pet skill fire, klik lagi buat lihat log")
         else
             local lines={}
-
-            -- Show currently placed pets + hook status
             table.insert(lines,"=== PLACED PETS in workspace ===")
             local pp=workspace:FindFirstChild("PetsPhysical")
             local pm=pp and pp:FindFirstChild("PetMover")
@@ -1521,8 +1481,6 @@ buildSwapList=function()
             end
             table.insert(lines,"Total: "..placedCount.." placed, "..hookedCount.." hooked")
             table.insert(lines,"")
-
-            -- Show last anim events
             table.insert(lines,"=== LAST "..#AnimSpy.log.." ANIM EVENTS ===")
             for i=1,math.min(20,#AnimSpy.log) do
                 table.insert(lines,AnimSpy.log[i])
@@ -1531,8 +1489,6 @@ buildSwapList=function()
                 table.insert(lines,"(kosong - belum ada animation play)")
             end
             table.insert(lines,"")
-
-            -- Show skill fire markers
             table.insert(lines,"=== SKILL FIRE MARKERS ===")
             local cnt=0
             for t,tm in pairs(AnimSpy.skillFire) do
@@ -1540,7 +1496,6 @@ buildSwapList=function()
                 table.insert(lines,"  "..t.." @ "..os.date("%X",tm))
             end
             if cnt==0 then table.insert(lines,"  (none)") end
-
             _dbgLines={}
             for _,l in ipairs(lines) do table.insert(_dbgLines,1,"> "..l) end
             if debugLbl then debugLbl.Text=table.concat(lines,"\n") end
@@ -2199,16 +2154,8 @@ end
 
 
 -- ============================================
--- RAPID SWAP TASK (per pet)
+-- RAPID SWAP TASK (per pet) — WITH PATCH 4: hybrid AnimSpy + GetPetCooldown
 -- ============================================
--- Behavior:
---   1. Place pet (equip)
---   2. Poll: check anim spy / notif detector for skill fire, OR until timeout (ps.pickup, default 0.6s)
---      - Polling rate 30ms (was 100ms), minWait 50ms (was 2-10s)
---      - Detected skill fire = pickup INSTANT (anim belum selesai)
---      - Timeout = fallback pickup (worst case = ps.pickup detik)
---   3. Pickup → wait ps.place (default 0 = instant) → place again
---   4. Loop
 local function startSwapForPet(uuid)
     if swapTasks[uuid] then return end
     local petInfo=getTeamPetInfo(uuid)
@@ -2231,7 +2178,7 @@ local function startSwapForPet(uuid)
 
         local baseline=tick()
         if cycle==0 then
-            dbg("[Swap] "..petName.." mode: detection-based (FX/Zone/anim spawn)")
+            dbg("[Swap] "..petName.." mode: hybrid (AnimSpy + GetPetCooldown)")
         end
 
         while isRunning do
@@ -2242,25 +2189,36 @@ local function startSwapForPet(uuid)
             end
             cycle=cycle+1
 
-            -- POLL: detection only (anim/FX spawn). Timeout = sanity (60s default).
             local pollStart=tick()
-            local maxWait=math.max(5,ps.pickup or 60)  -- max wait kalau detection miss (ps.pickup = sanity timeout)
+            local maxWait=math.max(5,ps.pickup or 60)
             local detected=false
             local detectVia=""
 
+            -- ===== PATCH 4: polling loop dengan 2 trigger source =====
             while isRunning do
                 ps=swapPerPet[uuid]
                 if not ps or not ps.enabled then break end
 
-                task.wait(0.05)
+                task.wait(0.1)
 
+                -- TRIGGER 1: AnimSpy (anim/FX detection - original)
                 local a1=AnimSpy.skillFire[petType] or 0
                 local a2=AnimSpy.skillFire[petTypeLast] or 0
                 local animLatest=math.max(a1,a2)
                 if animLatest>baseline+0.1 then
-                    detected=true detectVia="DETECT"
+                    detected=true detectVia="ANIM"
                     baseline=animLatest
                     break
+                end
+
+                -- TRIGGER 2: GetPetCooldown remote (PATCH 4 - kayak sc temen)
+                if getCooldownRF then
+                    local cd=getPetCD(uuid)
+                    if cd~=nil and cd<=0.5 then
+                        detected=true detectVia="CD="..string.format("%.1f",cd)
+                        baseline=tick()
+                        break
+                    end
                 end
 
                 if tick()-pollStart>=maxWait then break end
@@ -2268,7 +2226,7 @@ local function startSwapForPet(uuid)
 
             if cycle<=10 then
                 if detected then
-                    dbg(string.format("[Swap] %s skill fire (%.2fs)",petName,tick()-pollStart))
+                    dbg(string.format("[Swap] %s skill (%.2fs %s)",petName,tick()-pollStart,detectVia))
                 else
                     dbg(string.format("[Swap] %s timeout %.0fs (no skill - reset & retry)",petName,tick()-pollStart))
                 end
@@ -2278,27 +2236,23 @@ local function startSwapForPet(uuid)
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- HANYA pickup kalau skill BENERAN ke-detect.
-            -- Kalau timeout (gak detected), reset baseline & lanjut polling -- jangan pickup paksa
+            -- HANYA pickup kalau skill BENERAN ke-detect (anim/FX/CD).
             if not detected then
                 baseline=tick()
                 task.wait(0.3)
-                -- skip pickup, lanjut iter berikutnya buat polling lagi
             else
-                -- POST-SKILL DELAY: tunggu user-config detik setelah skill detect, baru pickup
                 task.wait(ps.place or 0.6)
                 if not isRunning then break end
                 ps=swapPerPet[uuid]
                 if not ps or not ps.enabled then break end
                 pickupPet(uuid)
-                task.wait(0.05)  -- minimal delay biar server register pickup
+                task.wait(0.05)
                 if not isRunning then break end
                 ps=swapPerPet[uuid]
                 if not ps or not ps.enabled then break end
-                equipPet(uuid)
-
-                baseline=tick()  -- reset baseline supaya skill fire lama gak ke-detect lagi
-                task.wait(math.max(0.3,swapConfig.swapDelay or 0))  -- min 0.3s biar pet sempet placed sebelum poll lagi
+                equipPet(uuid)  -- pakai PATCH 2: nil 3rd arg
+                baseline=tick()
+                task.wait(math.max(0.3,swapConfig.swapDelay or 0))
             end
         end
         swapTasks[uuid]=nil
@@ -2396,7 +2350,7 @@ local function doStart()
             dbg("[doStart] launching swap "..((info and info.name) or "?"))
             local cu=uuid local sg2=stagger
             task.delay(sg2,function() if isRunning then startSwapForPet(cu) end end)
-            stagger=stagger+0.1  -- stagger lebih kecil utk rapid mode
+            stagger=stagger+0.1
         end
     end
 
@@ -2495,4 +2449,4 @@ task.wait(1)
 if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
-print("ZenxLvl v5.0-fxdetect loaded! Detection = skill FX spawn (Particle/Zone/non-Walk anim)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Hybrid detection: AnimSpy + GetPetCooldown")
