@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v5.2-rescan"
+local SCRIPT_VERSION="v5.3-spydiag"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -1488,22 +1488,59 @@ buildSwapList=function()
             animSpyBtn.Text="ANIM SPY ON - klik utk show"
             dbg("[AnimSpy] ON - tunggu pet skill fire, klik lagi buat lihat log")
         else
-            local lines={"[AnimSpy] last "..#AnimSpy.log.." anim played:"}
-            for i=1,math.min(30,#AnimSpy.log) do
+            local lines={}
+
+            -- Show currently placed pets + hook status
+            table.insert(lines,"=== PLACED PETS in workspace ===")
+            local pp=workspace:FindFirstChild("PetsPhysical")
+            local pm=pp and pp:FindFirstChild("PetMover")
+            local placedCount=0
+            local hookedCount=0
+            if pm then
+                for _,m in ipairs(pm:GetChildren()) do
+                    if m:IsA("Model") then
+                        placedCount=placedCount+1
+                        local short=m.Name:sub(2,9)
+                        local hooked=AnimSpy.hooked[m] and "HOOKED" or "no-hook"
+                        if AnimSpy.hooked[m] then hookedCount=hookedCount+1 end
+                        local matchPet=nil
+                        for uuid,info in pairs(teamPetInfoCache) do
+                            if m.Name:find(uuid,1,true) then matchPet=info.name break end
+                        end
+                        local enabled=""
+                        for uuid,_ in pairs(swapPerPet) do
+                            if m.Name:find(uuid,1,true) and swapPerPet[uuid].enabled then
+                                enabled=" [SWAP-ON]" break
+                            end
+                        end
+                        table.insert(lines,"  "..short.." | "..hooked.." | "..(matchPet or "?")..enabled)
+                    end
+                end
+            else
+                table.insert(lines,"  PetMover NOT FOUND")
+            end
+            table.insert(lines,"Total: "..placedCount.." placed, "..hookedCount.." hooked")
+            table.insert(lines,"")
+
+            -- Show last anim events
+            table.insert(lines,"=== LAST "..#AnimSpy.log.." ANIM EVENTS ===")
+            for i=1,math.min(20,#AnimSpy.log) do
                 table.insert(lines,AnimSpy.log[i])
             end
             if #AnimSpy.log==0 then
-                table.insert(lines,"(kosong - pet placed?)")
-                table.insert(lines,"Pastikan pet TIM ditaruh di garden")
+                table.insert(lines,"(kosong - belum ada animation play)")
             end
             table.insert(lines,"")
-            table.insert(lines,"Skill detected (via anim):")
+
+            -- Show skill fire markers
+            table.insert(lines,"=== SKILL FIRE MARKERS ===")
             local cnt=0
             for t,tm in pairs(AnimSpy.skillFire) do
                 cnt=cnt+1
                 table.insert(lines,"  "..t.." @ "..os.date("%X",tm))
             end
             if cnt==0 then table.insert(lines,"  (none)") end
+
             _dbgLines={}
             for _,l in ipairs(lines) do table.insert(_dbgLines,1,"> "..l) end
             if debugLbl then debugLbl.Text=table.concat(lines,"\n") end
