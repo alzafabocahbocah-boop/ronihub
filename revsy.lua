@@ -197,6 +197,17 @@ if d.swapPerPetVersion < 7 then
     end
     d.swapPerPetVersion = 7
 end
+if d.swapPerPetVersion < 8 then
+    -- migrate to v78 pure-CD mechanic
+    d.swapConfig = {pollInterval=0.1,burstDelay=0.05,equipBurst=3}
+    if d.swapPerPet then
+        for _,cfg in pairs(d.swapPerPet) do
+            cfg.pickup = nil
+            cfg.place = nil
+        end
+    end
+    d.swapPerPetVersion = 8
+end
 
 local C={
     BG=Color3.fromRGB(15,15,15),Panel=Color3.fromRGB(21,21,21),Card=Color3.fromRGB(25,25,25),
@@ -948,7 +959,7 @@ local isAR=false local arTask=nil
 local arTog2,arTogStroke2,arStroke2,cdLbl2
 
 local swapPerPet=d.swapPerPet or {}
-local swapConfig=d.swapConfig or {swapDelay=0,pickupDelay=1800,placeDelay=0.6}
+local swapConfig=d.swapConfig or {pollInterval=0.1,burstDelay=0.05,equipBurst=3}
 local swapTasks={}
 
 local buildSwapList
@@ -1392,7 +1403,7 @@ buildSwapList=function()
     corner(dc,7) stroke(dc,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=dc})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=dc})
-    lbl(dc,"Detection: skill FX/anim spawn + CD remote",9,C.Teal).Size=UDim2.new(1,0,0,13)
+    lbl(dc,"Setting Swap Skill",9,C.Teal).Size=UDim2.new(1,0,0,13)
 
     local function ngRow(parent,lt,dt,def,lo,onChange)
         local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
@@ -1403,17 +1414,14 @@ buildSwapList=function()
         corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(math.max(0,v)) save() end end)
     end
-    ngRow(dc,"Skill Timeout","Max tunggu skill detect (default 1800s = 30min)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
-    ngRow(dc,"Pickup Delay","Pickup setelah pet mulai skill (default 0.6s)",swapConfig.placeDelay,2,function(v) swapConfig.placeDelay=v end)
-    ngRow(dc,"Gap","Gap antar cycle (dtk, default 0)",swapConfig.swapDelay,3,function(v) swapConfig.swapDelay=v end)
+    ngRow(dc,"Poll Interval","Cek CD tiap N detik (default 0.1)",swapConfig.pollInterval,1,function(v) swapConfig.pollInterval=math.max(0.05,v) end)
+    ngRow(dc,"Equip Burst","Spam equip N kali tiap cycle (default 3)",swapConfig.equipBurst,2,function(v) swapConfig.equipBurst=math.max(1,math.floor(v)) end)
 
     local applyBtn=btn(dc,"APPLY GLOBAL KE SEMUA PET",10,C.BG,C.White)
     applyBtn.Size=UDim2.new(1,0,0,26) applyBtn.LayoutOrder=4 applyBtn.Font=Enum.Font.GothamBold stroke(applyBtn,C.Teal,1.5)
     applyBtn.MouseButton1Click:Connect(function()
         for uuid,_ in pairs(teamPetUUIDs) do
-            if not swapPerPet[uuid] then swapPerPet[uuid]={pickup=swapConfig.pickupDelay,place=swapConfig.placeDelay,enabled=false} end
-            swapPerPet[uuid].pickup=swapConfig.pickupDelay
-            swapPerPet[uuid].place=swapConfig.placeDelay
+            if not swapPerPet[uuid] then swapPerPet[uuid]={enabled=false} end
         end
         save() buildSwapList()
     end)
@@ -1433,39 +1441,25 @@ buildSwapList=function()
 
     local thead=mk("Frame",{Size=UDim2.new(1,0,0,18),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=3,Parent=areas[3]})
     corner(thead,5)
-    lbl(thead,"PET",8,C.Gray).Size=UDim2.new(0.40,0,1,0)
-    local tp=lbl(thead,"Timeout",8,C.Gray,Enum.TextXAlignment.Center) tp.Size=UDim2.new(0.18,0,1,0) tp.Position=UDim2.new(0.40,0,0,0)
-    local tpl=lbl(thead,"Delay",8,C.Gray,Enum.TextXAlignment.Center) tpl.Size=UDim2.new(0.18,0,1,0) tpl.Position=UDim2.new(0.58,0,0,0)
-    local ton=lbl(thead,"ON/OFF",8,C.Gray,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.24,0,1,0) ton.Position=UDim2.new(0.76,0,0,0)
+    lbl(thead,"PET",8,C.Gray).Size=UDim2.new(0.7,0,1,0)
+    local ton=lbl(thead,"ON/OFF",8,C.Gray,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.28,0,1,0) ton.Position=UDim2.new(0.7,0,0,0)
 
     local n=3
     for uuid,_ in pairs(teamPetUUIDs) do
         n=n+1
         if not swapPerPet[uuid] then
-            swapPerPet[uuid]={pickup=swapConfig.pickupDelay,place=swapConfig.placeDelay,enabled=false}
+            swapPerPet[uuid]={enabled=false}
         end
         local ps=swapPerPet[uuid]
         local petInfo=getTeamPetInfo(uuid).info
 
         local row=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=ps.enabled and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=areas[3]})
         corner(row,5) if ps.enabled then stroke(row,C.Teal,1.2) end
-        local pl=lbl(row,petInfo,8,ps.enabled and C.White or C.Gray) pl.Size=UDim2.new(0.39,0,1,0) pl.Position=UDim2.new(0,4,0,0)
+        local pl=lbl(row,petInfo,9,ps.enabled and C.White or C.Gray) pl.Size=UDim2.new(0.69,0,1,0) pl.Position=UDim2.new(0,8,0,0)
 
-        local pkBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,18),Position=UDim2.new(0.40,2,0.5,-9),BackgroundColor3=C.Panel,Text=tostring(ps.pickup),TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=9,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
-        corner(pkBox,4) stroke(pkBox,C.Dim,1)
         local cu1=uuid
-        pkBox:GetPropertyChangedSignal("Text"):Connect(function()
-            local v=tonumber(pkBox.Text) if v then swapPerPet[cu1].pickup=math.max(0,v) save() end
-        end)
-
-        local plBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,18),Position=UDim2.new(0.58,2,0.5,-9),BackgroundColor3=C.Panel,Text=tostring(ps.place),TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=9,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
-        corner(plBox,4) stroke(plBox,C.Dim,1)
-        plBox:GetPropertyChangedSignal("Text"):Connect(function()
-            local v=tonumber(plBox.Text) if v then swapPerPet[cu1].place=math.max(0,v) save() end
-        end)
-
-        local selTog=btn(row,ps.enabled and "ON" or "OFF",8,ps.enabled and C.TDim or C.Panel,ps.enabled and C.Teal or C.Gray)
-        selTog.Size=UDim2.new(0.22,0,0,18) selTog.Position=UDim2.new(0.77,2,0.5,-9)
+        local selTog=btn(row,ps.enabled and "ON" or "OFF",9,ps.enabled and C.TDim or C.Panel,ps.enabled and C.Teal or C.Gray)
+        selTog.Size=UDim2.new(0.26,0,0,20) selTog.Position=UDim2.new(0.72,2,0.5,-10)
         local selStroke=stroke(selTog,ps.enabled and C.Teal or C.Dim,1.1)
         selTog.MouseButton1Click:Connect(function()
             local p=swapPerPet[cu1] if not p then return end
@@ -1984,26 +1978,14 @@ local function startSwapForPet(uuid)
     if swapTasks[uuid] then return end
     local petInfo=getTeamPetInfo(uuid)
     local petName=petInfo and petInfo.name or "?"
-    dbg("[Swap] START "..petName)
+    dbg("[Swap] START "..petName.." (pure CD mode)")
     swapTasks[uuid] = task.spawn(function()
+        -- Initial equip
         equipPet(uuid)
         task.wait(0.5)
         local cycle=0
-
-        local petType=getBaseName(petName):lower()
-        local petTypeLast=petType
-        local words={}
-        for w in petType:gmatch("%S+") do table.insert(words,w) end
-        if #words>1 then petTypeLast=words[#words] end
-
-        if cycle==0 then
-            dbg("[Swap] "..petName.." watch: "..petType..(petTypeLast~=petType and ", "..petTypeLast or ""))
-        end
-
-        local baseline=tick()
-        if cycle==0 then
-            dbg("[Swap] "..petName.." mode: hybrid (AnimSpy + GetPetCooldown)")
-        end
+        local lastCD=nil
+        local skillFiredOnce=false
 
         while isRunning do
             local ps=swapPerPet[uuid]
@@ -2013,71 +1995,56 @@ local function startSwapForPet(uuid)
             end
             cycle=cycle+1
 
+            -- POLL: tunggu sampai CD ready (== nil/empty/0)
             local pollStart=tick()
-            local maxWait=math.max(5,ps.pickup or 60)
-            local detected=false
-            local detectVia=""
-
-            -- ===== PATCH 4: polling loop dengan 2 trigger source =====
             while isRunning do
                 ps=swapPerPet[uuid]
                 if not ps or not ps.enabled then break end
 
-                task.wait(0.1)
+                local cd=getPetCD(uuid)
 
-                -- TRIGGER 1: AnimSpy (anim/FX detection - original)
-                local a1=AnimSpy.skillFire[petType] or 0
-                local a2=AnimSpy.skillFire[petTypeLast] or 0
-                local animLatest=math.max(a1,a2)
-                if animLatest>baseline+0.1 then
-                    detected=true detectVia="ANIM"
-                    baseline=animLatest
-                    break
-                end
-
-                -- TRIGGER 2: GetPetCooldown remote (PATCH 4 - kayak sc temen)
-                if getCooldownRF then
-                    local cd=getPetCD(uuid)
-                    if cd~=nil and cd<=0.5 then
-                        detected=true detectVia="CD="..string.format("%.1f",cd)
-                        baseline=tick()
-                        break
+                -- detect skill mulai aktif (CD muncul dari nil)
+                if cd~=nil and (lastCD==nil or lastCD<=0.5) and cd>0.5 then
+                    skillFiredOnce=true
+                    if cycle<=10 then
+                        dbg(string.format("[Swap] %s skill FIRED (CD=%.1f)",petName,cd))
                     end
                 end
 
-                if tick()-pollStart>=maxWait then break end
-            end
-
-            if cycle<=10 then
-                if detected then
-                    dbg(string.format("[Swap] %s skill (%.2fs %s)",petName,tick()-pollStart,detectVia))
-                else
-                    dbg(string.format("[Swap] %s timeout %.0fs (no skill - reset & retry)",petName,tick()-pollStart))
+                -- ready: CD nil atau 0
+                if skillFiredOnce and (cd==nil or cd<=0.5) then
+                    if cycle<=10 then
+                        dbg(string.format("[Swap] %s CD READY -> swap (%.2fs wait)",petName,tick()-pollStart))
+                    end
+                    lastCD=cd
+                    break
                 end
+
+                lastCD=cd
+                task.wait(swapConfig.pollInterval or 0.1)
             end
 
             if not isRunning then break end
             ps=swapPerPet[uuid]
             if not ps or not ps.enabled then break end
 
-            -- HANYA pickup kalau skill BENERAN ke-detect (anim/FX/CD).
-            if not detected then
-                baseline=tick()
-                task.wait(0.3)
-            else
-                task.wait(ps.place or 0.6)
+            -- BURST: pickup spam + equip burst (v78 pattern)
+            pickupPet(uuid)
+            task.wait(swapConfig.burstDelay or 0.05)
+            if not isRunning then break end
+
+            local burst=swapConfig.equipBurst or 3
+            for i=1,burst do
                 if not isRunning then break end
                 ps=swapPerPet[uuid]
                 if not ps or not ps.enabled then break end
-                pickupPet(uuid)
-                task.wait(0.05)
-                if not isRunning then break end
-                ps=swapPerPet[uuid]
-                if not ps or not ps.enabled then break end
-                equipPet(uuid)  -- pakai PATCH 2: nil 3rd arg
-                baseline=tick()
-                task.wait(math.max(0.3,swapConfig.swapDelay or 0))
+                equipPet(uuid)
+                if i<burst then task.wait(swapConfig.burstDelay or 0.05) end
             end
+
+            skillFiredOnce=false
+            lastCD=nil
+            task.wait(0.3)  -- biar CD update di server
         end
         swapTasks[uuid]=nil
         dbg("[Swap] "..petName.." END")
