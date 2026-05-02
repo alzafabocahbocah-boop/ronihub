@@ -957,6 +957,7 @@ local isRunning=false
 local mainTask=nil local monitorTask=nil
 local isAR=false local arTask=nil
 local arTog2,arTogStroke2,arStroke2,cdLbl2
+local currentLevelingUUIDs={}  -- UUID set: pet yg lagi di-level skrg (utk track unequip)
 
 local swapPerPet=d.swapPerPet or {}
 local swapConfig=d.swapConfig or {pollInterval=0.1,burstDelay=0.05,equipBurst=3}
@@ -2101,6 +2102,12 @@ local function doStop(reason)
     if monitorTask then task.cancel(monitorTask) monitorTask=nil end
     stopAllSwaps()
     statusLbl.Text="Unequip..." statusLbl.TextColor3=C.Gray
+    -- unequip pet yg lagi di-level
+    for uuid,_ in pairs(currentLevelingUUIDs) do
+        pcall(function() unequipPet(uuid) end)
+        task.wait(0.05)
+    end
+    currentLevelingUUIDs={}
     unequipTeam()
     setRunning(false)
     statusLbl.Text=reason or "Dihentikan" statusLbl.TextColor3=C.Gray
@@ -2111,6 +2118,7 @@ local function doStart()
     dbg("[doStart] dipanggil")
     cooldownDebugDone={}
     _uiCDSlotCache={}
+    currentLevelingUUIDs={}  -- reset state leveling
     if isRunning then dbg("[doStart] sudah running, skip") return end
     if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
@@ -2151,54 +2159,78 @@ local function doStart()
 
     monitorTask=task.spawn(function()
         while isRunning do
+            -- 1) cek pet yg lagi di-level: yg umur >= toAge berarti udah selesai
+            local doneList={}
+            for uuid,_ in pairs(currentLevelingUUIDs) do
+                local item=findPetInBackpack(uuid)
+                if item then
+                    local age=getAgeFromKG(item)
+                    if age and age>=toAge then
+                        table.insert(doneList,uuid)
+                    end
+                else
+                    -- pet hilang dari backpack (mungkin di-trade/gift) → drop
+                    table.insert(doneList,uuid)
+                end
+            end
+
+            -- 2) unequip pet selesai
+            for _,uuid in ipairs(doneList) do
+                pcall(function() unequipPet(uuid) end)
+                currentLevelingUUIDs[uuid]=nil
+                task.wait(0.1)
+            end
+
+            -- 3) hitung slot kepake
+            local slotsUsed=0
+            for _ in pairs(currentLevelingUUIDs) do slotsUsed=slotsUsed+1 end
+            local slotsFree=maxPetTarget-slotsUsed
+
+            -- 4) kalau ada slot kosong, ambil pet baru dari queue
             local queue2=getQueue()
-            if #queue2==0 then
+            local available={}
+            for _,pet in ipairs(queue2) do
+                local uuid=getPetUUID(pet)
+                if uuid and not currentLevelingUUIDs[tostring(uuid)] then
+                    table.insert(available,pet)
+                end
+            end
+
+            -- semua selesai (slot kosong + queue kosong)
+            if slotsUsed==0 and #available==0 then
                 doStop("Semua pet selesai Age "..toAge.."!")
                 statusLbl.TextColor3=C.Green buildTargetList() break
             end
 
-            local batch={}
-            for i,pet in ipairs(queue2) do
-                if i>maxPetTarget then break end
-                table.insert(batch,pet)
-            end
-
-            local batchUUIDs={}
-            for _,pet in ipairs(batch) do
-                local uuid=getPetUUID(pet)
-                if uuid then batchUUIDs[tostring(uuid)]=true end
-            end
-
-            local bp=player:FindFirstChild("Backpack")
-            if bp then
-                for _,item in pairs(bp:GetChildren()) do
-                    if isPet(item) then
-                        local uuid=getPetUUID(item)
-                        local uuidStr=uuid and tostring(uuid) or ""
-                        local name=getPetName(item)
-                        if uuid and not teamPetUUIDs[uuidStr] and isTargetPet(name) and not batchUUIDs[uuidStr] then
-                            local age=getAgeFromKG(item)
-                            if age==nil or (age>=fromAge and age<toAge) then
-                                unequipPet(uuid)
-                                task.wait(0.05)
-                            end
-                        end
+            if slotsFree>0 and #available>0 then
+                local toEquip=math.min(slotsFree,#available)
+                for i=1,toEquip do
+                    if not isRunning then break end
+                    local uuid=getPetUUID(available[i])
+                    if uuid then
+                        equipPet(uuid)
+                        currentLevelingUUIDs[tostring(uuid)]=true
+                        task.wait(0.15)
                     end
                 end
             end
-            task.wait(0.5)
 
-            for _,pet in ipairs(batch) do
-                if not isRunning then break end
-                local uuid=getPetUUID(pet)
-                if uuid then equipPet(uuid) task.wait(0.15) end
+            -- 5) update status
+            local statusParts={}
+            local activeNames={}
+            for uuid,_ in pairs(currentLevelingUUIDs) do
+                local item=findPetInBackpack(uuid)
+                if item then
+                    local age=getAgeFromKG(item) or "?"
+                    table.insert(activeNames,getPetName(item).." A"..tostring(age))
+                end
             end
-
-            if #batch>0 and batch[1] and batch[1].Parent then
-                local age=getAgeFromKG(batch[1])
-                statusLbl.Text=getPetName(batch[1]).." Age "..(age or "?").."/"..toAge.." | Sisa "..#queue2.." | Batch "..#batch
-                statusLbl.TextColor3=C.Teal
+            if #activeNames>0 then
+                statusLbl.Text="Lvl: "..table.concat(activeNames,", ").." | Q:"..#available
+            else
+                statusLbl.Text="Tunggu... Q:"..#available
             end
+            statusLbl.TextColor3=C.Teal
 
             task.wait(3)
         end
