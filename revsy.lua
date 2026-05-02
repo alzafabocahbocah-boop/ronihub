@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v5.5-patched"
+local SCRIPT_VERSION="v5.7"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -676,7 +676,7 @@ corner(main,10) stroke(main,C.Teal,2)
 local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=main})
 corner(TB,10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5),Position=UDim2.new(0,0,1,-1.5),BackgroundColor3=C.Teal,BorderSizePixel=0,Parent=TB})
-lbl(TB,"ZENX AUTO LEVELING",11,C.Teal).Size=UDim2.new(1,-60,1,0)
+lbl(TB,"ZENX AUTO LEVELING  "..SCRIPT_VERSION,11,C.Teal).Size=UDim2.new(1,-60,1,0)
 
 local minBtn=btn(TB,"-",13,C.Panel,C.Gray)
 minBtn.Size=UDim2.new(0,22,0,22) minBtn.Position=UDim2.new(1,-50,0.5,-11) stroke(minBtn,C.Dim,1.2)
@@ -2119,6 +2119,47 @@ local function doStop(reason)
     buildTargetList()
 end
 
+-- Cleanup: keluarin pet di garden yg bukan tim & bukan target
+local function cleanupGarden()
+    local petsPhys=workspace:FindFirstChild("PetsPhysical")
+    local petMover=petsPhys and petsPhys:FindFirstChild("PetMover")
+    if not petMover then return 0 end
+
+    local removed=0
+    for _,placedPet in ipairs(petMover:GetChildren()) do
+        local modelName=placedPet.Name
+        local uuidNoBrace=modelName:gsub("^{",""):gsub("}$","")
+
+        -- 1) cek pet tim (cocokin format dengan/tanpa kurung)
+        local isTeam = teamPetUUIDs[uuidNoBrace]==true
+            or teamPetUUIDs[modelName]==true
+            or teamPetUUIDs["{"..uuidNoBrace.."}"]==true
+
+        if not isTeam then
+            -- 2) cek pet target (cari Tool di backpack, cek isTargetPet + age)
+            local isTarget=false
+            local item=findPetInBackpack(uuidNoBrace) or findPetInBackpack(modelName)
+            if item then
+                local petName=getPetName(item)
+                if isTargetPet(petName) then
+                    local age=getAgeFromKG(item)
+                    if age==nil or (age>=fromAge and age<toAge) then
+                        isTarget=true
+                    end
+                end
+            end
+
+            -- 3) bukan tim, bukan target → unequip
+            if not isTarget then
+                pcall(function() unequipPet(uuidNoBrace) end)
+                removed=removed+1
+                task.wait(0.05)
+            end
+        end
+    end
+    return removed
+end
+
 local function doStart()
     dbg("[doStart] dipanggil")
     cooldownDebugDone={}
@@ -2127,6 +2168,14 @@ local function doStart()
     if isRunning then dbg("[doStart] sudah running, skip") return end
     if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
+
+    -- bersihin garden dulu: keluarin pet bukan tim/target
+    local removed=cleanupGarden()
+    if removed>0 then
+        dbg("[doStart] cleanup garden: keluarin "..removed.." pet bukan tim/target")
+        task.wait(0.3)
+    end
+
     local queue=getQueue()
     if #queue==0 then dbg("[doStart] FAIL: queue kosong") statusLbl.Text="Tidak ada pet target!" statusLbl.TextColor3=C.Red return end
 
@@ -2277,4 +2326,4 @@ task.wait(1)
 if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Hybrid detection: AnimSpy + GetPetCooldown")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Mekanik sc temen: UnequipPet -> EquipPet (no pickup variants)")
