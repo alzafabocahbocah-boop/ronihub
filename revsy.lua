@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v5.0-fxdetect"
+local SCRIPT_VERSION="v5.1-fxdetect"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
 
@@ -815,9 +815,23 @@ local function _animSpyFindAnimator(model)
     return nil
 end
 
--- Skill detection: name-filtered animation + skill effect spawning (ParticleEmitter, Zone Part, Beam, Trail)
-local SKILL_FX_NAMES={Zone=true,Aoe=true,AOE=true,Skill=true,SkillFx=true,SkillEffect=true,Effect=true}
+-- Skill detection: aggressive multi-signal detection
+-- Triggers: anim (non-walk/idle), particle/beam/trail, sounds, lights, surface guis, named parts
+local SKILL_FX_NAMES={
+    Zone=true,Aoe=true,AOE=true,Skill=true,SkillFx=true,SkillEffect=true,
+    Effect=true,Field=true,Aura=true,Range=true,Cast=true,Cast1=true,
+    Web=true,Spit=true,Shoot=true,Spray=true,Wave=true,Blast=true,
+    Hitbox=true,Damage=true,Beam=true,Slash=true,
+}
 local SKIP_ANIM_NAMES={Walk=true,Idle=true,Run=true,Stand=true,Move=true,Sit=true,Sleep=true,Eat=true,Jump=true,Fall=true,Land=true,Swim=true,Climb=true}
+-- ClassNames yg auto-trigger (skill FX)
+local SKILL_FX_CLASSES={
+    ParticleEmitter=true, Beam=true, Trail=true,
+    Sound=true,
+    PointLight=true, SpotLight=true, SurfaceLight=true,
+    SurfaceGui=true, BillboardGui=true,
+    Explosion=true, Fire=true, Smoke=true, Sparkles=true,
+}
 
 local function _animSpyMarkFire(model,reason)
     for uuid,info in pairs(teamPetInfoCache) do
@@ -841,7 +855,7 @@ local function _animSpyHookModel(model)
     if AnimSpy.hooked[model] then return end
     AnimSpy.hooked[model]=true
 
-    -- 1) Hook Animator: name-based filter (Walk/Idle excluded, anything else = potential skill)
+    -- 1) Hook Animator: name-based filter
     task.spawn(function()
         for i=1,10 do
             local an=_animSpyFindAnimator(model)
@@ -860,12 +874,10 @@ local function _animSpyHookModel(model)
                             table.insert(AnimSpy.log,1,entry)
                             if #AnimSpy.log>50 then table.remove(AnimSpy.log) end
                         end
-                        -- Skip movement/idle animations
                         if name=="" or name=="?" then return end
                         if SKIP_ANIM_NAMES[name] then return end
                         local nameLower=name:lower()
-                        if nameLower:find("walk") or nameLower:find("idle") or nameLower:find("run") then return end
-                        -- Anything else = skill
+                        if nameLower:find("walk") or nameLower:find("idle") or nameLower:find("run") or nameLower:find("stand") then return end
                         _animSpyMarkFire(model,"ANIM:"..name)
                     end)
                 end)
@@ -875,13 +887,13 @@ local function _animSpyHookModel(model)
         end
     end)
 
-    -- 2) Hook DescendantAdded: skill effects (ParticleEmitter, Zone Part, Beam, Trail)
+    -- 2) Hook DescendantAdded: skill effects (any FX class + named parts)
     pcall(function()
         model.DescendantAdded:Connect(function(d)
             local cls=d.ClassName
-            if cls=="ParticleEmitter" or cls=="Beam" or cls=="Trail" then
+            if SKILL_FX_CLASSES[cls] then
                 _animSpyMarkFire(model,"FX:"..cls..":"..d.Name)
-            elseif cls=="Part" then
+            elseif cls=="Part" or cls=="MeshPart" then
                 if SKILL_FX_NAMES[d.Name] then
                     _animSpyMarkFire(model,"PART:"..d.Name)
                 end
