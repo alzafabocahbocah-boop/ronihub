@@ -1958,10 +1958,17 @@ local function isPetInSwap(uuid)
 end
 
 local function equipTeam()
+    local petsPhys=workspace:FindFirstChild("PetsPhysical")
+    local petMover=petsPhys and petsPhys:FindFirstChild("PetMover")
+    if not petMover then return end  -- garden belum load
+
     for uuid,_ in pairs(teamPetUUIDs) do
         if not isPetInSwap(uuid) then
-            -- cek apakah pet masih di garden; kalau gak ada, re-equip
-            if not findPlacedPetByUUID(uuid) then
+            local uuidStr=tostring(uuid)
+            local uuidBracket=uuidStr:sub(1,1)=="{" and uuidStr or "{"..uuidStr.."}"
+            -- ringan: cek langsung di PetMover doang
+            local placed=petMover:FindFirstChild(uuidBracket) or petMover:FindFirstChild(uuidStr)
+            if not placed then
                 equipPet(uuid)
                 task.wait(0.1)
             end
