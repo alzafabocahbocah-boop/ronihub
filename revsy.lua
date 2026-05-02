@@ -1389,19 +1389,19 @@ buildSwapList=function()
         if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
     end
 
-    local dc=mk("Frame",{Size=UDim2.new(1,0,0,310),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
+    local dc=mk("Frame",{Size=UDim2.new(1,0,0,260),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
     corner(dc,7) stroke(dc,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=dc})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=dc})
-    local detLbl=lbl(dc,"DETECTION: SKILL FX SPAWN",10,C.White) detLbl.Size=UDim2.new(1,0,0,16) detLbl.Font=Enum.Font.GothamBold
+    lbl(dc,"Detection: skill FX/anim spawn (auto)",9,C.Teal).Size=UDim2.new(1,0,0,13)
 
     local function ngRow(parent,lt,dt,def,lo,onChange)
-        local r=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
+        local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
         corner(r,6) stroke(r,C.Dim,1.1)
-        local ll=lbl(r,lt,11,C.White) ll.Size=UDim2.new(0.55,0,0,16) ll.Position=UDim2.new(0,10,0,2) ll.Font=Enum.Font.GothamBold
-        local dl=lbl(r,dt,8,Color3.fromRGB(150,150,150)) dl.Size=UDim2.new(0.65,0,0,12) dl.Position=UDim2.new(0,10,0,17)
-        local box=mk("TextBox",{Size=UDim2.new(0,60,0,22),Position=UDim2.new(1,-66,0.5,-11),BackgroundColor3=C.BG,Text=tostring(def),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=12,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
-        corner(box,5) stroke(box,C.Teal,1.2)
+        local ll=lbl(r,lt,9,C.White) ll.Size=UDim2.new(0.5,0,0,14) ll.Position=UDim2.new(0,8,0,1)
+        local dl=lbl(r,dt,7,C.Dim) dl.Size=UDim2.new(0.6,0,0,11) dl.Position=UDim2.new(0,8,0,14)
+        local box=mk("TextBox",{Size=UDim2.new(0,56,0,20),Position=UDim2.new(1,-62,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(def),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
+        corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(math.max(0,v)) save() end end)
     end
     ngRow(dc,"Skill Timeout","Max tunggu skill detect (default 60s)",swapConfig.pickupDelay,1,function(v) swapConfig.pickupDelay=v end)
@@ -1578,12 +1578,12 @@ buildSwapList=function()
         return
     end
 
-    local thead=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=3,Parent=areas[3]})
+    local thead=mk("Frame",{Size=UDim2.new(1,0,0,18),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=3,Parent=areas[3]})
     corner(thead,5)
-    local hpet=lbl(thead,"PET",10,C.White) hpet.Size=UDim2.new(0.40,0,1,0) hpet.Position=UDim2.new(0,8,0,0) hpet.Font=Enum.Font.GothamBold
-    local tp=lbl(thead,"TIMEOUT",10,C.White,Enum.TextXAlignment.Center) tp.Size=UDim2.new(0.18,0,1,0) tp.Position=UDim2.new(0.40,0,0,0) tp.Font=Enum.Font.GothamBold
-    local tpl=lbl(thead,"DELAY",10,C.White,Enum.TextXAlignment.Center) tpl.Size=UDim2.new(0.18,0,1,0) tpl.Position=UDim2.new(0.58,0,0,0) tpl.Font=Enum.Font.GothamBold
-    local ton=lbl(thead,"ON/OFF",10,C.White,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.24,0,1,0) ton.Position=UDim2.new(0.76,0,0,0) ton.Font=Enum.Font.GothamBold
+    lbl(thead,"PET",8,C.Gray).Size=UDim2.new(0.40,0,1,0)
+    local tp=lbl(thead,"Timeout",8,C.Gray,Enum.TextXAlignment.Center) tp.Size=UDim2.new(0.18,0,1,0) tp.Position=UDim2.new(0.40,0,0,0)
+    local tpl=lbl(thead,"PostSkill",8,C.Gray,Enum.TextXAlignment.Center) tpl.Size=UDim2.new(0.18,0,1,0) tpl.Position=UDim2.new(0.58,0,0,0)
+    local ton=lbl(thead,"ON/OFF",8,C.Gray,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.24,0,1,0) ton.Position=UDim2.new(0.76,0,0,0)
 
     local n=3
     for uuid,_ in pairs(teamPetUUIDs) do
@@ -1594,41 +1594,41 @@ buildSwapList=function()
         local ps=swapPerPet[uuid]
         local petInfo=getTeamPetInfo(uuid).info
 
-        local row=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=ps.enabled and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=areas[3]})
+        local row=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=ps.enabled and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=areas[3]})
         corner(row,5) if ps.enabled then stroke(row,C.Teal,1.2) end
-        local pl=lbl(row,petInfo,10,ps.enabled and C.White or Color3.fromRGB(180,180,180)) pl.Size=UDim2.new(0.39,0,1,0) pl.Position=UDim2.new(0,8,0,0) pl.Font=Enum.Font.GothamBold
+        local pl=lbl(row,petInfo,8,ps.enabled and C.White or C.Gray) pl.Size=UDim2.new(0.39,0,1,0) pl.Position=UDim2.new(0,4,0,0)
 
-        local pkBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,22),Position=UDim2.new(0.40,2,0.5,-11),BackgroundColor3=C.BG,Text=tostring(ps.pickup),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=11,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
-        corner(pkBox,4) stroke(pkBox,C.Teal,1.2)
+        local pkBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,18),Position=UDim2.new(0.40,2,0.5,-9),BackgroundColor3=C.Panel,Text=tostring(ps.pickup),TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=9,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
+        corner(pkBox,4) stroke(pkBox,C.Dim,1)
         local cu1=uuid
         pkBox:GetPropertyChangedSignal("Text"):Connect(function()
             local v=tonumber(pkBox.Text) if v then swapPerPet[cu1].pickup=math.max(0,v) save() end
         end)
 
-        local plBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,22),Position=UDim2.new(0.58,2,0.5,-11),BackgroundColor3=C.BG,Text=tostring(ps.place),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=11,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
-        corner(plBox,4) stroke(plBox,C.Teal,1.2)
+        local plBox=mk("TextBox",{Size=UDim2.new(0.16,0,0,18),Position=UDim2.new(0.58,2,0.5,-9),BackgroundColor3=C.Panel,Text=tostring(ps.place),TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=9,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
+        corner(plBox,4) stroke(plBox,C.Dim,1)
         plBox:GetPropertyChangedSignal("Text"):Connect(function()
             local v=tonumber(plBox.Text) if v then swapPerPet[cu1].place=math.max(0,v) save() end
         end)
 
-        local selTog=btn(row,ps.enabled and "ON" or "OFF",11,ps.enabled and C.BG or C.Panel,ps.enabled and Color3.fromRGB(70,255,170) or Color3.fromRGB(180,180,180))
-        selTog.Size=UDim2.new(0.22,0,0,22) selTog.Position=UDim2.new(0.77,2,0.5,-11) selTog.Font=Enum.Font.GothamBold
-        local selStroke=stroke(selTog,ps.enabled and C.Teal or C.Dim,1.5)
+        local selTog=btn(row,ps.enabled and "ON" or "OFF",8,ps.enabled and C.TDim or C.Panel,ps.enabled and C.Teal or C.Gray)
+        selTog.Size=UDim2.new(0.22,0,0,18) selTog.Position=UDim2.new(0.77,2,0.5,-9)
+        local selStroke=stroke(selTog,ps.enabled and C.Teal or C.Dim,1.1)
         selTog.MouseButton1Click:Connect(function()
             local p=swapPerPet[cu1] if not p then return end
             p.enabled=not p.enabled
             if p.enabled then
-                selTog.Text="ON" selTog.BackgroundColor3=C.BG selTog.TextColor3=Color3.fromRGB(70,255,170) selStroke.Color=C.Teal
+                selTog.Text="ON" selTog.BackgroundColor3=C.TDim selTog.TextColor3=C.Teal selStroke.Color=C.Teal
                 row.BackgroundColor3=C.TDim
                 local rs=row:FindFirstChildWhichIsA("UIStroke")
                 if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.2) end
                 pl.TextColor3=C.White
             else
-                selTog.Text="OFF" selTog.BackgroundColor3=C.Panel selTog.TextColor3=Color3.fromRGB(180,180,180) selStroke.Color=C.Dim
+                selTog.Text="OFF" selTog.BackgroundColor3=C.Panel selTog.TextColor3=C.Gray selStroke.Color=C.Dim
                 row.BackgroundColor3=C.Card
                 local rs=row:FindFirstChildWhichIsA("UIStroke")
                 if rs then rs:Destroy() end
-                pl.TextColor3=Color3.fromRGB(180,180,180)
+                pl.TextColor3=C.Gray
             end
             save()
             if isRunning and _G.ZenxStartSwap and _G.ZenxStopSwap then
