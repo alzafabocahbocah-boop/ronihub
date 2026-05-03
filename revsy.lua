@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v6.7"
+local SCRIPT_VERSION="v6.8"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -2028,9 +2028,9 @@ local function doStart()
     end)
 
     monitorTask=task.spawn(function()
-        local equipTime={} -- uuid -> tick saat pet pertama kali di-track (utk safety timeout)
-        local lastRecheck={} -- uuid -> tick saat force recheck terakhir (rate limit recheck)
-        local SAFETY_TIMEOUT=10*60 -- 10 menit: kalau pet udah di-track segitu lama tanpa age detect, force unequip (failsafe)
+        local equipTime={} -- uuid -> tick saat pet pertama kali di-track
+        local lastRecheck={} -- uuid -> tick saat force recheck terakhir
+        local SAFETY_TIMEOUT=10*60 -- 10 menit failsafe
         while isRunning do
             local doneList={}
             for uuid,_ in pairs(currentLevelingUUIDs) do
@@ -2039,7 +2039,7 @@ local function doStart()
                 local item=findPetInBackpack(uuid)
                 local placed=findPlacedPetByUUID(uuid)
 
-                -- Cari age dari sumber manapun (Tool name OR placed model)
+                -- Cari age dari Tool name OR placed model attributes
                 local age=nil
                 local source=nil
                 if item then
@@ -2051,30 +2051,30 @@ local function doStart()
                     if age then source="placed" end
                 end
 
-                if age then
-                    -- Age dapet: cek udah toAge atau belum
-                    if age>=toAge then
-                        dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done")
-                        table.insert(doneList,uuid)
-                    end
-                    -- else: lanjut leveling, gak ngapa-ngapain
+                if age and age>=toAge then
+                    -- Done!
+                    dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done")
+                    table.insert(doneList,uuid)
                 elseif (not item) and (not placed) then
-                    -- Pet beneran ilang (di-trade/gift)
+                    -- Pet beneran ilang
                     dbg("[monitor] "..uuid:sub(1,8).." beneran ilang -> drop")
                     table.insert(doneList,uuid)
                 else
-                    -- Pet ada (di backpack atau garden) tapi age gak ke-baca
-                    -- Force recheck via brief unequip tiap 30 detik (rate-limited)
+                    -- Pet ada (age <toAge ATAU age unknown)
+                    -- Force recheck SELALU jalan periodik (cegah stuck karena age detection wrong/stale)
                     local elapsed=tick()-equipTime[uuid]
                     local lastRC=lastRecheck[uuid] or 0
+                    -- Interval recheck: 30s kalau age unknown (urgent), 90s kalau age known<toAge (sanity check)
+                    local recheckInterval=age and 90 or 30
 
-                    -- SAFETY: kalau udah tracked >6 menit tanpa age verified, asumsi done
                     if elapsed > SAFETY_TIMEOUT then
-                        dbg("[monitor] "..uuid:sub(1,8).." SAFETY TIMEOUT >6 menit, assume done -> drop")
+                        -- Failsafe: drop after 10 min tracked
+                        dbg("[monitor] "..uuid:sub(1,8).." SAFETY TIMEOUT >10 menit, force drop")
                         table.insert(doneList,uuid)
-                    elseif elapsed > 15 and (tick()-lastRC) > 30 then
-                        -- Force recheck: brief unequip → cek age di backpack → equip lagi kalo belum kelar
-                        dbg("[monitor] force recheck "..uuid:sub(1,8).." (elapsed "..math.floor(elapsed).."s, age unknown)")
+                    elseif elapsed > 15 and (tick()-lastRC) > recheckInterval then
+                        -- Force unequip → baca age dari Tool yg balik ke backpack → equip lagi
+                        local logAge=age and tostring(math.floor(age)) or "unknown"
+                        dbg("[monitor] force recheck "..uuid:sub(1,8).." (elapsed "..math.floor(elapsed).."s, age="..logAge..", interval "..recheckInterval.."s)")
                         lastRecheck[uuid]=tick()
                         pcall(function() unequipPet(uuid) end)
                         task.wait(0.5)
@@ -2090,12 +2090,11 @@ local function doStart()
                                     dbg("[monitor] "..uuid:sub(1,8).." age "..newAge..">="..toAge.." (recheck) -> done")
                                     table.insert(doneList,uuid)
                                 else
-                                    dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck), lanjut")
+                                    dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck), lanjut leveling")
                                     pcall(function() equipPet(uuid) end)
                                 end
                             else
-                                -- Age gak ke-baca dari recheck juga, mungkin nama Tool weird
-                                dbg("[monitor] "..uuid:sub(1,8).." age GAK ke-baca dari Tool recheck (nama: "..tostring(recheckItem.Name)..")")
+                                dbg("[monitor] "..uuid:sub(1,8).." age GAK ke-baca (Tool name: "..tostring(recheckItem.Name)..")")
                                 pcall(function() equipPet(uuid) end)
                             end
                         else
@@ -2103,7 +2102,6 @@ local function doStart()
                             pcall(function() equipPet(uuid) end)
                         end
                     end
-                    -- else: belum waktunya recheck, biarin lanjut leveling
                 end
             end
 
@@ -2225,4 +2223,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Monitor rework: try age dari Tool+placed, force recheck setiap 30s untuk age unknown, safety timeout 10 menit")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Force recheck SELALU jalan periodik (90s kalo age known, 30s kalo unknown), cegah pet stuck karena age detection wrong/stale")
