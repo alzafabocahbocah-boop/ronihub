@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v7.5"
+local SCRIPT_VERSION="v7.6"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -87,26 +87,110 @@ do
     local cc = Instance.new("UICorner") cc.CornerRadius = UDim.new(0,4) cc.Parent = closeDbg
     closeDbg.MouseButton1Click:Connect(function() debugSg:Destroy() end)
 
+    -- Copy button (bawah X)
+    local copyDbg = Instance.new("TextButton")
+    copyDbg.Size = UDim2.new(0,52,0,20)
+    copyDbg.Position = UDim2.new(1,-80,0,4)
+    copyDbg.BackgroundColor3 = Color3.fromRGB(20,60,40)
+    copyDbg.Text = "Copy"
+    copyDbg.TextColor3 = Color3.fromRGB(40,200,160)
+    copyDbg.Font = Enum.Font.GothamBold
+    copyDbg.TextSize = 11
+    copyDbg.AutoButtonColor = false
+    copyDbg.Parent = fr
+    local cc2 = Instance.new("UICorner") cc2.CornerRadius = UDim.new(0,4) cc2.Parent = copyDbg
+
+    -- Clear button (sebelah Copy)
+    local clearDbg = Instance.new("TextButton")
+    clearDbg.Size = UDim2.new(0,46,0,20)
+    clearDbg.Position = UDim2.new(1,-130,0,4)
+    clearDbg.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    clearDbg.Text = "Clear"
+    clearDbg.TextColor3 = Color3.fromRGB(180,180,180)
+    clearDbg.Font = Enum.Font.GothamBold
+    clearDbg.TextSize = 11
+    clearDbg.AutoButtonColor = false
+    clearDbg.Parent = fr
+    local cc3 = Instance.new("UICorner") cc3.CornerRadius = UDim.new(0,4) cc3.Parent = clearDbg
+
+    -- Pake ScrollingFrame biar log panjang bisa di-scroll
+    local sfDbg = Instance.new("ScrollingFrame")
+    sfDbg.Size = UDim2.new(1,-16,1,-30)
+    sfDbg.Position = UDim2.new(0,8,0,26)
+    sfDbg.BackgroundTransparency = 1
+    sfDbg.BorderSizePixel = 0
+    sfDbg.ScrollBarThickness = 6
+    sfDbg.ScrollBarImageColor3 = Color3.fromRGB(40,200,160)
+    sfDbg.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    sfDbg.CanvasSize = UDim2.new(0,0,0,0)
+    sfDbg.Parent = fr
+
     debugLbl = Instance.new("TextLabel")
-    debugLbl.Size = UDim2.new(1,-16,1,-30)
-    debugLbl.Position = UDim2.new(0,8,0,26)
+    debugLbl.Size = UDim2.new(1,-6,0,0)
+    debugLbl.Position = UDim2.new(0,2,0,0)
+    debugLbl.AutomaticSize = Enum.AutomaticSize.Y
     debugLbl.BackgroundTransparency = 1
     debugLbl.Text = "Loading..."
     debugLbl.TextColor3 = Color3.fromRGB(220,220,220)
-    debugLbl.Font = Enum.Font.Gotham
+    debugLbl.Font = Enum.Font.Code
     debugLbl.TextSize = 10
     debugLbl.TextXAlignment = Enum.TextXAlignment.Left
     debugLbl.TextYAlignment = Enum.TextYAlignment.Top
     debugLbl.TextWrapped = true
-    debugLbl.Parent = fr
+    debugLbl.Parent = sfDbg
+
+    -- Status label utk Copy feedback
+    local copyStatusLbl = Instance.new("TextLabel")
+    copyStatusLbl.Size = UDim2.new(0,180,0,16)
+    copyStatusLbl.Position = UDim2.new(0,8,0,4)
+    copyStatusLbl.BackgroundTransparency = 1
+    copyStatusLbl.Text = ""
+    copyStatusLbl.TextColor3 = Color3.fromRGB(40,200,160)
+    copyStatusLbl.Font = Enum.Font.Gotham
+    copyStatusLbl.TextSize = 10
+    copyStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    copyStatusLbl.TextYAlignment = Enum.TextYAlignment.Center
+    copyStatusLbl.Parent = fr
+    copyStatusLbl.Visible = false
+
+    copyDbg.MouseButton1Click:Connect(function()
+        local fullText = table.concat(_dbgLines or {}, "\n")
+        if setclipboard then
+            local ok, err = pcall(setclipboard, fullText)
+            if ok then
+                copyStatusLbl.Text = "Copied "..#_dbgLines.." lines"
+                copyStatusLbl.TextColor3 = Color3.fromRGB(40,200,160)
+            else
+                copyStatusLbl.Text = "Copy FAILED: "..tostring(err):sub(1,30)
+                copyStatusLbl.TextColor3 = Color3.fromRGB(220,80,80)
+            end
+        else
+            copyStatusLbl.Text = "setclipboard GAK ADA di executor"
+            copyStatusLbl.TextColor3 = Color3.fromRGB(220,160,80)
+        end
+        copyStatusLbl.Visible = true
+        task.delay(3, function() copyStatusLbl.Visible = false end)
+    end)
+
+    clearDbg.MouseButton1Click:Connect(function()
+        _dbgLines = {}
+        if debugLbl then debugLbl.Text = "" end
+    end)
 end
 
 local _dbgLines = {}
 local function dbg(msg)
     print("[ZenxDbg] "..msg)
     table.insert(_dbgLines, "> "..msg)
-    while #_dbgLines > 30 do table.remove(_dbgLines, 1) end
-    if debugLbl then debugLbl.Text = table.concat(_dbgLines, "\n") end
+    -- Naikin capacity 30 → 500 biar log panjang bisa ke-Copy semua
+    while #_dbgLines > 500 do table.remove(_dbgLines, 1) end
+    if debugLbl then
+        -- Tampilin 100 line terakhir (biar gak lag karena render text gede)
+        local startIdx = math.max(1, #_dbgLines - 100)
+        local visible = {}
+        for i = startIdx, #_dbgLines do table.insert(visible, _dbgLines[i]) end
+        debugLbl.Text = table.concat(visible, "\n")
+    end
 end
 dbg("Step 1 OK: services + playerGui")
 
@@ -2493,4 +2577,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Robust UI age detection (parent chain walk). Kalo masih ?/100, pencet 'Scan UI Age' di tab 1 + screenshot debug log")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Debug log skrg ada Copy/Clear button + scrollable + 500 lines capacity")
