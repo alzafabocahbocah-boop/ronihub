@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v7.6"
+local SCRIPT_VERSION="v7.7"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -155,21 +155,162 @@ do
 
     copyDbg.MouseButton1Click:Connect(function()
         local fullText = table.concat(_dbgLines or {}, "\n")
-        if setclipboard then
-            local ok, err = pcall(setclipboard, fullText)
-            if ok then
-                copyStatusLbl.Text = "Copied "..#_dbgLines.." lines"
-                copyStatusLbl.TextColor3 = Color3.fromRGB(40,200,160)
-            else
-                copyStatusLbl.Text = "Copy FAILED: "..tostring(err):sub(1,30)
-                copyStatusLbl.TextColor3 = Color3.fromRGB(220,80,80)
-            end
-        else
-            copyStatusLbl.Text = "setclipboard GAK ADA di executor"
+        if #fullText == 0 then
+            copyStatusLbl.Text = "Log kosong"
             copyStatusLbl.TextColor3 = Color3.fromRGB(220,160,80)
+            copyStatusLbl.Visible = true
+            task.delay(2, function() copyStatusLbl.Visible = false end)
+            return
         end
-        copyStatusLbl.Visible = true
-        task.delay(3, function() copyStatusLbl.Visible = false end)
+
+        -- Coba setclipboard dulu (executor desktop)
+        local clipFn = setclipboard or set_clipboard or toclipboard
+        if not clipFn and Clipboard and Clipboard.set then clipFn = Clipboard.set end
+        local copied = false
+        if clipFn then
+            local ok = pcall(clipFn, fullText)
+            if ok then
+                copied = true
+                copyStatusLbl.Text = "Copied "..#_dbgLines.." lines ke clipboard!"
+                copyStatusLbl.TextColor3 = Color3.fromRGB(40,200,160)
+                copyStatusLbl.Visible = true
+                task.delay(3, function() copyStatusLbl.Visible = false end)
+            end
+        end
+
+        if not copied then
+            -- Fallback: buka modal TextBox biar user bisa manual select-all + copy
+            local modal = Instance.new("Frame")
+            modal.Size = UDim2.new(0, 540, 0, 380)
+            modal.Position = UDim2.new(0.5, -270, 0.5, -190)
+            modal.BackgroundColor3 = Color3.fromRGB(15,15,18)
+            modal.BorderSizePixel = 0
+            modal.Active = true
+            modal.Draggable = true
+            modal.ZIndex = 100
+            modal.Parent = debugSg
+            local mc = Instance.new("UICorner") mc.CornerRadius = UDim.new(0,8) mc.Parent = modal
+            local ms = Instance.new("UIStroke") ms.Color = Color3.fromRGB(40,200,160) ms.Thickness = 2 ms.Parent = modal
+
+            local mTitle = Instance.new("TextLabel")
+            mTitle.Size = UDim2.new(1,-50,0,28)
+            mTitle.Position = UDim2.new(0,12,0,4)
+            mTitle.BackgroundTransparency = 1
+            mTitle.Text = "Copy Log Manual ("..#_dbgLines.." lines)"
+            mTitle.TextColor3 = Color3.fromRGB(40,200,160)
+            mTitle.Font = Enum.Font.GothamBold
+            mTitle.TextSize = 12
+            mTitle.TextXAlignment = Enum.TextXAlignment.Left
+            mTitle.ZIndex = 101
+            mTitle.Parent = modal
+
+            local mClose = Instance.new("TextButton")
+            mClose.Size = UDim2.new(0,28,0,24)
+            mClose.Position = UDim2.new(1,-34,0,4)
+            mClose.BackgroundColor3 = Color3.fromRGB(60,20,20)
+            mClose.Text = "X"
+            mClose.TextColor3 = Color3.fromRGB(255,80,80)
+            mClose.Font = Enum.Font.GothamBold
+            mClose.TextSize = 12
+            mClose.AutoButtonColor = false
+            mClose.ZIndex = 101
+            mClose.Parent = modal
+            local mcc = Instance.new("UICorner") mcc.CornerRadius = UDim.new(0,4) mcc.Parent = mClose
+            mClose.MouseButton1Click:Connect(function() modal:Destroy() end)
+
+            local hint = Instance.new("TextLabel")
+            hint.Size = UDim2.new(1,-16,0,30)
+            hint.Position = UDim2.new(0,8,0,32)
+            hint.BackgroundTransparency = 1
+            hint.Text = "executor lo gak support setclipboard. Tap textbox di bawah, long-press → Select All → Copy."
+            hint.TextColor3 = Color3.fromRGB(220,160,80)
+            hint.Font = Enum.Font.Gotham
+            hint.TextSize = 10
+            hint.TextXAlignment = Enum.TextXAlignment.Left
+            hint.TextWrapped = true
+            hint.ZIndex = 101
+            hint.Parent = modal
+
+            -- ScrollingFrame container utk TextBox (biar bisa scroll log panjang)
+            local sfM = Instance.new("ScrollingFrame")
+            sfM.Size = UDim2.new(1,-16,1,-100)
+            sfM.Position = UDim2.new(0,8,0,68)
+            sfM.BackgroundColor3 = Color3.fromRGB(0,0,0)
+            sfM.BorderSizePixel = 0
+            sfM.ScrollBarThickness = 6
+            sfM.ScrollBarImageColor3 = Color3.fromRGB(40,200,160)
+            sfM.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            sfM.CanvasSize = UDim2.new(0,0,0,0)
+            sfM.ZIndex = 101
+            sfM.Parent = modal
+            local sfc = Instance.new("UICorner") sfc.CornerRadius = UDim.new(0,4) sfc.Parent = sfM
+
+            local txt = Instance.new("TextBox")
+            txt.Size = UDim2.new(1,-12,0,0)
+            txt.Position = UDim2.new(0,6,0,4)
+            txt.AutomaticSize = Enum.AutomaticSize.Y
+            txt.BackgroundTransparency = 1
+            txt.Text = fullText
+            txt.TextColor3 = Color3.fromRGB(220,220,220)
+            txt.Font = Enum.Font.Code
+            txt.TextSize = 10
+            txt.TextXAlignment = Enum.TextXAlignment.Left
+            txt.TextYAlignment = Enum.TextYAlignment.Top
+            txt.TextWrapped = true
+            txt.MultiLine = true
+            txt.ClearTextOnFocus = false
+            txt.TextEditable = false
+            txt.ZIndex = 102
+            txt.Parent = sfM
+
+            -- Save to file button (kalo writefile available)
+            local saveBtn = Instance.new("TextButton")
+            saveBtn.Size = UDim2.new(0,140,0,24)
+            saveBtn.Position = UDim2.new(0,8,1,-30)
+            saveBtn.BackgroundColor3 = Color3.fromRGB(40,80,140)
+            saveBtn.Text = "Save to .txt File"
+            saveBtn.TextColor3 = Color3.fromRGB(225,225,225)
+            saveBtn.Font = Enum.Font.GothamBold
+            saveBtn.TextSize = 10
+            saveBtn.AutoButtonColor = false
+            saveBtn.ZIndex = 101
+            saveBtn.Parent = modal
+            local sbc = Instance.new("UICorner") sbc.CornerRadius = UDim.new(0,4) sbc.Parent = saveBtn
+
+            local saveStatus = Instance.new("TextLabel")
+            saveStatus.Size = UDim2.new(1,-160,0,24)
+            saveStatus.Position = UDim2.new(0,156,1,-30)
+            saveStatus.BackgroundTransparency = 1
+            saveStatus.Text = ""
+            saveStatus.TextColor3 = Color3.fromRGB(180,180,180)
+            saveStatus.Font = Enum.Font.Gotham
+            saveStatus.TextSize = 10
+            saveStatus.TextXAlignment = Enum.TextXAlignment.Left
+            saveStatus.ZIndex = 101
+            saveStatus.Parent = modal
+
+            saveBtn.MouseButton1Click:Connect(function()
+                if not writefile then
+                    saveStatus.Text = "writefile gak ada di executor"
+                    saveStatus.TextColor3 = Color3.fromRGB(220,80,80)
+                    return
+                end
+                local fname = "ZenxLog_"..os.date("%Y%m%d_%H%M%S")..".txt"
+                local ok, err = pcall(writefile, fname, fullText)
+                if ok then
+                    saveStatus.Text = "Saved: "..fname
+                    saveStatus.TextColor3 = Color3.fromRGB(40,200,160)
+                else
+                    saveStatus.Text = "FAIL: "..tostring(err):sub(1,30)
+                    saveStatus.TextColor3 = Color3.fromRGB(220,80,80)
+                end
+            end)
+
+            copyStatusLbl.Text = "Modal terbuka - manual copy"
+            copyStatusLbl.TextColor3 = Color3.fromRGB(220,160,80)
+            copyStatusLbl.Visible = true
+            task.delay(3, function() copyStatusLbl.Visible = false end)
+        end
     end)
 
     clearDbg.MouseButton1Click:Connect(function()
@@ -2577,4 +2718,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Debug log skrg ada Copy/Clear button + scrollable + 500 lines capacity")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Copy log fallback: kalo executor gak support setclipboard, modal popup buka biar manual select-all + copy")
