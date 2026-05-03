@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v7.0"
+local SCRIPT_VERSION="v7.3"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -909,6 +909,7 @@ buildTimList=function()
                     buildPickerContent(pickSearch.Text) updatePreview()
                     syncSwapTab()
                     save()
+                    if not teamKeeperShouldRun() then stopTeamKeeper() end
                 end)
             end
         end
@@ -966,6 +967,10 @@ buildTimList=function()
                                 updatePreview()
                                 syncSwapTab()
                                 save()
+                                if nowIn then startTeamKeeper() else
+                                    -- Kalo team kosong total, stop keeper
+                                    if not teamKeeperShouldRun() then stopTeamKeeper() end
+                                end
                             end)
                         end
                     end
@@ -989,6 +994,7 @@ buildTimList=function()
                         buildPickerContent(pickSearch.Text) updatePreview()
                         syncSwapTab()
                         save()
+                        if not teamKeeperShouldRun() then stopTeamKeeper() end
                     end)
                 end
             end
@@ -1849,6 +1855,60 @@ local function unequipTeam()
     end
 end
 
+-- ============================================
+-- TEAM KEEPER (auto-recover pet tim yg ke-pickup manual)
+-- Jalan independen dari isRunning, selama ada minimal 1 pet di teamPetUUIDs.
+-- Tiap 2 detik scan PetMover, kalo ada team pet yg gak placed, equip ulang.
+-- ============================================
+local teamKeeperTask=nil
+
+local function teamKeeperShouldRun()
+    for _ in pairs(teamPetUUIDs) do return true end
+    return false
+end
+
+local function startTeamKeeper()
+    if teamKeeperTask then return end
+    if not teamKeeperShouldRun() then return end
+    teamKeeperTask=task.spawn(function()
+        dbg("[teamKeeper] START (global, independen dari leveling)")
+        while teamKeeperShouldRun() do
+            local petsPhys=workspace:FindFirstChild("PetsPhysical")
+            local petMover=petsPhys and petsPhys:FindFirstChild("PetMover")
+            if petMover then
+                for uuid,_ in pairs(teamPetUUIDs) do
+                    if not isPetInSwap(uuid) then
+                        local uuidStr=tostring(uuid)
+                        local uuidBracket=uuidStr:sub(1,1)=="{" and uuidStr or "{"..uuidStr.."}"
+                        local placed=petMover:FindFirstChild(uuidBracket) or petMover:FindFirstChild(uuidStr)
+                        if not placed then
+                            -- Pet tim ke-pickup manual ATAU belum di-place. Re-equip.
+                            dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak placed, re-equip")
+                            equipPet(uuid)
+                            task.wait(0.2)
+                        end
+                    end
+                end
+            end
+            task.wait(2)
+        end
+        dbg("[teamKeeper] STOP (team kosong)")
+        teamKeeperTask=nil
+    end)
+end
+
+local function stopTeamKeeper()
+    if teamKeeperTask then
+        pcall(task.cancel,teamKeeperTask)
+        teamKeeperTask=nil
+        dbg("[teamKeeper] STOP (manual)")
+    end
+end
+
+-- Public hook utk dipanggil dari UI add/remove team
+_G.ZenxStartTeamKeeper=startTeamKeeper
+_G.ZenxStopTeamKeeper=stopTeamKeeper
+
 
 -- ============================================
 -- GLOBAL POLLER (FRIEND-7 MECHANIC)
@@ -1943,11 +2003,14 @@ local function getQueue()
             local uuid=getPetUUID(item)
             local uuidStr=uuid and tostring(uuid) or ""
             if uuid and not teamPetUUIDs[uuidStr] then
-                local name=getPetName(item)
-                if isTargetPet(name) then
-                    local age=getAgeFromKG(item)
-                    if age==nil or (age>=fromAge and age<toAge) then
-                        table.insert(queue,item)
+                -- Skip pet yg lagi tracked (jangan re-queue pet yg baru aja kelar/lagi di-level)
+                if not currentLevelingUUIDs[uuidStr] then
+                    local name=getPetName(item)
+                    if isTargetPet(name) then
+                        local age=getAgeFromKG(item)
+                        if age==nil or (age>=fromAge and age<toAge) then
+                            table.insert(queue,item)
+                        end
                     end
                 end
             end
@@ -2205,6 +2268,12 @@ local function doStart()
                 task.wait(0.1)
             end
 
+            -- Kasih server waktu process unequip sebelum equip pet baru (500ms buffer)
+            if #doneList>0 then
+                dbg("[monitor] "..#doneList.." pet selesai, tunggu 0.5s sebelum equip pet baru...")
+                task.wait(0.5)
+            end
+
             local slotsUsed=0
             for _ in pairs(currentLevelingUUIDs) do slotsUsed=slotsUsed+1 end
             local slotsFree=maxPetTarget-slotsUsed
@@ -2225,34 +2294,62 @@ local function doStart()
 
             if slotsFree>0 and #available>0 then
                 local toEquip=math.min(slotsFree,#available)
+                dbg("[monitor] EQUIP "..toEquip.." pet baru (slotFree="..slotsFree..", queue="..#available..")")
                 for i=1,toEquip do
                     if not isRunning then break end
                     local uuid=getPetUUID(available[i])
                     if uuid then
+                        local petName=getPetName(available[i])
+                        dbg("[monitor]   -> equip "..petName.." uuid="..tostring(uuid):sub(1,8))
                         equipPet(uuid)
                         currentLevelingUUIDs[tostring(uuid)]=true
-                        task.wait(0.15)
+                        task.wait(0.3) -- naikin dari 0.15 ke 0.3 biar server lebih sempet
                     end
+                end
+            elseif #doneList>0 then
+                -- Debug: Pet selesai tapi gak ada yg bisa di-equip
+                dbg("[monitor] Pet selesai TAPI gak equip baru: slotFree="..slotsFree..", queue="..#available..", queue2_total="..#queue2)
+                if slotsFree<=0 then dbg("  reason: slotFree<=0 (slotsUsed="..slotsUsed..", maxPetTarget="..maxPetTarget..")") end
+                if #available==0 then
+                    dbg("  reason: queue kosong (cek pet target di backpack masih ada apa enggak)")
+                    if #queue2==0 then dbg("  getQueue() return kosong total") end
                 end
             end
 
             local activeNames={}
             for uuid,_ in pairs(currentLevelingUUIDs) do
-                local item=findPetInBackpack(uuid)
-                if item then
-                    local age=getAgeFromKG(item) or "?"
-                    table.insert(activeNames,getPetName(item).." A"..tostring(age))
-                else
-                    -- Tool gak di backpack tapi pet ada di garden, tampilin info dari cache
-                    local cached=teamPetInfoCache[uuid] or swapPetInfoCache[uuid]
-                    local nm=(cached and cached.name) or uuid:sub(1,8)
-                    table.insert(activeNames,nm.." A?")
+                -- Cari nama dari UI (paling reliable utk pet placed) → backpack → cache
+                local nameStr=nil
+                pcall(function()
+                    local pg=player.PlayerGui
+                    local scroll=pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame
+                    local petFrame=scroll:FindFirstChild("{"..uuid.."}") or scroll:FindFirstChild(uuid)
+                    if petFrame then
+                        local nLbl=petFrame.Main:FindFirstChild("PET_NAME") or petFrame.Main:FindFirstChild("PET_TYPE")
+                        if nLbl then nameStr=nLbl.Text end
+                    end
+                end)
+                if not nameStr then
+                    local item=findPetInBackpack(uuid)
+                    if item then nameStr=getPetName(item) end
                 end
+                if not nameStr then
+                    local cached=teamPetInfoCache[uuid] or swapPetInfoCache[uuid]
+                    nameStr=(cached and cached.name) or uuid:sub(1,8)
+                end
+                -- Cari age (UI dulu, fallback Tool)
+                local age=getAgeFromUI(uuid)
+                if not age then
+                    local item=findPetInBackpack(uuid)
+                    if item then age=getAgeFromKG(item) end
+                end
+                local ageStr=age and (age.."/"..toAge) or ("?/"..toAge)
+                table.insert(activeNames,nameStr.." "..ageStr)
             end
             if #activeNames>0 then
                 statusLbl.Text="Lvl: "..table.concat(activeNames,", ").." | Q:"..#available
             else
-                statusLbl.Text="Tunggu... Q:"..#available
+                statusLbl.Text="Tunggu pet target... Q:"..#available
             end
             statusLbl.TextColor3=C.Teal
 
@@ -2315,4 +2412,14 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! REAL-TIME age detection via ActivePetUI - pet ke-swap instant pas hit toAge")
+-- Auto-start team keeper kalau ada saved team pets
+do
+    local hasTeam=false
+    for _ in pairs(teamPetUUIDs) do hasTeam=true break end
+    if hasTeam then
+        dbg("[init] auto-start teamKeeper (ada team pet dari saved config)")
+        startTeamKeeper()
+    end
+end
+
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! + Team Keeper: pet tim yg gak sengaja ke-pickup auto re-equip ke garden (jalan independen, gak peduli STOP/RUN)")
