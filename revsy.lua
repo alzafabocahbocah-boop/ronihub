@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v7.3"
+local SCRIPT_VERSION="v7.4"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -328,24 +328,23 @@ end
 -- Coba baca age dari placed pet model (workspace), tanpa harus pickup dulu
 local function getPlacedPetAge(placedModel)
     if not placedModel then return nil end
-    -- 1) PRIMARY: Try UI lookup by model name (UUID) — paling reliable utk game ini
+    -- 1) PRIMARY: UI lookup by model name (UUID) - recursive deep search
     local modelName=placedModel.Name
     local uuidStr=modelName:gsub("^{",""):gsub("}$","")
     if #uuidStr>=20 then
         local pg=player:FindFirstChild("PlayerGui")
-        if pg then
-            local ok,age=pcall(function()
-                local lbl=pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame[modelName].Main.PET_AGE
-                return tonumber(lbl.Text:match("(%d+)"))
-            end)
-            if ok and age then return age end
-            -- Try also without/with brace
-            local altName=modelName:sub(1,1)=="{" and uuidStr or "{"..uuidStr.."}"
-            local ok2,age2=pcall(function()
-                local lbl=pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame[altName].Main.PET_AGE
-                return tonumber(lbl.Text:match("(%d+)"))
-            end)
-            if ok2 and age2 then return age2 end
+        local activePetUI=pg and pg:FindFirstChild("ActivePetUI")
+        if activePetUI then
+            local petFrame=activePetUI:FindFirstChild("{"..uuidStr.."}",true) or activePetUI:FindFirstChild(uuidStr,true)
+            if petFrame then
+                local ageLbl=petFrame:FindFirstChild("PET_AGE",true)
+                if ageLbl then
+                    local txt=""
+                    pcall(function() txt=ageLbl.Text end)
+                    local age=tonumber((txt or ""):match("(%d+)"))
+                    if age then return age end
+                end
+            end
         end
     end
     -- 2) Attributes umum (legacy fallback)
@@ -519,22 +518,23 @@ end
 -- Game punya UI di PlayerGui.ActivePetUI yg display age per pet active.
 -- Path: ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame.{uuid}.Main.PET_AGE.Text = "Age: 15"
 -- v7.0 pake ini sebagai source PRIMARY karena reliable & realtime.
-local function getAgeFromUI(uuid)
+-- v7.4: pake recursive deep search biar tetep nemu walau struktur beda
+local function findPetUIFrame(uuid)
     if not uuid then return nil end
     local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
     local activePetUI=pg:FindFirstChild("ActivePetUI") if not activePetUI then return nil end
-    local frame=activePetUI:FindFirstChild("Frame") if not frame then return nil end
-    local mainF=frame:FindFirstChild("Main") if not mainF then return nil end
-    local petDisplay=mainF:FindFirstChild("PetDisplay") if not petDisplay then return nil end
-    local scroll=petDisplay:FindFirstChild("ScrollingFrame") if not scroll then return nil end
-
     local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
     local uuidBraced="{"..uuidStr.."}"
-    local petFrame=scroll:FindFirstChild(uuidBraced) or scroll:FindFirstChild(uuidStr)
-    if not petFrame then return nil end
+    -- Recursive search di ActivePetUI buat Frame yg nama-nya match UUID
+    local petFrame=activePetUI:FindFirstChild(uuidBraced,true) or activePetUI:FindFirstChild(uuidStr,true)
+    return petFrame
+end
 
-    local petMain=petFrame:FindFirstChild("Main") if not petMain then return nil end
-    local ageLbl=petMain:FindFirstChild("PET_AGE") if not ageLbl then return nil end
+local function getAgeFromUI(uuid)
+    local petFrame=findPetUIFrame(uuid) if not petFrame then return nil end
+    -- Deep search: cari TextLabel "PET_AGE" anywhere under petFrame
+    local ageLbl=petFrame:FindFirstChild("PET_AGE",true)
+    if not ageLbl then return nil end
     local txt=""
     pcall(function() txt=ageLbl.Text end)
     if not txt or #txt==0 then return nil end
@@ -545,23 +545,23 @@ end
 
 -- Get pet type+mutation dari UI (e.g. "Everchanted Peryton")
 local function getPetTypeFromUI(uuid)
-    if not uuid then return nil end
-    local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
-    local petFrame=nil
-    pcall(function()
-        local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
-        local uuidBraced="{"..uuidStr.."}"
-        petFrame=pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame:FindFirstChild(uuidBraced)
-            or pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame:FindFirstChild(uuidStr)
-    end)
-    if not petFrame then return nil end
-    local typeLbl=nil
-    pcall(function() typeLbl=petFrame.Main.PET_TYPE end)
-    if typeLbl then
-        local txt=""
-        pcall(function() txt=typeLbl.Text end)
-        if txt and #txt>0 then return txt end
-    end
+    local petFrame=findPetUIFrame(uuid) if not petFrame then return nil end
+    local typeLbl=petFrame:FindFirstChild("PET_TYPE",true)
+    if not typeLbl then return nil end
+    local txt=""
+    pcall(function() txt=typeLbl.Text end)
+    if txt and #txt>0 then return txt end
+    return nil
+end
+
+-- Get pet nickname dari UI (PET_NAME, e.g. "Sami")
+local function getPetNameFromUI(uuid)
+    local petFrame=findPetUIFrame(uuid) if not petFrame then return nil end
+    local nLbl=petFrame:FindFirstChild("PET_NAME",true)
+    if not nLbl then return nil end
+    local txt=""
+    pcall(function() txt=nLbl.Text end)
+    if txt and #txt>0 then return txt end
     return nil
 end
 
@@ -2318,17 +2318,9 @@ local function doStart()
 
             local activeNames={}
             for uuid,_ in pairs(currentLevelingUUIDs) do
-                -- Cari nama dari UI (paling reliable utk pet placed) → backpack → cache
-                local nameStr=nil
-                pcall(function()
-                    local pg=player.PlayerGui
-                    local scroll=pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame
-                    local petFrame=scroll:FindFirstChild("{"..uuid.."}") or scroll:FindFirstChild(uuid)
-                    if petFrame then
-                        local nLbl=petFrame.Main:FindFirstChild("PET_NAME") or petFrame.Main:FindFirstChild("PET_TYPE")
-                        if nLbl then nameStr=nLbl.Text end
-                    end
-                end)
+                -- Cari nama: PET_NAME (nickname) → PET_TYPE (mutation+type) → backpack → cache
+                local nameStr=getPetNameFromUI(uuid)
+                if not nameStr or nameStr=="" then nameStr=getPetTypeFromUI(uuid) end
                 if not nameStr then
                     local item=findPetInBackpack(uuid)
                     if item then nameStr=getPetName(item) end
@@ -2422,4 +2414,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! + Team Keeper: pet tim yg gak sengaja ke-pickup auto re-equip ke garden (jalan independen, gak peduli STOP/RUN)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Fix: age detection pake recursive deep search (PET_AGE bisa di sub-frame manapun di UI)")
