@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v6.2"
+local SCRIPT_VERSION="v6.3"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -727,6 +727,36 @@ buildTimList=function()
             end
         end
         dbg("=== END SCAN. Kasih ke Claude. ===")
+    end)
+
+    -- Scan Garden button: debug isi PetsPhysical buat tau pickup gagal di mana
+    local scanGardenBtn=btn(areas[1],"Scan Garden (debug pickup)",9,C.Panel,C.Gold)
+    scanGardenBtn.Size=UDim2.new(1,0,0,22) scanGardenBtn.LayoutOrder=3 stroke(scanGardenBtn,C.Gold,1.2)
+    scanGardenBtn.MouseButton1Click:Connect(function()
+        dbg("=== SCAN GARDEN STRUCTURE ===")
+        local petsPhys=workspace:FindFirstChild("PetsPhysical")
+        if not petsPhys then dbg("PetsPhysical GAK ADA di workspace") return end
+        dbg("PetsPhysical children:")
+        for _,c in ipairs(petsPhys:GetChildren()) do
+            dbg("  ["..c.ClassName.."] "..c.Name)
+        end
+        local petMover=petsPhys:FindFirstChild("PetMover")
+        if petMover then
+            dbg("PetMover children ("..#petMover:GetChildren().." items):")
+            local n=0
+            for _,c in ipairs(petMover:GetChildren()) do
+                n=n+1
+                if n<=10 then
+                    local attrUuid="-"
+                    pcall(function() local a=c:GetAttribute("PET_UUID") if a then attrUuid=tostring(a) end end)
+                    dbg("  "..n..". ["..c.ClassName.."] "..c.Name.." attr.PET_UUID="..attrUuid)
+                end
+            end
+            if n>10 then dbg("  ... ("..(n-10).." pet lain)") end
+        else
+            dbg("PetMover GAK ADA di PetsPhysical")
+        end
+        dbg("=== END SCAN. Kasih ke Claude kalo pickup gagal. ===")
     end)
 
     div(areas[1],1)
@@ -1813,19 +1843,68 @@ local function doStop(reason)
 end
 
 -- Pickup SEMUA pet di garden (bukan cuma "other"). Tim+target akan di-place ulang setelah ini.
+-- v6.3: scan multi-layer (PetMover children + descendants + alt folders + by attribute PET_UUID)
 local function pickupAllGardenPets()
     local petsPhys=workspace:FindFirstChild("PetsPhysical")
-    local petMover=petsPhys and petsPhys:FindFirstChild("PetMover")
-    if not petMover then return 0 end
-
-    local removed=0
-    for _,placedPet in ipairs(petMover:GetChildren()) do
-        local modelName=placedPet.Name
-        local uuidNoBrace=modelName:gsub("^{",""):gsub("}$","")
-        pcall(function() unequipPet(uuidNoBrace) end)
-        removed=removed+1
-        task.wait(0.05)
+    if not petsPhys then
+        dbg("[pickup] PetsPhysical gak ada di workspace")
+        return 0
     end
+
+    local processed={} -- avoid double-pickup pet yg sama
+    local removed=0
+
+    local function tryPickup(model)
+        if not model or not model:IsA("Model") then return false end
+        local modelName=model.Name
+        local uuidNoBrace=nil
+
+        -- Cek attribute PET_UUID dulu (paling reliable)
+        local attrUuid=nil
+        pcall(function() attrUuid=model:GetAttribute("PET_UUID") end)
+        if attrUuid then
+            uuidNoBrace=tostring(attrUuid):gsub("^{",""):gsub("}$","")
+        elseif modelName:sub(1,1)=="{" and modelName:sub(-1)=="}" then
+            -- Format {uuid}
+            uuidNoBrace=modelName:sub(2,-2)
+        elseif #modelName>=30 and modelName:match("^[%w%-]+$") then
+            -- Format uuid tanpa brace (panjang >=30, alfanumerik+dash)
+            uuidNoBrace=modelName
+        end
+
+        if uuidNoBrace and #uuidNoBrace>=20 and not processed[uuidNoBrace] then
+            processed[uuidNoBrace]=true
+            pcall(function() unequipPet(uuidNoBrace) end)
+            removed=removed+1
+            return true
+        end
+        return false
+    end
+
+    -- Layer 1: direct children PetMover (path utama)
+    local petMover=petsPhys:FindFirstChild("PetMover")
+    if petMover then
+        for _,m in ipairs(petMover:GetChildren()) do
+            if tryPickup(m) then task.wait(0.05) end
+        end
+    end
+
+    -- Layer 2: deep scan PetsPhysical (kalau pet nested di folder dalam)
+    for _,m in ipairs(petsPhys:GetDescendants()) do
+        if tryPickup(m) then task.wait(0.05) end
+    end
+
+    -- Layer 3: folder alternatif di workspace
+    for _,n in ipairs({"Pets","PlacedPets","ActivePets","PetMover"}) do
+        local f=workspace:FindFirstChild(n)
+        if f then
+            for _,m in ipairs(f:GetDescendants()) do
+                if tryPickup(m) then task.wait(0.05) end
+            end
+        end
+    end
+
+    dbg("[pickup] total: "..removed.." pet di-pickup dari garden")
     return removed
 end
 
@@ -1836,13 +1915,25 @@ local function doStart()
     if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
 
-    -- 1) Pickup SEMUA pet di garden (bersih total)
+    -- 1) Pickup SEMUA pet di garden (bersih total) — retry sampe 3x kalau masih ada sisa
     statusLbl.Text="Membersihkan garden..." statusLbl.TextColor3=C.Gold
-    local removed=pickupAllGardenPets()
-    if removed>0 then
-        dbg("[doStart] pickup ALL: "..removed.." pet di-pickup dari garden")
-        -- delay proporsional sama jumlah pet (server butuh waktu update)
-        task.wait(math.min(2,0.3+removed*0.05))
+    local totalRemoved=0
+    for attempt=1,3 do
+        local removed=pickupAllGardenPets()
+        totalRemoved=totalRemoved+removed
+        if removed>0 then
+            dbg("[doStart] pickup attempt "..attempt..": "..removed.." pet")
+            task.wait(math.min(1.5,0.3+removed*0.05))
+        else
+            -- Pass kosong = garden udah bersih
+            if attempt>1 then dbg("[doStart] garden bersih setelah "..(attempt-1).." attempt") end
+            break
+        end
+    end
+    if totalRemoved>0 then
+        dbg("[doStart] TOTAL pickup: "..totalRemoved.." pet")
+    else
+        dbg("[doStart] garden udah kosong, gak ada yg di-pickup")
     end
 
     -- 2) Place tim leveling pets balik (yg sebelumnya udah ada di tim)
@@ -2069,4 +2160,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Fix age detection: baca placed model + force recheck 30s, pet udah age toAge auto kelar")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Pickup garden lebih agresif: multi-layer scan + retry 3x. Pencet 'Scan Garden' di tab 1 kalo masih bermasalah")
