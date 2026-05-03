@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v7.7"
+local SCRIPT_VERSION="v7.8"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -42,6 +42,7 @@ pcall(function()
 end)
 
 local debugSg, debugLbl
+local _dbgLines = {}
 do
     debugSg = Instance.new("ScreenGui")
     debugSg.Name = "ZenxDebug"
@@ -319,7 +320,6 @@ do
     end)
 end
 
-local _dbgLines = {}
 local function dbg(msg)
     print("[ZenxDbg] "..msg)
     table.insert(_dbgLines, "> "..msg)
@@ -2718,4 +2718,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Copy log fallback: kalo executor gak support setclipboard, modal popup buka biar manual select-all + copy")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! BUG FIX: Copy log button skrg actually copy isi log (sebelumnya scope issue bikin variable kosong)")
