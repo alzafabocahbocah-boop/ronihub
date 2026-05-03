@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v7.4"
+local SCRIPT_VERSION="v7.5"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -515,53 +515,83 @@ local function getMaxKGForPet(name)
 end
 
 -- ============= REAL-TIME AGE DETECTION dari ActivePetUI =============
--- Game punya UI di PlayerGui.ActivePetUI yg display age per pet active.
--- Path: ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame.{uuid}.Main.PET_AGE.Text = "Age: 15"
--- v7.0 pake ini sebagai source PRIMARY karena reliable & realtime.
--- v7.4: pake recursive deep search biar tetep nemu walau struktur beda
-local function findPetUIFrame(uuid)
+-- Robust approach v7.5: iterate ALL PET_AGE TextLabels, walk parent chain to match UUID.
+-- Tahan ke struktur UI apapun: {uuid}.Main.PET_AGE, {uuid}.Main.Item.PET_AGE, dll.
+local function getAgeFromUI(uuid)
     if not uuid then return nil end
     local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
     local activePetUI=pg:FindFirstChild("ActivePetUI") if not activePetUI then return nil end
     local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
-    local uuidBraced="{"..uuidStr.."}"
-    -- Recursive search di ActivePetUI buat Frame yg nama-nya match UUID
-    local petFrame=activePetUI:FindFirstChild(uuidBraced,true) or activePetUI:FindFirstChild(uuidStr,true)
-    return petFrame
-end
+    if #uuidStr<10 then return nil end
 
-local function getAgeFromUI(uuid)
-    local petFrame=findPetUIFrame(uuid) if not petFrame then return nil end
-    -- Deep search: cari TextLabel "PET_AGE" anywhere under petFrame
-    local ageLbl=petFrame:FindFirstChild("PET_AGE",true)
-    if not ageLbl then return nil end
-    local txt=""
-    pcall(function() txt=ageLbl.Text end)
-    if not txt or #txt==0 then return nil end
-    -- Format: "Age: 15", "Age 100", "Age:100"
-    local age=tonumber(txt:match("(%d+)"))
-    return age
-end
-
--- Get pet type+mutation dari UI (e.g. "Everchanted Peryton")
-local function getPetTypeFromUI(uuid)
-    local petFrame=findPetUIFrame(uuid) if not petFrame then return nil end
-    local typeLbl=petFrame:FindFirstChild("PET_TYPE",true)
-    if not typeLbl then return nil end
-    local txt=""
-    pcall(function() txt=typeLbl.Text end)
-    if txt and #txt>0 then return txt end
+    -- Iterate all PET_AGE labels, ngecek ancestor mana yg cocok UUID
+    for _,d in ipairs(activePetUI:GetDescendants()) do
+        if d.Name=="PET_AGE" and d:IsA("TextLabel") then
+            local p=d.Parent
+            local depth=0
+            while p and depth<10 do
+                local pn=p.Name:gsub("^{",""):gsub("}$","")
+                if pn==uuidStr then
+                    local txt=""
+                    pcall(function() txt=d.Text end)
+                    if txt and #txt>0 then
+                        local age=tonumber(txt:match("(%d+)"))
+                        if age then return age end
+                    end
+                end
+                p=p.Parent
+                depth=depth+1
+            end
+        end
+    end
     return nil
 end
 
--- Get pet nickname dari UI (PET_NAME, e.g. "Sami")
+local function getPetTypeFromUI(uuid)
+    if not uuid then return nil end
+    local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
+    local activePetUI=pg:FindFirstChild("ActivePetUI") if not activePetUI then return nil end
+    local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
+    for _,d in ipairs(activePetUI:GetDescendants()) do
+        if d.Name=="PET_TYPE" and d:IsA("TextLabel") then
+            local p=d.Parent
+            local depth=0
+            while p and depth<10 do
+                local pn=p.Name:gsub("^{",""):gsub("}$","")
+                if pn==uuidStr then
+                    local txt=""
+                    pcall(function() txt=d.Text end)
+                    if txt and #txt>0 then return txt end
+                end
+                p=p.Parent
+                depth=depth+1
+            end
+        end
+    end
+    return nil
+end
+
 local function getPetNameFromUI(uuid)
-    local petFrame=findPetUIFrame(uuid) if not petFrame then return nil end
-    local nLbl=petFrame:FindFirstChild("PET_NAME",true)
-    if not nLbl then return nil end
-    local txt=""
-    pcall(function() txt=nLbl.Text end)
-    if txt and #txt>0 then return txt end
+    if not uuid then return nil end
+    local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
+    local activePetUI=pg:FindFirstChild("ActivePetUI") if not activePetUI then return nil end
+    local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
+    for _,d in ipairs(activePetUI:GetDescendants()) do
+        if d.Name=="PET_NAME" and d:IsA("TextLabel") then
+            local p=d.Parent
+            local depth=0
+            while p and depth<10 do
+                local pn=p.Name:gsub("^{",""):gsub("}$","")
+                if pn==uuidStr then
+                    local txt=""
+                    pcall(function() txt=d.Text end)
+                    if txt and #txt>0 then return txt end
+                end
+                p=p.Parent
+                depth=depth+1
+            end
+        end
+    end
     return nil
 end
 
@@ -851,6 +881,55 @@ buildTimList=function()
             dbg("PetMover GAK ADA di PetsPhysical")
         end
         dbg("=== END SCAN. Kasih ke Claude kalo pickup gagal. ===")
+    end)
+
+    -- Scan UI Age button: debug ActivePetUI struktur buat tau kenapa age detection gagal
+    local scanUIBtn=btn(areas[1],"Scan UI Age (debug ?/100)",9,C.Panel,C.Blue)
+    scanUIBtn.Size=UDim2.new(1,0,0,22) scanUIBtn.LayoutOrder=4 stroke(scanUIBtn,C.Blue,1.2)
+    scanUIBtn.MouseButton1Click:Connect(function()
+        dbg("=== SCAN UI AGE DEBUG ===")
+        local pg=player:FindFirstChild("PlayerGui")
+        if not pg then dbg("PlayerGui GAK ADA") return end
+        local activePetUI=pg:FindFirstChild("ActivePetUI")
+        if not activePetUI then dbg("ActivePetUI GAK ADA") return end
+
+        -- Cari semua PET_AGE TextLabels
+        local ageLabels={}
+        for _,d in ipairs(activePetUI:GetDescendants()) do
+            if d.Name=="PET_AGE" and d:IsA("TextLabel") then
+                table.insert(ageLabels,d)
+            end
+        end
+        dbg("Found "..#ageLabels.." PET_AGE TextLabel(s)")
+
+        for i,lbl in ipairs(ageLabels) do
+            if i<=10 then
+                local txt=""
+                pcall(function() txt=lbl.Text end)
+                dbg("--- PET_AGE ["..i.."] text='"..txt.."' path="..lbl:GetFullName():sub(-100))
+                -- Walk up parents, log each name
+                local p=lbl.Parent
+                local depth=0
+                while p and p~=activePetUI and depth<8 do
+                    dbg("  parent ["..depth.."]: ["..p.ClassName.."] '"..p.Name.."'")
+                    p=p.Parent
+                    depth=depth+1
+                end
+            end
+        end
+
+        -- Sekarang test setiap currentLevelingUUIDs apa hasil getAgeFromUI
+        dbg("--- Test currentLevelingUUIDs ---")
+        local cnt=0
+        for uuid,_ in pairs(currentLevelingUUIDs) do
+            cnt=cnt+1
+            local age=getAgeFromUI(uuid)
+            local nm=getPetNameFromUI(uuid) or "(no nick)"
+            local tp=getPetTypeFromUI(uuid) or "(no type)"
+            dbg("  uuid="..tostring(uuid):sub(1,16).."... age="..tostring(age).." name='"..nm.."' type='"..tp.."'")
+        end
+        if cnt==0 then dbg("  (currentLevelingUUIDs kosong, pencet START dulu)") end
+        dbg("=== END SCAN UI ===")
     end)
 
     div(areas[1],1)
@@ -2414,4 +2493,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Fix: age detection pake recursive deep search (PET_AGE bisa di sub-frame manapun di UI)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Robust UI age detection (parent chain walk). Kalo masih ?/100, pencet 'Scan UI Age' di tab 1 + screenshot debug log")
