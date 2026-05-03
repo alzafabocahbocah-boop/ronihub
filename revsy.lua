@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v6.1"
+local SCRIPT_VERSION="v6.2"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -321,6 +321,25 @@ local function findPlacedPetByUUID(uuid)
         if m:IsA("Model") and (m.Name==uuidBracket or m.Name==uuidStr) then return m end
         local ok,uid=pcall(function() return m:GetAttribute("PET_UUID") end)
         if ok and uid==uuid then return m end
+    end
+    return nil
+end
+
+-- Coba baca age dari placed pet model (workspace), tanpa harus pickup dulu
+local function getPlacedPetAge(placedModel)
+    if not placedModel then return nil end
+    -- 1) Attributes umum
+    for _,attr in ipairs({"Age","Level","PetAge","PetLevel","CurrentAge","CurrentLevel","AGE"}) do
+        local v=placedModel:GetAttribute(attr)
+        if type(v)=="number" then return v end
+    end
+    -- 2) IntValue/NumberValue child
+    for _,d in ipairs(placedModel:GetDescendants()) do
+        if (d:IsA("IntValue") or d:IsA("NumberValue")) then
+            if d.Name=="Age" or d.Name=="Level" or d.Name=="PetAge" or d.Name=="PetLevel" then
+                return d.Value
+            end
+        end
     end
     return nil
 end
@@ -1870,28 +1889,75 @@ local function doStart()
     end)
 
     monitorTask=task.spawn(function()
+        local lastAgeCheck={} -- uuid -> tick saat age terakhir berhasil dibaca
         while isRunning do
             local doneList={}
             for uuid,_ in pairs(currentLevelingUUIDs) do
                 local item=findPetInBackpack(uuid)
                 if item then
+                    -- Tool ada di backpack, baca age dari nama
                     local age=getAgeFromKG(item)
-                    if age and age>=toAge then
+                    if age then
+                        lastAgeCheck[uuid]=tick()
+                        if age>=toAge then
+                            dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." -> done")
+                            table.insert(doneList,uuid)
+                        end
+                    end
+                else
+                    -- Tool gak di backpack, cek garden
+                    local placed=findPlacedPetByUUID(uuid)
+                    if placed then
+                        -- 1) Coba baca age langsung dari placed model
+                        local placedAge=getPlacedPetAge(placed)
+                        if placedAge then
+                            lastAgeCheck[uuid]=tick()
+                            if placedAge>=toAge then
+                                dbg("[monitor] "..uuid:sub(1,8).." age "..placedAge..">="..toAge.." (placed) -> done")
+                                table.insert(doneList,uuid)
+                            end
+                        else
+                            -- 2) Gak bisa baca age dari placed: force recheck setiap 30 detik
+                            -- Brief unequip biar Tool balik ke backpack, baca age, equip lagi
+                            local last=lastAgeCheck[uuid] or 0
+                            if tick()-last > 30 then
+                                dbg("[monitor] force recheck "..uuid:sub(1,8).." (age unknown >30s)")
+                                pcall(function() unequipPet(uuid) end)
+                                task.wait(0.4)
+                                local recheckItem=findPetInBackpack(uuid)
+                                if recheckItem then
+                                    local age=getAgeFromKG(recheckItem)
+                                    if age then
+                                        lastAgeCheck[uuid]=tick()
+                                        if age>=toAge then
+                                            dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." (recheck) -> done")
+                                            table.insert(doneList,uuid)
+                                        else
+                                            -- belum kelar, equip lagi
+                                            pcall(function() equipPet(uuid) end)
+                                        end
+                                    else
+                                        pcall(function() equipPet(uuid) end)
+                                    end
+                                else
+                                    -- Tool gak ke-detect, equip lagi
+                                    pcall(function() equipPet(uuid) end)
+                                end
+                            end
+                            -- else: belum 30s, biarin terus level
+                        end
+                    else
+                        -- Tool gak di backpack DAN gak di garden = pet beneran ilang (di-trade/gift)
+                        dbg("[monitor] pet "..uuid:sub(1,8).." beneran ilang (gak di backpack & gak di garden) -> drop")
                         table.insert(doneList,uuid)
                     end
-                elseif findPlacedPetByUUID(uuid) then
-                    -- Pet di garden tapi Tool gak di backpack: tetep di-level, JANGAN drop.
-                    -- (Game ngumpetin Tool dari backpack pas pet di-equip)
-                else
-                    -- Tool gak di backpack DAN gak di garden = pet beneran ilang (di-trade/gift)
-                    dbg("[monitor] pet "..uuid:sub(1,8).." beneran ilang (gak di backpack & gak di garden) -> drop")
-                    table.insert(doneList,uuid)
                 end
             end
 
             for _,uuid in ipairs(doneList) do
                 pcall(function() unequipPet(uuid) end)
                 currentLevelingUUIDs[uuid]=nil
+                lastAgeCheck[uuid]=nil
                 task.wait(0.1)
             end
 
@@ -2003,4 +2069,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Swap config independen dari START, toggle ON langsung jalan")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Fix age detection: baca placed model + force recheck 30s, pet udah age toAge auto kelar")
