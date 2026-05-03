@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v7.8"
+local SCRIPT_VERSION="v7.9"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -1055,8 +1055,8 @@ buildTimList=function()
         buildTimList()
     end)
 
-    local scanBtn=btn(areas[1],"Scan Attr Pet (debug favorite)",9,C.Panel,C.Gold)
-    scanBtn.Size=UDim2.new(1,0,0,22) scanBtn.LayoutOrder=2 stroke(scanBtn,C.Gold,1.2)
+    local scanBtn=btn(areas[1],"Scan Attr Pet (debug)",8,C.Card,C.Gray)
+    scanBtn.Size=UDim2.new(1,0,0,20) scanBtn.LayoutOrder=2 stroke(scanBtn,C.Dim,1)
     scanBtn.MouseButton1Click:Connect(function()
         local bp=player:FindFirstChild("Backpack")
         if not bp then dbg("Backpack tidak ada") return end
@@ -1079,8 +1079,8 @@ buildTimList=function()
     end)
 
     -- Scan Garden button: debug isi PetsPhysical buat tau pickup gagal di mana
-    local scanGardenBtn=btn(areas[1],"Scan Garden (debug pickup)",9,C.Panel,C.Gold)
-    scanGardenBtn.Size=UDim2.new(1,0,0,22) scanGardenBtn.LayoutOrder=3 stroke(scanGardenBtn,C.Gold,1.2)
+    local scanGardenBtn=btn(areas[1],"Scan Garden (debug)",8,C.Card,C.Gray)
+    scanGardenBtn.Size=UDim2.new(1,0,0,20) scanGardenBtn.LayoutOrder=3 stroke(scanGardenBtn,C.Dim,1)
     scanGardenBtn.MouseButton1Click:Connect(function()
         dbg("=== SCAN GARDEN STRUCTURE ===")
         local petsPhys=workspace:FindFirstChild("PetsPhysical")
@@ -1109,8 +1109,8 @@ buildTimList=function()
     end)
 
     -- Scan UI Age button: debug ActivePetUI struktur buat tau kenapa age detection gagal
-    local scanUIBtn=btn(areas[1],"Scan UI Age (debug ?/100)",9,C.Panel,C.Blue)
-    scanUIBtn.Size=UDim2.new(1,0,0,22) scanUIBtn.LayoutOrder=4 stroke(scanUIBtn,C.Blue,1.2)
+    local scanUIBtn=btn(areas[1],"Scan UI Age (debug)",8,C.Card,C.Gray)
+    scanUIBtn.Size=UDim2.new(1,0,0,20) scanUIBtn.LayoutOrder=4 stroke(scanUIBtn,C.Dim,1)
     scanUIBtn.MouseButton1Click:Connect(function()
         dbg("=== SCAN UI AGE DEBUG ===")
         local pg=player:FindFirstChild("PlayerGui")
@@ -2718,4 +2718,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! BUG FIX: Copy log button skrg actually copy isi log (sebelumnya scope issue bikin variable kosong)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! 3 tombol debug di tab 1 (Scan Attr/Garden/UI Age) styling-nya udah subtle gak ngejreng lagi")
