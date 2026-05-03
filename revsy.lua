@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v5.8"
+local SCRIPT_VERSION="v5.9"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -1767,7 +1767,8 @@ local function doStop(reason)
     buildTargetList()
 end
 
-local function cleanupGarden()
+-- Pickup SEMUA pet di garden (bukan cuma "other"). Tim+target akan di-place ulang setelah ini.
+local function pickupAllGardenPets()
     local petsPhys=workspace:FindFirstChild("PetsPhysical")
     local petMover=petsPhys and petsPhys:FindFirstChild("PetMover")
     if not petMover then return 0 end
@@ -1776,30 +1777,9 @@ local function cleanupGarden()
     for _,placedPet in ipairs(petMover:GetChildren()) do
         local modelName=placedPet.Name
         local uuidNoBrace=modelName:gsub("^{",""):gsub("}$","")
-
-        local isTeam = teamPetUUIDs[uuidNoBrace]==true
-            or teamPetUUIDs[modelName]==true
-            or teamPetUUIDs["{"..uuidNoBrace.."}"]==true
-
-        if not isTeam then
-            local isTarget=false
-            local item=findPetInBackpack(uuidNoBrace) or findPetInBackpack(modelName)
-            if item then
-                local petName=getPetName(item)
-                if isTargetPet(petName) then
-                    local age=getAgeFromKG(item)
-                    if age==nil or (age>=fromAge and age<toAge) then
-                        isTarget=true
-                    end
-                end
-            end
-
-            if not isTarget then
-                pcall(function() unequipPet(uuidNoBrace) end)
-                removed=removed+1
-                task.wait(0.05)
-            end
-        end
+        pcall(function() unequipPet(uuidNoBrace) end)
+        removed=removed+1
+        task.wait(0.05)
     end
     return removed
 end
@@ -1811,14 +1791,36 @@ local function doStart()
     if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
 
-    local removed=cleanupGarden()
+    -- 1) Pickup SEMUA pet di garden (bersih total)
+    statusLbl.Text="Membersihkan garden..." statusLbl.TextColor3=C.Gold
+    local removed=pickupAllGardenPets()
     if removed>0 then
-        dbg("[doStart] cleanup garden: keluarin "..removed.." pet bukan tim/target")
+        dbg("[doStart] pickup ALL: "..removed.." pet di-pickup dari garden")
+        -- delay proporsional sama jumlah pet (server butuh waktu update)
+        task.wait(math.min(2,0.3+removed*0.05))
+    end
+
+    -- 2) Place tim leveling pets balik (yg sebelumnya udah ada di tim)
+    statusLbl.Text="Pasang tim leveling..." statusLbl.TextColor3=C.Gold
+    local teamPlaced=0
+    for uuid,_ in pairs(teamPetUUIDs) do
+        equipPet(uuid)
+        teamPlaced=teamPlaced+1
+        task.wait(0.1)
+    end
+    if teamPlaced>0 then
+        dbg("[doStart] tim "..teamPlaced.." pet di-place")
         task.wait(0.3)
     end
 
+    -- 3) Cek queue pet target
     local queue=getQueue()
-    if #queue==0 then dbg("[doStart] FAIL: queue kosong") statusLbl.Text="Tidak ada pet target!" statusLbl.TextColor3=C.Red return end
+    if #queue==0 then
+        dbg("[doStart] FAIL: queue kosong (tim udah di-place tapi gak ada pet target)")
+        statusLbl.Text="Tidak ada pet target!" statusLbl.TextColor3=C.Red
+        -- Karena udah pickup garden + place tim, jangan unequip tim. Cuma stop di sini.
+        return
+    end
 
     isRunning=true setRunning(true)
     statusLbl.Text="Berjalan... Q:"..#queue statusLbl.TextColor3=C.Teal
@@ -1948,4 +1950,4 @@ task.wait(1)
 if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Swap mechanic: friend-7 (global poller, Time<=0 -> swap, gap 30ms)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Swap: friend-7 (favorited pets, independen tim) | START: pickup all garden -> place tim+target")
