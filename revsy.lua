@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v6.6"
+local SCRIPT_VERSION="v6.7"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -2028,80 +2028,90 @@ local function doStart()
     end)
 
     monitorTask=task.spawn(function()
-        local lastAgeCheck={} -- uuid -> tick saat age TERAKHIR berhasil dibaca dari Tool (reliable source)
+        local equipTime={} -- uuid -> tick saat pet pertama kali di-track (utk safety timeout)
+        local lastRecheck={} -- uuid -> tick saat force recheck terakhir (rate limit recheck)
+        local SAFETY_TIMEOUT=10*60 -- 10 menit: kalau pet udah di-track segitu lama tanpa age detect, force unequip (failsafe)
         while isRunning do
             local doneList={}
             for uuid,_ in pairs(currentLevelingUUIDs) do
+                if not equipTime[uuid] then equipTime[uuid]=tick() end
+
                 local item=findPetInBackpack(uuid)
+                local placed=findPlacedPetByUUID(uuid)
+
+                -- Cari age dari sumber manapun (Tool name OR placed model)
+                local age=nil
+                local source=nil
                 if item then
-                    -- Tool ada di backpack: source paling reliable
-                    local age=getAgeFromKG(item)
-                    if age then
-                        lastAgeCheck[uuid]=tick()
-                        if age>=toAge then
-                            dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." -> done")
-                            table.insert(doneList,uuid)
-                        end
-                    end
-                else
-                    -- Tool gak di backpack, cek garden
-                    local placed=findPlacedPetByUUID(uuid)
-                    if placed then
-                        -- Early exit: kalau placed model ngasih age >= toAge, langsung selesai (gak perlu unequip)
-                        local placedAge=getPlacedPetAge(placed)
-                        if placedAge and placedAge>=toAge then
-                            dbg("[monitor] "..uuid:sub(1,8).." age "..placedAge..">="..toAge.." (placed) -> done")
-                            table.insert(doneList,uuid)
-                        else
-                            -- placedAge mungkin nil ATAU mungkin SALAH (e.g. attribute "Level" = rarity bukan age)
-                            -- jadi lastAgeCheck[uuid] HANYA di-update lewat backpack/recheck (reliable source).
-                            -- Force recheck via brief unequip tiap 30 detik (selalu jalan, gak peduli placedAge).
-                            local last=lastAgeCheck[uuid] or 0
-                            if tick()-last > 30 then
-                                dbg("[monitor] force recheck "..uuid:sub(1,8).." (placed >30s tanpa age verified)")
-                                pcall(function() unequipPet(uuid) end)
-                                task.wait(0.5)
-                                local recheckItem=findPetInBackpack(uuid)
-                                -- Retry: kasih kesempatan kalau server lambat update
-                                if not recheckItem then
-                                    task.wait(0.5)
-                                    recheckItem=findPetInBackpack(uuid)
-                                end
-                                if recheckItem then
-                                    local age=getAgeFromKG(recheckItem)
-                                    if age then
-                                        lastAgeCheck[uuid]=tick()
-                                        if age>=toAge then
-                                            dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." (recheck) -> done")
-                                            table.insert(doneList,uuid)
-                                            -- Jangan equip lagi, biarin di backpack (akan di-unequip lagi di doneList loop)
-                                        else
-                                            -- Belum kelar, equip lagi biar lanjut leveling
-                                            pcall(function() equipPet(uuid) end)
-                                        end
-                                    else
-                                        -- Age gak ke-baca, equip lagi
-                                        pcall(function() equipPet(uuid) end)
-                                    end
-                                else
-                                    -- Tool gak ke-detect bahkan setelah retry, equip lagi
-                                    dbg("[monitor] "..uuid:sub(1,8).." Tool gak balik ke backpack abis unequip, equip ulang")
-                                    pcall(function() equipPet(uuid) end)
-                                end
-                            end
-                        end
-                    else
-                        -- Tool gak di backpack DAN gak di garden = pet beneran ilang (di-trade/gift)
-                        dbg("[monitor] pet "..uuid:sub(1,8).." beneran ilang (gak di backpack & gak di garden) -> drop")
+                    age=getAgeFromKG(item)
+                    if age then source="tool" end
+                end
+                if not age and placed then
+                    age=getPlacedPetAge(placed)
+                    if age then source="placed" end
+                end
+
+                if age then
+                    -- Age dapet: cek udah toAge atau belum
+                    if age>=toAge then
+                        dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done")
                         table.insert(doneList,uuid)
                     end
+                    -- else: lanjut leveling, gak ngapa-ngapain
+                elseif (not item) and (not placed) then
+                    -- Pet beneran ilang (di-trade/gift)
+                    dbg("[monitor] "..uuid:sub(1,8).." beneran ilang -> drop")
+                    table.insert(doneList,uuid)
+                else
+                    -- Pet ada (di backpack atau garden) tapi age gak ke-baca
+                    -- Force recheck via brief unequip tiap 30 detik (rate-limited)
+                    local elapsed=tick()-equipTime[uuid]
+                    local lastRC=lastRecheck[uuid] or 0
+
+                    -- SAFETY: kalau udah tracked >6 menit tanpa age verified, asumsi done
+                    if elapsed > SAFETY_TIMEOUT then
+                        dbg("[monitor] "..uuid:sub(1,8).." SAFETY TIMEOUT >6 menit, assume done -> drop")
+                        table.insert(doneList,uuid)
+                    elseif elapsed > 15 and (tick()-lastRC) > 30 then
+                        -- Force recheck: brief unequip → cek age di backpack → equip lagi kalo belum kelar
+                        dbg("[monitor] force recheck "..uuid:sub(1,8).." (elapsed "..math.floor(elapsed).."s, age unknown)")
+                        lastRecheck[uuid]=tick()
+                        pcall(function() unequipPet(uuid) end)
+                        task.wait(0.5)
+                        local recheckItem=findPetInBackpack(uuid)
+                        if not recheckItem then
+                            task.wait(0.5)
+                            recheckItem=findPetInBackpack(uuid)
+                        end
+                        if recheckItem then
+                            local newAge=getAgeFromKG(recheckItem)
+                            if newAge then
+                                if newAge>=toAge then
+                                    dbg("[monitor] "..uuid:sub(1,8).." age "..newAge..">="..toAge.." (recheck) -> done")
+                                    table.insert(doneList,uuid)
+                                else
+                                    dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck), lanjut")
+                                    pcall(function() equipPet(uuid) end)
+                                end
+                            else
+                                -- Age gak ke-baca dari recheck juga, mungkin nama Tool weird
+                                dbg("[monitor] "..uuid:sub(1,8).." age GAK ke-baca dari Tool recheck (nama: "..tostring(recheckItem.Name)..")")
+                                pcall(function() equipPet(uuid) end)
+                            end
+                        else
+                            dbg("[monitor] "..uuid:sub(1,8).." Tool gak balik abis unequip, equip ulang")
+                            pcall(function() equipPet(uuid) end)
+                        end
+                    end
+                    -- else: belum waktunya recheck, biarin lanjut leveling
                 end
             end
 
             for _,uuid in ipairs(doneList) do
                 pcall(function() unequipPet(uuid) end)
                 currentLevelingUUIDs[uuid]=nil
-                lastAgeCheck[uuid]=nil
+                equipTime[uuid]=nil
+                lastRecheck[uuid]=nil
                 task.wait(0.1)
             end
 
@@ -2215,4 +2225,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Toggle ON di tab Swap cuma config + start poller (gak auto-equip). Pet di-place manual / via leveling.")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Monitor rework: try age dari Tool+placed, force recheck setiap 30s untuk age unknown, safety timeout 10 menit")
