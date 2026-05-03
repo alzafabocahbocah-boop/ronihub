@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v5.7"
+local SCRIPT_VERSION="v5.8"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION)
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -110,7 +110,7 @@ local function dbg(msg)
 end
 dbg("Step 1 OK: services + playerGui")
 
--- ===== PATCH 1: + GetPetCooldown remote =====
+-- ===== REMOTES =====
 local equipRE = nil
 local getCooldownRF = nil
 for _,v in pairs(RS:GetDescendants()) do
@@ -172,41 +172,18 @@ end
 local d=getgenv().ZenxData
 dbg("Step 3 OK: data loaded")
 
-if not d.swapPerPetVersion or d.swapPerPetVersion < 2 then
-    d.swapPerPet = {}
-    d.swapPerPetVersion = 2
-end
-if d.swapPerPetVersion < 3 then
+-- ===== MIGRATION (sampai v9 = friend-7 swap mechanic) =====
+if not d.swapPerPetVersion or d.swapPerPetVersion < 9 then
+    -- Reset semua swap config lama, friend-7 mekanik gak butuh per-pet config
+    d.swapPerPet = d.swapPerPet or {}
     if d.swapPerPet then
         for uuid,cfg in pairs(d.swapPerPet) do
-            if cfg.pickup and cfg.pickup < 1 then cfg.pickup = 15 end
+            -- Bersihin field lama, sisain enabled doang
+            d.swapPerPet[uuid]={enabled=cfg.enabled==true}
         end
     end
-    d.swapPerPetVersion = 3
-end
-if d.swapPerPetVersion < 7 then
-    if d.swapConfig then
-        d.swapConfig.pickupDelay = 1800
-        d.swapConfig.placeDelay = 0.6
-    end
-    if d.swapPerPet then
-        for _,cfg in pairs(d.swapPerPet) do
-            cfg.pickup = 1800
-            cfg.place = 0.6
-        end
-    end
-    d.swapPerPetVersion = 7
-end
-if d.swapPerPetVersion < 8 then
-    -- migrate to v78 pure-CD mechanic
-    d.swapConfig = {pollInterval=0.1,burstDelay=0.05,equipBurst=3}
-    if d.swapPerPet then
-        for _,cfg in pairs(d.swapPerPet) do
-            cfg.pickup = nil
-            cfg.place = nil
-        end
-    end
-    d.swapPerPetVersion = 8
+    d.swapConfig = nil  -- gak dipake lagi
+    d.swapPerPetVersion = 9
 end
 
 local C={
@@ -270,7 +247,7 @@ local function fmtUUID(uuid)
     return s
 end
 
--- ===== PATCH 2: equipPet dengan nil arg ke-3 =====
+-- ===== EQUIP / UNEQUIP =====
 local function equipPet(uuid)
     local u=fmtUUID(uuid)
     pcall(function() equipRE:FireServer("EquipPet",u,nil) end)
@@ -281,43 +258,38 @@ local function unequipPet(uuid)
     pcall(function() equipRE:FireServer("UnequipPet",u) end)
     pcall(function() petLeadRE:FireServer("UnequipPet",u) end)
 end
-local function pickupPet(uuid)
+
+-- ===== SWAP MECHANIC (FRIEND-7 PERSIS) =====
+-- UnequipPet -> 30ms wait -> EquipPet(uuid, nil)
+local function swapPet(uuid)
     local u=fmtUUID(uuid)
     pcall(function() equipRE:FireServer("UnequipPet",u) end)
-    pcall(function() petLeadRE:FireServer("UnequipPet",u) end)
-    pcall(function() equipRE:FireServer("PickupPet",u) end)
-    pcall(function() petLeadRE:FireServer("PickupPet",u) end)
-    pcall(function() equipRE:FireServer("PickPetUp",u) end)
-    pcall(function() petLeadRE:FireServer("PickPetUp",u) end)
-    pcall(function() equipRE:FireServer("PickUpPet",u) end)
-    pcall(function() petLeadRE:FireServer("PickUpPet",u) end)
+    task.wait(0.03)
+    pcall(function() equipRE:FireServer("EquipPet",u,nil) end)
 end
 
--- ===== PATCH 3: getPetCD helper =====
-local function getPetCD(uuid)
+-- ===== getPetTime (FRIEND-7: strict res[1].Time key) =====
+-- Return: number (seconds remaining), atau nil kalau pet inactive
+local function getCooldownRaw(uuid)
     if not getCooldownRF then return nil end
     local u=fmtUUID(uuid)
     local ok,res=pcall(function() return getCooldownRF:InvokeServer(u) end)
     if not ok then return nil end
-    if type(res)=="number" then return res end
-    if type(res)=="boolean" then return res and 0 or nil end
-    if type(res)=="table" then
-        if next(res)==nil then return nil end
-        local sub=res[1]
-        if type(sub)=="number" then return sub end
-        if type(sub)=="table" then
-            for _,k in ipairs({"cooldown","cd","remaining","time","CD","Cooldown","Remaining","Time"}) do
-                if type(sub[k])=="number" then return sub[k] end
-            end
-            if type(sub[1])=="number" then return sub[1] end
-            if type(sub[2])=="number" then return sub[2] end
-        end
-    end
+    return res
+end
+
+local function getPetTime(uuid)
+    local res=getCooldownRaw(uuid)
+    if type(res)~="table" then return nil end
+    if next(res)==nil then return nil end -- empty {} = inactive/no skill
+    local sub=res[1]
+    if type(sub)~="table" then return nil end
+    if type(sub.Time)=="number" then return sub.Time end
     return nil
 end
 
 -- ============================================
--- COOLDOWN DETECTION
+-- HELPER LAIN (gak dipake utk swap, tapi ditahan utk fitur lain)
 -- ============================================
 local function findPlacedPetByUUID(uuid)
     local uuidStr=tostring(uuid)
@@ -351,148 +323,6 @@ local function findPlacedPetByUUID(uuid)
         if ok and uid==uuid then return m end
     end
     return nil
-end
-
-local function parseCDText(txt)
-    if not txt then return nil end
-    local clean=txt:gsub("[^%d:]","")
-    local h,m,s=clean:match("^(%d+):(%d+):(%d+)$")
-    if h then return tonumber(h)*3600+tonumber(m)*60+tonumber(s) end
-    local m2,s2=clean:match("^(%d+):(%d+)$")
-    if m2 then return tonumber(m2)*60+tonumber(s2) end
-    return nil
-end
-
-local _uiCDSlotCache={}
-local function readUICDForPetType(petType)
-    local pg=player:FindFirstChild("PlayerGui")
-    if not pg then return nil end
-    local apUi=pg:FindFirstChild("ActivePetUI")
-    if not apUi then return nil end
-    local frame=apUi:FindFirstChild("Frame")
-    if not frame then return nil end
-
-    local cached=_uiCDSlotCache[petType]
-    if cached and cached.cdLbl and cached.cdLbl.Parent then
-        local ok2,txt=pcall(function() return cached.cdLbl.Text end)
-        if ok2 then
-            local sec=parseCDText(txt)
-            if sec then return sec, cached.slot end
-        end
-        _uiCDSlotCache[petType]=nil
-    end
-
-    local candidates={}
-    local fullLow=petType:lower()
-    table.insert(candidates,fullLow)
-    local base=getBaseName(petType):lower()
-    if base~=fullLow then table.insert(candidates,base) end
-    local words={}
-    for w in petType:gmatch("%S+") do table.insert(words,w:lower()) end
-    if #words>=1 then
-        local lastW=words[#words]
-        local seen=false
-        for _,c in ipairs(candidates) do if c==lastW then seen=true break end end
-        if not seen then table.insert(candidates,lastW) end
-    end
-    if #words>=2 then
-        local last2=words[#words-1].." "..words[#words]
-        local seen=false
-        for _,c in ipairs(candidates) do if c==last2 then seen=true break end end
-        if not seen then table.insert(candidates,last2) end
-    end
-
-    local exactMatch=nil
-    local looseMatch=nil
-    for _,d in ipairs(frame:GetDescendants()) do
-        if d:IsA("TextLabel") then
-            local ok,txt=pcall(function() return d.Text end)
-            if ok and txt then
-                local txtLow=txt:lower()
-                for _,cand in ipairs(candidates) do
-                    if txtLow==cand then
-                        exactMatch=exactMatch or d
-                    elseif txtLow:find(cand,1,true) and #txt<60 then
-                        looseMatch=looseMatch or d
-                    end
-                end
-            end
-        end
-    end
-    local nameLbl=exactMatch or looseMatch
-    if not nameLbl then return nil end
-
-    local slot=nameLbl.Parent
-    for h=1,3 do
-        if not slot then break end
-        local cdLbls={}
-        for _,sib in ipairs(slot:GetDescendants()) do
-            if sib:IsA("TextLabel") and sib~=nameLbl then
-                local ok2,t2=pcall(function() return sib.Text end)
-                if ok2 and t2 then
-                    local cd=parseCDText(t2)
-                    if cd then table.insert(cdLbls,{lbl=sib,cd=cd}) end
-                end
-            end
-        end
-        if #cdLbls==1 then
-            _uiCDSlotCache[petType]={slot=slot,cdLbl=cdLbls[1].lbl,nameLbl=nameLbl}
-            return cdLbls[1].cd, slot
-        elseif #cdLbls>1 then
-            if h==1 then return nil end
-            _uiCDSlotCache[petType]={slot=slot,cdLbl=cdLbls[1].lbl,nameLbl=nameLbl}
-            return cdLbls[1].cd, slot
-        end
-        slot=slot.Parent
-    end
-    return nil
-end
-
-local function readPetCooldown(petModel)
-    if not petModel then return nil end
-    local names={"TimeUntilReady","Cooldown","CooldownLeft","CooldownRemaining","CD","SkillCooldown","AbilityCooldown","NextSkillIn","SkillReady"}
-    for _,n in ipairs(names) do
-        local v=petModel:GetAttribute(n)
-        if type(v)=="number" then return v,n end
-        if type(v)=="boolean" then return v and 0 or 1,n end
-    end
-    return nil,nil
-end
-
-local cooldownDebugDone={}
-local function debugDumpPet(uuid,petName,item,placedModel)
-    if cooldownDebugDone[uuid] then return end
-    cooldownDebugDone[uuid]=true
-    print("====== [ZenxSwap-Debug] "..petName.." ======")
-    dbg("=== Swap Debug "..petName.." ===")
-    if item then
-        print("-- Tool attributes:")
-        dbg("Tool attrs:")
-        for k,v in pairs(item:GetAttributes()) do
-            local line="  ["..k.."] = "..tostring(v).." ("..type(v)..")"
-            print(line) dbg(line)
-        end
-    else
-        print("-- Tool not in backpack (probably equipped)")
-        dbg("Tool: not in backpack")
-    end
-    if placedModel then
-        print("-- Placed pet: "..placedModel:GetFullName())
-        dbg("Placed: "..placedModel.Name)
-        for k,v in pairs(placedModel:GetAttributes()) do
-            local line="  ["..k.."] = "..tostring(v).." ("..type(v)..")"
-            print(line) dbg(line)
-        end
-        for _,c in ipairs(placedModel:GetChildren()) do
-            local line="  child:["..c.Name.."] "..c.ClassName
-            print(line) dbg(line)
-        end
-    else
-        print("-- Placed pet: NOT FOUND in workspace")
-        dbg("Placed: NOT FOUND")
-    end
-    dbg("=== Kasih output ini ke Claude ===")
-    print("================================")
 end
 
 local giftRE=nil
@@ -744,189 +574,6 @@ end)
 local teamPetUUIDs=d.teamPetUUIDs or {}
 local teamPetInfoCache=d.teamPetInfoCache or {}
 
--- ===== SKILL DETECTOR (kept as in original) =====
-local SkillDetector={lastFire={},watchTypes={},notifLog={},rawLog={},rawLogEnabled=false,initialized=false}
-local function _skillDetectorCheckText(text)
-    if not text or text=="" or #text>200 then return end
-    local low=text:lower()
-    for petType,_ in pairs(SkillDetector.watchTypes) do
-        if low:find(petType,1,true) then
-            local lastTxt=SkillDetector.lastText and SkillDetector.lastText[petType]
-            local lastT=SkillDetector.lastFire[petType] or 0
-            if lastTxt==text and (tick()-lastT)<2 then return end
-            SkillDetector.lastFire[petType]=tick()
-            SkillDetector.lastText=SkillDetector.lastText or {}
-            SkillDetector.lastText[petType]=text
-            table.insert(SkillDetector.notifLog,1,os.date("%X").." | "..petType.." | "..text:sub(1,60))
-            if #SkillDetector.notifLog>20 then table.remove(SkillDetector.notifLog) end
-            break
-        end
-    end
-end
-local function _skillDetectorRawLog(text,path)
-    if not SkillDetector.rawLogEnabled then return end
-    if not text or text=="" or #text>120 then return end
-    table.insert(SkillDetector.rawLog,1,os.date("%X").." | "..text:sub(1,60).." @ "..path)
-    if #SkillDetector.rawLog>50 then table.remove(SkillDetector.rawLog) end
-end
-local function _skillDetectorHookLabel(lbl)
-    if not lbl or not lbl:IsA("TextLabel") then return end
-    task.spawn(function()
-        task.wait(0.05)
-        local ok,t=pcall(function() return lbl.Text end)
-        if ok and t then
-            _skillDetectorCheckText(t)
-            local p=""
-            pcall(function() p=lbl:GetFullName():gsub(".*PlayerGui%.","") end)
-            _skillDetectorRawLog(t,p)
-        end
-    end)
-    pcall(function()
-        lbl:GetPropertyChangedSignal("Text"):Connect(function()
-            local ok,t=pcall(function() return lbl.Text end)
-            if ok and t then
-                _skillDetectorCheckText(t)
-                local p=""
-                pcall(function() p=lbl:GetFullName():gsub(".*PlayerGui%.","") end)
-                _skillDetectorRawLog(t,p)
-            end
-        end)
-    end)
-end
-local function initSkillDetector()
-    if SkillDetector.initialized then return end
-    SkillDetector.initialized=true
-    pcall(function()
-        for _,lbl in ipairs(playerGui:GetDescendants()) do
-            if lbl:IsA("TextLabel") then _skillDetectorHookLabel(lbl) end
-        end
-        playerGui.DescendantAdded:Connect(function(lbl)
-            if lbl:IsA("TextLabel") then _skillDetectorHookLabel(lbl) end
-        end)
-    end)
-    dbg("[SkillDetector] init OK")
-end
-local function updateSkillWatchTypes()
-    SkillDetector.watchTypes={}
-    for uuid,_ in pairs(teamPetUUIDs) do
-        local info=teamPetInfoCache[uuid]
-        if info and info.name then
-            local base=getBaseName(info.name):lower()
-            SkillDetector.watchTypes[base]=true
-            local words={}
-            for w in base:gmatch("%S+") do table.insert(words,w) end
-            if #words>1 then SkillDetector.watchTypes[words[#words]]=true end
-        end
-    end
-end
-
--- ===== ANIMATION SPY =====
-local AnimSpy={log={},hooked={},skillFire={},minLength=1.0,enabled=false,initialized=false}
-local function _animSpyFindAnimator(model)
-    for _,d in ipairs(model:GetDescendants()) do
-        if d:IsA("Animator") then return d end
-    end
-    return nil
-end
-local SKILL_FX_NAMES={Zone=true,Aoe=true,AOE=true,Skill=true,SkillFx=true,SkillEffect=true,Effect=true,Field=true,Aura=true,Range=true,Cast=true,Cast1=true,Web=true,Spit=true,Shoot=true,Spray=true,Wave=true,Blast=true,Hitbox=true,Damage=true,Beam=true,Slash=true}
-local SKIP_ANIM_NAMES={Walk=true,Idle=true,Run=true,Stand=true,Move=true,Sit=true,Sleep=true,Eat=true,Jump=true,Fall=true,Land=true,Swim=true,Climb=true}
-local SKILL_FX_CLASSES={ParticleEmitter=true,Beam=true,Trail=true,Sound=true,PointLight=true,SpotLight=true,SurfaceLight=true,SurfaceGui=true,BillboardGui=true,Explosion=true,Fire=true,Smoke=true,Sparkles=true}
-
-local function _animSpyMarkFire(model,reason)
-    for uuid,info in pairs(teamPetInfoCache) do
-        if model.Name:find(uuid,1,true) then
-            local base=getBaseName(info.name):lower()
-            AnimSpy.skillFire[base]=tick()
-            local words={}
-            for w in base:gmatch("%S+") do table.insert(words,w) end
-            if #words>1 then AnimSpy.skillFire[words[#words]]=tick() end
-            if AnimSpy.enabled then
-                local entry=os.date("%X").." | "..base.." | "..reason
-                table.insert(AnimSpy.log,1,entry)
-                if #AnimSpy.log>50 then table.remove(AnimSpy.log) end
-            end
-            return
-        end
-    end
-end
-
-local function _animSpyHookModel(model)
-    if AnimSpy.hooked[model] then return end
-    AnimSpy.hooked[model]=true
-    local matchedPet=nil
-    for uuid,info in pairs(teamPetInfoCache) do
-        if model.Name:find(uuid,1,true) then matchedPet=info.name break end
-    end
-    dbg("[AnimSpy] hook "..model.Name:sub(2,9).." -> "..(matchedPet or "(no team match)"))
-    task.spawn(function()
-        for i=1,10 do
-            local an=_animSpyFindAnimator(model)
-            if an then
-                pcall(function()
-                    an.AnimationPlayed:Connect(function(track)
-                        local name="?"
-                        pcall(function() if track.Animation then name=track.Animation.Name end end)
-                        if AnimSpy.enabled then
-                            local len=0 local looped=true
-                            pcall(function() len=track.Length or 0 looped=track.Looped end)
-                            local entry=string.format("%s|%s|%.1fs|loop=%s|%s",os.date("%X"),model.Name:sub(2,9),len,tostring(looped),name:sub(1,15))
-                            table.insert(AnimSpy.log,1,entry)
-                            if #AnimSpy.log>50 then table.remove(AnimSpy.log) end
-                        end
-                        if name=="" or name=="?" then return end
-                        if SKIP_ANIM_NAMES[name] then return end
-                        local nameLower=name:lower()
-                        if nameLower:find("walk") or nameLower:find("idle") or nameLower:find("run") or nameLower:find("stand") then return end
-                        _animSpyMarkFire(model,"ANIM:"..name)
-                    end)
-                end)
-                break
-            end
-            task.wait(0.5)
-        end
-    end)
-    pcall(function()
-        model.DescendantAdded:Connect(function(d)
-            local cls=d.ClassName
-            if SKILL_FX_CLASSES[cls] then
-                _animSpyMarkFire(model,"FX:"..cls..":"..d.Name)
-            elseif cls=="Part" or cls=="MeshPart" then
-                if SKILL_FX_NAMES[d.Name] then _animSpyMarkFire(model,"PART:"..d.Name) end
-            end
-        end)
-    end)
-end
-
-local function initAnimSpy()
-    if AnimSpy.initialized then return end
-    AnimSpy.initialized=true
-    local pp=workspace:FindFirstChild("PetsPhysical")
-    if not pp then dbg("[AnimSpy] PetsPhysical gak ada") return end
-    local pm=pp:FindFirstChild("PetMover")
-    if not pm then dbg("[AnimSpy] PetMover gak ada") return end
-    pcall(function()
-        for _,m in ipairs(pm:GetChildren()) do
-            if m:IsA("Model") then _animSpyHookModel(m) end
-        end
-        pm.ChildAdded:Connect(function(m)
-            if m:IsA("Model") then task.wait(0.3) _animSpyHookModel(m) end
-        end)
-    end)
-    dbg("[AnimSpy] init OK")
-    task.spawn(function()
-        while true do
-            task.wait(3)
-            local pmm=workspace:FindFirstChild("PetsPhysical")
-            if pmm then pmm=pmm:FindFirstChild("PetMover") end
-            if pmm then
-                for _,m in ipairs(pmm:GetChildren()) do
-                    if m:IsA("Model") and not AnimSpy.hooked[m] then _animSpyHookModel(m) end
-                end
-            end
-        end
-    end)
-end
-
 local config=d.config or {equipInterval=5,rejoinMinutes=30}
 local targetPetTypes=d.targetPetTypes or {}
 local fromAge=d.fromAge or 1
@@ -957,11 +604,12 @@ local isRunning=false
 local mainTask=nil local monitorTask=nil
 local isAR=false local arTask=nil
 local arTog2,arTogStroke2,arStroke2,cdLbl2
-local currentLevelingUUIDs={}  -- UUID set: pet yg lagi di-level skrg (utk track unequip)
+local currentLevelingUUIDs={}
 
+-- ===== SWAP STATE (FRIEND-7 GLOBAL POLLER) =====
 local swapPerPet=d.swapPerPet or {}
-local swapConfig=d.swapConfig or {pollInterval=0.1,burstDelay=0.05,equipBurst=3}
-local swapTasks={}
+local pollerTask=nil
+local lastSwap={} -- uuid -> tick of last swap (debounce)
 
 local buildSwapList
 local buildTimList
@@ -974,7 +622,7 @@ local function save()
     d.sendInterval=sendInterval
     d.giftSlots=giftSlots
     d.antiAfk=antiAfk d.showAllPets=showAllPets
-    d.swapPerPet=swapPerPet d.swapConfig=swapConfig
+    d.swapPerPet=swapPerPet
     d.teamPetUUIDs=teamPetUUIDs d.teamPetInfoCache=teamPetInfoCache
     saveToFile(d)
 end
@@ -1393,40 +1041,21 @@ local function buildTargetList()
 end
 
 -- ============================================
--- TAB 3: SWAP SKILL  (RAPID PICKUP MODE)
+-- TAB 3: SWAP SKILL  (FRIEND-7 GLOBAL POLLER)
 -- ============================================
 buildSwapList=function()
     for _,c in pairs(areas[3]:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
     end
 
-    local dc=mk("Frame",{Size=UDim2.new(1,0,0,150),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
-    corner(dc,7) stroke(dc,C.Teal,1.2)
-    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=dc})
-    mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=dc})
-    lbl(dc,"Setting Swap Skill",9,C.Teal).Size=UDim2.new(1,0,0,13)
-
-    local function ngRow(parent,lt,dt,def,lo,onChange)
-        local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
-        corner(r,6) stroke(r,C.Dim,1.1)
-        local ll=lbl(r,lt,9,C.White) ll.Size=UDim2.new(0.5,0,0,14) ll.Position=UDim2.new(0,8,0,1)
-        local dl=lbl(r,dt,7,C.Dim) dl.Size=UDim2.new(0.6,0,0,11) dl.Position=UDim2.new(0,8,0,14)
-        local box=mk("TextBox",{Size=UDim2.new(0,56,0,20),Position=UDim2.new(1,-62,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(def),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
-        corner(box,5) stroke(box,C.Dim,1)
-        box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(math.max(0,v)) save() end end)
-    end
-    ngRow(dc,"Poll Interval","Cek CD tiap N detik (default 0.1)",swapConfig.pollInterval,1,function(v) swapConfig.pollInterval=math.max(0.05,v) end)
-    ngRow(dc,"Burst Delay","Jeda unequip→equip (default 0.05)",swapConfig.burstDelay,2,function(v) swapConfig.burstDelay=math.max(0,v) end)
-
-    local applyBtn=btn(dc,"APPLY GLOBAL KE SEMUA PET",10,C.BG,C.White)
-    applyBtn.Size=UDim2.new(1,0,0,26) applyBtn.LayoutOrder=4 applyBtn.Font=Enum.Font.GothamBold stroke(applyBtn,C.Teal,1.5)
-    applyBtn.MouseButton1Click:Connect(function()
-        for uuid,_ in pairs(teamPetUUIDs) do
-            if not swapPerPet[uuid] then swapPerPet[uuid]={enabled=false} end
-        end
-        save() buildSwapList()
-    end)
-
+    -- Info card (gak ada config UI lagi, semua hardcoded di poller)
+    local infoCard=mk("Frame",{Size=UDim2.new(1,0,0,52),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
+    corner(infoCard,7) stroke(infoCard,C.Teal,1.2)
+    mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,5),Parent=infoCard})
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=infoCard})
+    lbl(infoCard,"Swap Mechanic: friend-7",10,C.Teal).Size=UDim2.new(1,0,0,14)
+    local descLbl=lbl(infoCard,"Poll GetPetCooldown 50ms, swap kalau {1.Time<=0}, gap 30ms, debounce 1.5s",8,C.Gray)
+    descLbl.Size=UDim2.new(1,0,0,22) descLbl.TextWrapped=true
 
     div(areas[3],1)
 
@@ -1479,8 +1108,9 @@ buildSwapList=function()
                 pl.TextColor3=C.Gray
             end
             save()
-            if isRunning and _G.ZenxStartSwap and _G.ZenxStopSwap then
-                if p.enabled then _G.ZenxStartSwap(cu1) else _G.ZenxStopSwap(cu1) end
+            -- Kalau lagi running, pastiin poller jalan (poller pickup toggle dari swapPerPet[uuid].enabled)
+            if isRunning and _G.ZenxStartSwap then
+                _G.ZenxStartSwap(cu1)
             end
         end)
     end
@@ -1492,7 +1122,6 @@ buildSwapList=function()
     clr.MouseButton1Click:Connect(function()
         for uuid,_ in pairs(teamPetUUIDs) do
             if swapPerPet[uuid] then swapPerPet[uuid].enabled=false end
-            if isRunning and _G.ZenxStopSwap then _G.ZenxStopSwap(uuid) end
         end
         save() buildSwapList()
     end)
@@ -1553,7 +1182,7 @@ local function buildOtherSetting()
 end
 
 -- ============================================
--- TAB 5: AUTO GIFT (Send + Accept) - 3 Gift Slots
+-- TAB 5: AUTO GIFT
 -- ============================================
 local accStatusLbl=nil
 local sendStatusLbl=nil
@@ -1960,13 +1589,12 @@ end
 local function equipTeam()
     local petsPhys=workspace:FindFirstChild("PetsPhysical")
     local petMover=petsPhys and petsPhys:FindFirstChild("PetMover")
-    if not petMover then return end  -- garden belum load
+    if not petMover then return end
 
     for uuid,_ in pairs(teamPetUUIDs) do
         if not isPetInSwap(uuid) then
             local uuidStr=tostring(uuid)
             local uuidBracket=uuidStr:sub(1,1)=="{" and uuidStr or "{"..uuidStr.."}"
-            -- ringan: cek langsung di PetMover doang
             local placed=petMover:FindFirstChild(uuidBracket) or petMover:FindFirstChild(uuidStr)
             if not placed then
                 equipPet(uuid)
@@ -1984,97 +1612,73 @@ end
 
 
 -- ============================================
--- RAPID SWAP TASK (per pet) — WITH PATCH 4: hybrid AnimSpy + GetPetCooldown
+-- GLOBAL POLLER (FRIEND-7 MECHANIC)
+-- Poll semua pet enabled tiap 50ms, swap kalau Time<=0 (debounce 1.5s)
 -- ============================================
-local function startSwapForPet(uuid)
-    if swapTasks[uuid] then return end
-    local petInfo=getTeamPetInfo(uuid)
-    local petName=petInfo and petInfo.name or "?"
-    dbg("[Swap] START "..petName.." (pure CD mode)")
-    swapTasks[uuid] = task.spawn(function()
-        -- Initial equip
-        equipPet(uuid)
-        task.wait(0.5)
-        local cycle=0
-        local lastCD=nil
-        local skillFiredOnce=false
-
+local function startGlobalPoller()
+    if pollerTask then return end
+    pollerTask=task.spawn(function()
+        dbg("[poller] global poller START")
+        local cycles=0
         while isRunning do
-            local ps=swapPerPet[uuid]
-            if not ps or not ps.enabled then
-                dbg("[Swap] "..petName.." STOP (toggle off)")
-                break
-            end
-            cycle=cycle+1
-
-            -- POLL: tunggu sampai CD ready (== nil/empty/0)
-            local pollStart=tick()
-            while isRunning do
-                ps=swapPerPet[uuid]
-                if not ps or not ps.enabled then break end
-
-                local cd=getPetCD(uuid)
-
-                -- detect skill mulai aktif (CD muncul dari nil)
-                if cd~=nil and (lastCD==nil or lastCD<=0.5) and cd>0.5 then
-                    skillFiredOnce=true
-                    if cycle<=10 then
-                        dbg(string.format("[Swap] %s skill FIRED (CD=%.1f)",petName,cd))
+            cycles=cycles+1
+            -- Batch poll semua pet yg ON
+            for uuid,cfg in pairs(swapPerPet) do
+                if cfg.enabled and teamPetUUIDs[uuid] then
+                    local t=getPetTime(uuid)
+                    if t~=nil and t<=0 then
+                        local last=lastSwap[uuid] or 0
+                        if tick()-last>=1.5 then
+                            local info=getTeamPetInfo(uuid)
+                            local nm=(info and info.name) or "?"
+                            if cycles<=20 then
+                                dbg(string.format("[swap] %s Time=%.1f -> SWAP",nm:sub(1,12),t))
+                            end
+                            swapPet(uuid)
+                            lastSwap[uuid]=tick()
+                        end
                     end
                 end
-
-                -- ready: CD nil atau 0
-                if skillFiredOnce and (cd==nil or cd<=0.5) then
-                    if cycle<=10 then
-                        dbg(string.format("[Swap] %s CD READY -> swap (%.2fs wait)",petName,tick()-pollStart))
-                    end
-                    lastCD=cd
-                    break
-                end
-
-                lastCD=cd
-                task.wait(swapConfig.pollInterval or 0.1)
             end
-
-            if not isRunning then break end
-            ps=swapPerPet[uuid]
-            if not ps or not ps.enabled then break end
-
-            -- SWAP PATTERN (sc temen): UnequipPet → EquipPet, NO pickup variants
-            unequipPet(uuid)
-            task.wait(swapConfig.burstDelay or 0.05)
-            if not isRunning then break end
-            ps=swapPerPet[uuid]
-            if not ps or not ps.enabled then break end
-            equipPet(uuid)
-
-            skillFiredOnce=false
-            lastCD=nil
-            task.wait(0.3)  -- biar CD update di server
+            -- Status update tiap 100 cycle (~5 detik @ 50ms)
+            if cycles%100==0 then
+                local active,ready,idle=0,0,0
+                for uuid,cfg in pairs(swapPerPet) do
+                    if cfg.enabled and teamPetUUIDs[uuid] then
+                        local t=getPetTime(uuid)
+                        if t==nil then idle=idle+1
+                        elseif t<=0 then ready=ready+1
+                        else active=active+1 end
+                    end
+                end
+                dbg(string.format("[alive] cycle=%d active=%d ready=%d idle=%d",cycles,active,ready,idle))
+            end
+            task.wait(0.05)
         end
-        swapTasks[uuid]=nil
-        dbg("[Swap] "..petName.." END")
-        if isRunning then
-            pcall(function() equipPet(uuid) end)
-        end
+        pollerTask=nil
+        dbg("[poller] global poller STOP")
     end)
 end
 
-local function stopSwapForPet(uuid)
-    local t=swapTasks[uuid]
-    if t then
-        pcall(task.cancel,t)
-        swapTasks[uuid]=nil
+local function stopAllSwaps()
+    if pollerTask then
+        pcall(task.cancel,pollerTask)
+        pollerTask=nil
     end
-    if isRunning then pcall(function() equipPet(uuid) end) end
+    lastSwap={}
 end
 
-local function stopAllSwaps()
-    for uuid,t in pairs(swapTasks) do
-        pcall(task.cancel,t)
-        swapTasks[uuid]=nil
+-- Public hooks (dipanggil dari UI toggle)
+local function startSwapForPet(uuid)
+    -- Poller global pickup toggle dari swapPerPet[uuid].enabled, jadi cukup pastiin poller jalan
+    if isRunning and not pollerTask then
+        startGlobalPoller()
     end
-    swapTasks={}
+end
+
+local function stopSwapForPet(uuid)
+    -- Poller skip pet disabled otomatis. Cuma bersihin debounce-nya
+    lastSwap[uuid]=nil
 end
 
 _G.ZenxStartSwap=startSwapForPet
@@ -2107,7 +1711,6 @@ local function doStop(reason)
     if monitorTask then task.cancel(monitorTask) monitorTask=nil end
     stopAllSwaps()
     statusLbl.Text="Unequip..." statusLbl.TextColor3=C.Gray
-    -- unequip pet yg lagi di-level
     for uuid,_ in pairs(currentLevelingUUIDs) do
         pcall(function() unequipPet(uuid) end)
         task.wait(0.05)
@@ -2119,7 +1722,6 @@ local function doStop(reason)
     buildTargetList()
 end
 
--- Cleanup: keluarin pet di garden yg bukan tim & bukan target
 local function cleanupGarden()
     local petsPhys=workspace:FindFirstChild("PetsPhysical")
     local petMover=petsPhys and petsPhys:FindFirstChild("PetMover")
@@ -2130,13 +1732,11 @@ local function cleanupGarden()
         local modelName=placedPet.Name
         local uuidNoBrace=modelName:gsub("^{",""):gsub("}$","")
 
-        -- 1) cek pet tim (cocokin format dengan/tanpa kurung)
         local isTeam = teamPetUUIDs[uuidNoBrace]==true
             or teamPetUUIDs[modelName]==true
             or teamPetUUIDs["{"..uuidNoBrace.."}"]==true
 
         if not isTeam then
-            -- 2) cek pet target (cari Tool di backpack, cek isTargetPet + age)
             local isTarget=false
             local item=findPetInBackpack(uuidNoBrace) or findPetInBackpack(modelName)
             if item then
@@ -2149,7 +1749,6 @@ local function cleanupGarden()
                 end
             end
 
-            -- 3) bukan tim, bukan target → unequip
             if not isTarget then
                 pcall(function() unequipPet(uuidNoBrace) end)
                 removed=removed+1
@@ -2162,14 +1761,11 @@ end
 
 local function doStart()
     dbg("[doStart] dipanggil")
-    cooldownDebugDone={}
-    _uiCDSlotCache={}
-    currentLevelingUUIDs={}  -- reset state leveling
+    currentLevelingUUIDs={}
     if isRunning then dbg("[doStart] sudah running, skip") return end
     if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
 
-    -- bersihin garden dulu: keluarin pet bukan tim/target
     local removed=cleanupGarden()
     if removed>0 then
         dbg("[doStart] cleanup garden: keluarin "..removed.." pet bukan tim/target")
@@ -2182,10 +1778,6 @@ local function doStart()
     isRunning=true setRunning(true)
     statusLbl.Text="Berjalan... Q:"..#queue statusLbl.TextColor3=C.Teal
 
-    pcall(initSkillDetector)
-    pcall(updateSkillWatchTypes)
-    pcall(initAnimSpy)
-
     local teamCnt,swapCnt=0,0
     for uuid,_ in pairs(teamPetUUIDs) do
         teamCnt=teamCnt+1
@@ -2194,17 +1786,9 @@ local function doStart()
     dbg("[doStart] team="..teamCnt.." swap-enabled="..swapCnt)
     if swapCnt==0 then
         dbg("[doStart] NO swap pets - cek toggle ON di Tab Swap")
-    end
-
-    local stagger=0
-    for uuid,_ in pairs(teamPetUUIDs) do
-        if isPetInSwap(uuid) then
-            local info=getTeamPetInfo(uuid)
-            dbg("[doStart] launching swap "..((info and info.name) or "?"))
-            local cu=uuid local sg2=stagger
-            task.delay(sg2,function() if isRunning then startSwapForPet(cu) end end)
-            stagger=stagger+0.1
-        end
+    else
+        -- Launch 1 global poller utk semua pet swap
+        startGlobalPoller()
     end
 
     mainTask=task.spawn(function()
@@ -2213,7 +1797,6 @@ local function doStart()
 
     monitorTask=task.spawn(function()
         while isRunning do
-            -- 1) cek pet yg lagi di-level: yg umur >= toAge berarti udah selesai
             local doneList={}
             for uuid,_ in pairs(currentLevelingUUIDs) do
                 local item=findPetInBackpack(uuid)
@@ -2223,24 +1806,20 @@ local function doStart()
                         table.insert(doneList,uuid)
                     end
                 else
-                    -- pet hilang dari backpack (mungkin di-trade/gift) → drop
                     table.insert(doneList,uuid)
                 end
             end
 
-            -- 2) unequip pet selesai
             for _,uuid in ipairs(doneList) do
                 pcall(function() unequipPet(uuid) end)
                 currentLevelingUUIDs[uuid]=nil
                 task.wait(0.1)
             end
 
-            -- 3) hitung slot kepake
             local slotsUsed=0
             for _ in pairs(currentLevelingUUIDs) do slotsUsed=slotsUsed+1 end
             local slotsFree=maxPetTarget-slotsUsed
 
-            -- 4) kalau ada slot kosong, ambil pet baru dari queue
             local queue2=getQueue()
             local available={}
             for _,pet in ipairs(queue2) do
@@ -2250,7 +1829,6 @@ local function doStart()
                 end
             end
 
-            -- semua selesai (slot kosong + queue kosong)
             if slotsUsed==0 and #available==0 then
                 doStop("Semua pet selesai Age "..toAge.."!")
                 statusLbl.TextColor3=C.Green buildTargetList() break
@@ -2269,8 +1847,6 @@ local function doStart()
                 end
             end
 
-            -- 5) update status
-            local statusParts={}
             local activeNames={}
             for uuid,_ in pairs(currentLevelingUUIDs) do
                 local item=findPetInBackpack(uuid)
@@ -2326,4 +1902,4 @@ task.wait(1)
 if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Mekanik sc temen: UnequipPet -> EquipPet (no pickup variants)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Swap mechanic: friend-7 (global poller, Time<=0 -> swap, gap 30ms)")
