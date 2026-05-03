@@ -608,6 +608,8 @@ local currentLevelingUUIDs={}
 
 -- ===== SWAP STATE (FRIEND-7 GLOBAL POLLER) =====
 local swapPerPet=d.swapPerPet or {}
+local swapPetInfoCache=d.swapPetInfoCache or {} -- info pet utk swap tab (cache nama/info)
+local showAllPetsSwap=d.showAllPetsSwap or false -- bypass filter favorit di tab Swap
 local pollerTask=nil
 local lastSwap={} -- uuid -> tick of last swap (debounce)
 
@@ -621,8 +623,8 @@ local function save()
     d.autoAccGift=autoAccGift d.autoAccTrade=autoAccTrade
     d.sendInterval=sendInterval
     d.giftSlots=giftSlots
-    d.antiAfk=antiAfk d.showAllPets=showAllPets
-    d.swapPerPet=swapPerPet
+    d.antiAfk=antiAfk d.showAllPets=showAllPets d.showAllPetsSwap=showAllPetsSwap
+    d.swapPerPet=swapPerPet d.swapPetInfoCache=swapPetInfoCache
     d.teamPetUUIDs=teamPetUUIDs d.teamPetInfoCache=teamPetInfoCache
     saveToFile(d)
 end
@@ -1048,71 +1050,114 @@ buildSwapList=function()
         if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
     end
 
-    -- Info card (gak ada config UI lagi, semua hardcoded di poller)
+    -- Info card
     local infoCard=mk("Frame",{Size=UDim2.new(1,0,0,52),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[3]})
     corner(infoCard,7) stroke(infoCard,C.Teal,1.2)
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,5),Parent=infoCard})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=infoCard})
     lbl(infoCard,"Swap Mechanic: friend-7",10,C.Teal).Size=UDim2.new(1,0,0,14)
-    local descLbl=lbl(infoCard,"Poll GetPetCooldown 50ms, swap kalau {1.Time<=0}, gap 30ms, debounce 1.5s",8,C.Gray)
+    local descLbl=lbl(infoCard,"Pet di-love auto kedetek. Toggle ON pet yg mau di-swap. Independen dari Tim Leveling.",8,C.Gray)
     descLbl.Size=UDim2.new(1,0,0,22) descLbl.TextWrapped=true
 
-    div(areas[3],1)
+    -- Toggle "tampilkan semua pet" (bypass filter favorit)
+    local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[3]})
+    corner(saRow,6) stroke(saRow,C.Dim,1.1)
+    lbl(saRow,"Tampilkan semua pet",9,C.Gray).Size=UDim2.new(0.55,0,0,14)
+    local saTxt=lbl(saRow,"(bypass filter love)",7,C.Dim) saTxt.Size=UDim2.new(0.55,0,0,11) saTxt.Position=UDim2.new(0,8,0,16)
+    local saTog=btn(saRow,showAllPetsSwap and "ON" or "OFF",9,showAllPetsSwap and C.TDim or C.Panel,showAllPetsSwap and C.Teal or C.Gray)
+    saTog.Size=UDim2.new(0,44,0,20) saTog.Position=UDim2.new(1,-50,0.5,-10)
+    local saTogStroke=stroke(saTog,showAllPetsSwap and C.Teal or C.Dim,1.1)
+    saTog.MouseButton1Click:Connect(function()
+        showAllPetsSwap=not showAllPetsSwap save()
+        buildSwapList()
+    end)
 
-    local hdr=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=2,Parent=areas[3]})
-    corner(hdr,5)
-    lbl(hdr,"Pet TIM ("..teamCount().." pet) -- sinkron dgn Tim Leveling",9,C.Teal).Size=UDim2.new(1,-10,1,0)
+    div(areas[3],2)
 
-    if teamCount()==0 then
-        local e=lbl(areas[3],"Belum ada pet TIM. Pilih dulu di tab 'Tim Leveling'.",8,C.Gray,Enum.TextXAlignment.Center)
-        e.Size=UDim2.new(1,0,0,40) e.LayoutOrder=3
-        return
+    -- Kumpulin pet yg mau ditampilin: favorited di backpack + swap-enabled (walau gak di backpack)
+    local rows={} -- {uuid, info, fromBackpack, isPlaced}
+    local seen={}
+    local bp=player:FindFirstChild("Backpack")
+    local favCount=0
+    if bp then
+        for _,item in pairs(bp:GetChildren()) do
+            if isPet(item) and (showAllPetsSwap or isFavorite(item)) then
+                favCount=favCount+1
+                local uuid=getPetUUID(item)
+                if uuid then
+                    local uuidStr=tostring(uuid)
+                    local name=getPetName(item)
+                    local info=getPetInfo(item)
+                    swapPetInfoCache[uuidStr]={name=name,info=info}
+                    seen[uuidStr]=true
+                    table.insert(rows,{uuid=uuidStr,info=info,fromBackpack=true,isPlaced=false})
+                end
+            end
+        end
+    end
+    -- Pet yg swap-enabled tapi gak di backpack (mungkin di-place di garden)
+    for uuid,cfg in pairs(swapPerPet) do
+        if cfg.enabled and not seen[uuid] then
+            local cached=swapPetInfoCache[uuid] or teamPetInfoCache[uuid]
+            local info=cached and cached.info or (uuid:sub(1,8).."...")
+            table.insert(rows,{uuid=uuid,info=info.." (di garden)",fromBackpack=false,isPlaced=true})
+        end
     end
 
-    local thead=mk("Frame",{Size=UDim2.new(1,0,0,18),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=3,Parent=areas[3]})
-    corner(thead,5)
-    lbl(thead,"PET",8,C.Gray).Size=UDim2.new(0.7,0,1,0)
-    local ton=lbl(thead,"ON/OFF",8,C.Gray,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.28,0,1,0) ton.Position=UDim2.new(0.7,0,0,0)
+    -- Header info jumlah
+    local enabledCnt=0
+    for _,cfg in pairs(swapPerPet) do if cfg.enabled then enabledCnt=enabledCnt+1 end end
+    local hdr=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=3,Parent=areas[3]})
+    corner(hdr,5)
+    lbl(hdr,"Pet Favorit ("..#rows.." pet, "..enabledCnt.." swap ON)",9,C.Teal).Size=UDim2.new(1,-10,1,0)
 
-    local n=3
-    for uuid,_ in pairs(teamPetUUIDs) do
-        n=n+1
-        if not swapPerPet[uuid] then
-            swapPerPet[uuid]={enabled=false}
+    if #rows==0 then
+        local msg=favCount==0 and "Belum ada pet di-love. Tekan icon love di pet game dulu." or "Tidak ada pet love"
+        local e=lbl(areas[3],msg,8,C.Red,Enum.TextXAlignment.Center)
+        e.Size=UDim2.new(1,0,0,40) e.LayoutOrder=4 e.TextWrapped=true
+    else
+        local thead=mk("Frame",{Size=UDim2.new(1,0,0,18),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=4,Parent=areas[3]})
+        corner(thead,5)
+        lbl(thead,"PET",8,C.Gray).Size=UDim2.new(0.7,0,1,0)
+        local ton=lbl(thead,"ON/OFF",8,C.Gray,Enum.TextXAlignment.Center) ton.Size=UDim2.new(0.28,0,1,0) ton.Position=UDim2.new(0.7,0,0,0)
+
+        local n=4
+        for _,r in ipairs(rows) do
+            n=n+1
+            local uuid=r.uuid
+            if not swapPerPet[uuid] then swapPerPet[uuid]={enabled=false} end
+            local ps=swapPerPet[uuid]
+
+            local row=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=ps.enabled and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=areas[3]})
+            corner(row,5) if ps.enabled then stroke(row,C.Teal,1.2) end
+            local pl=lbl(row,r.info,9,ps.enabled and C.White or C.Gray) pl.Size=UDim2.new(0.69,0,1,0) pl.Position=UDim2.new(0,8,0,0)
+
+            local cu1=uuid
+            local selTog=btn(row,ps.enabled and "ON" or "OFF",9,ps.enabled and C.TDim or C.Panel,ps.enabled and C.Teal or C.Gray)
+            selTog.Size=UDim2.new(0.26,0,0,20) selTog.Position=UDim2.new(0.72,2,0.5,-10)
+            local selStroke=stroke(selTog,ps.enabled and C.Teal or C.Dim,1.1)
+            selTog.MouseButton1Click:Connect(function()
+                local p=swapPerPet[cu1] if not p then return end
+                p.enabled=not p.enabled
+                if p.enabled then
+                    selTog.Text="ON" selTog.BackgroundColor3=C.TDim selTog.TextColor3=C.Teal selStroke.Color=C.Teal
+                    row.BackgroundColor3=C.TDim
+                    local rs=row:FindFirstChildWhichIsA("UIStroke")
+                    if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.2) end
+                    pl.TextColor3=C.White
+                else
+                    selTog.Text="OFF" selTog.BackgroundColor3=C.Panel selTog.TextColor3=C.Gray selStroke.Color=C.Dim
+                    row.BackgroundColor3=C.Card
+                    local rs=row:FindFirstChildWhichIsA("UIStroke")
+                    if rs then rs:Destroy() end
+                    pl.TextColor3=C.Gray
+                end
+                save()
+                if isRunning and _G.ZenxStartSwap then
+                    _G.ZenxStartSwap(cu1)
+                end
+            end)
         end
-        local ps=swapPerPet[uuid]
-        local petInfo=getTeamPetInfo(uuid).info
-
-        local row=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=ps.enabled and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=areas[3]})
-        corner(row,5) if ps.enabled then stroke(row,C.Teal,1.2) end
-        local pl=lbl(row,petInfo,9,ps.enabled and C.White or C.Gray) pl.Size=UDim2.new(0.69,0,1,0) pl.Position=UDim2.new(0,8,0,0)
-
-        local cu1=uuid
-        local selTog=btn(row,ps.enabled and "ON" or "OFF",9,ps.enabled and C.TDim or C.Panel,ps.enabled and C.Teal or C.Gray)
-        selTog.Size=UDim2.new(0.26,0,0,20) selTog.Position=UDim2.new(0.72,2,0.5,-10)
-        local selStroke=stroke(selTog,ps.enabled and C.Teal or C.Dim,1.1)
-        selTog.MouseButton1Click:Connect(function()
-            local p=swapPerPet[cu1] if not p then return end
-            p.enabled=not p.enabled
-            if p.enabled then
-                selTog.Text="ON" selTog.BackgroundColor3=C.TDim selTog.TextColor3=C.Teal selStroke.Color=C.Teal
-                row.BackgroundColor3=C.TDim
-                local rs=row:FindFirstChildWhichIsA("UIStroke")
-                if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.2) end
-                pl.TextColor3=C.White
-            else
-                selTog.Text="OFF" selTog.BackgroundColor3=C.Panel selTog.TextColor3=C.Gray selStroke.Color=C.Dim
-                row.BackgroundColor3=C.Card
-                local rs=row:FindFirstChildWhichIsA("UIStroke")
-                if rs then rs:Destroy() end
-                pl.TextColor3=C.Gray
-            end
-            save()
-            -- Kalau lagi running, pastiin poller jalan (poller pickup toggle dari swapPerPet[uuid].enabled)
-            if isRunning and _G.ZenxStartSwap then
-                _G.ZenxStartSwap(cu1)
-            end
-        end)
     end
 
     div(areas[3],200)
@@ -1120,8 +1165,8 @@ buildSwapList=function()
     rf.MouseButton1Click:Connect(function() buildSwapList() end)
     local clr=btn(areas[3],"Clear Semua (matikan)",9,C.RDim,C.Red) clr.Size=UDim2.new(1,0,0,22) clr.LayoutOrder=202 stroke(clr,C.Red,1.2)
     clr.MouseButton1Click:Connect(function()
-        for uuid,_ in pairs(teamPetUUIDs) do
-            if swapPerPet[uuid] then swapPerPet[uuid].enabled=false end
+        for uuid,cfg in pairs(swapPerPet) do
+            cfg.enabled=false
         end
         save() buildSwapList()
     end)
@@ -1622,14 +1667,14 @@ local function startGlobalPoller()
         local cycles=0
         while isRunning do
             cycles=cycles+1
-            -- Batch poll semua pet yg ON
+            -- Batch poll semua pet yg ON (independen dari Tim Leveling)
             for uuid,cfg in pairs(swapPerPet) do
-                if cfg.enabled and teamPetUUIDs[uuid] then
+                if cfg.enabled then
                     local t=getPetTime(uuid)
                     if t~=nil and t<=0 then
                         local last=lastSwap[uuid] or 0
                         if tick()-last>=1.5 then
-                            local info=getTeamPetInfo(uuid)
+                            local info=swapPetInfoCache[uuid] or teamPetInfoCache[uuid]
                             local nm=(info and info.name) or "?"
                             if cycles<=20 then
                                 dbg(string.format("[swap] %s Time=%.1f -> SWAP",nm:sub(1,12),t))
@@ -1644,7 +1689,7 @@ local function startGlobalPoller()
             if cycles%100==0 then
                 local active,ready,idle=0,0,0
                 for uuid,cfg in pairs(swapPerPet) do
-                    if cfg.enabled and teamPetUUIDs[uuid] then
+                    if cfg.enabled then
                         local t=getPetTime(uuid)
                         if t==nil then idle=idle+1
                         elseif t<=0 then ready=ready+1
@@ -1778,16 +1823,17 @@ local function doStart()
     isRunning=true setRunning(true)
     statusLbl.Text="Berjalan... Q:"..#queue statusLbl.TextColor3=C.Teal
 
-    local teamCnt,swapCnt=0,0
-    for uuid,_ in pairs(teamPetUUIDs) do
-        teamCnt=teamCnt+1
-        if isPetInSwap(uuid) then swapCnt=swapCnt+1 end
+    local teamCnt=0
+    for _ in pairs(teamPetUUIDs) do teamCnt=teamCnt+1 end
+    local swapCnt=0
+    for _,cfg in pairs(swapPerPet) do
+        if cfg.enabled then swapCnt=swapCnt+1 end
     end
     dbg("[doStart] team="..teamCnt.." swap-enabled="..swapCnt)
     if swapCnt==0 then
         dbg("[doStart] NO swap pets - cek toggle ON di Tab Swap")
     else
-        -- Launch 1 global poller utk semua pet swap
+        -- Launch 1 global poller utk semua pet swap (independen dari Tim Leveling)
         startGlobalPoller()
     end
 
