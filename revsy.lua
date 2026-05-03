@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v7.9"
+local SCRIPT_VERSION="v8.0"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -973,6 +973,9 @@ local mainTask=nil local monitorTask=nil
 local isAR=false local arTask=nil
 local arTog2,arTogStroke2,arStroke2,cdLbl2
 local currentLevelingUUIDs={}
+-- v8.0: pet yg udah hit toAge selama session ini disimpen disini biar gak re-cycle
+-- (kasus: setelah unequip age detection gagal, pet masuk queue lagi -> infinite loop)
+local completedPets={}
 
 -- ===== SWAP STATE (FRIEND-7 GLOBAL POLLER) =====
 local swapPerPet=d.swapPerPet or {}
@@ -2135,17 +2138,33 @@ local function isPetInSwap(uuid)
     return ps~=nil and ps.enabled==true
 end
 
-local function equipTeam()
-    local petsPhys=workspace:FindFirstChild("PetsPhysical")
-    local petMover=petsPhys and petsPhys:FindFirstChild("PetMover")
-    if not petMover then return end
+-- v8.0: helper buat cek pet equipped via ActivePetUI (PetMover gak include team pet di game ini)
+local function isPetEquippedInUI(uuid)
+    local pg=player:FindFirstChild("PlayerGui") if not pg then return false end
+    local activePetUI=pg:FindFirstChild("ActivePetUI") if not activePetUI then return false end
+    local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
+    if #uuidStr<10 then return false end
+    -- Walk all PET_AGE descendants, cek ada parent {uuid} match
+    for _,d in ipairs(activePetUI:GetDescendants()) do
+        if d.Name=="PET_AGE" and d:IsA("TextLabel") then
+            local p=d.Parent
+            local depth=0
+            while p and depth<10 do
+                local pn=p.Name:gsub("^{",""):gsub("}$","")
+                if pn==uuidStr then return true end
+                p=p.Parent
+                depth=depth+1
+            end
+        end
+    end
+    return false
+end
 
+local function equipTeam()
+    -- v8.0: pake ActivePetUI check, bukan PetMover (team pet gak masuk PetMover di game ini)
     for uuid,_ in pairs(teamPetUUIDs) do
         if not isPetInSwap(uuid) then
-            local uuidStr=tostring(uuid)
-            local uuidBracket=uuidStr:sub(1,1)=="{" and uuidStr or "{"..uuidStr.."}"
-            local placed=petMover:FindFirstChild(uuidBracket) or petMover:FindFirstChild(uuidStr)
-            if not placed then
+            if not isPetEquippedInUI(uuid) then
                 equipPet(uuid)
                 task.wait(0.1)
             end
@@ -2175,22 +2194,16 @@ local function startTeamKeeper()
     if teamKeeperTask then return end
     if not teamKeeperShouldRun() then return end
     teamKeeperTask=task.spawn(function()
-        dbg("[teamKeeper] START (global, independen dari leveling)")
+        dbg("[teamKeeper] START (cek ActivePetUI, bukan PetMover)")
         while teamKeeperShouldRun() do
-            local petsPhys=workspace:FindFirstChild("PetsPhysical")
-            local petMover=petsPhys and petsPhys:FindFirstChild("PetMover")
-            if petMover then
-                for uuid,_ in pairs(teamPetUUIDs) do
-                    if not isPetInSwap(uuid) then
+            for uuid,_ in pairs(teamPetUUIDs) do
+                if not isPetInSwap(uuid) then
+                    -- v8.0: cek lewat ActivePetUI (lebih akurat dari PetMover di game ini)
+                    if not isPetEquippedInUI(uuid) then
                         local uuidStr=tostring(uuid)
-                        local uuidBracket=uuidStr:sub(1,1)=="{" and uuidStr or "{"..uuidStr.."}"
-                        local placed=petMover:FindFirstChild(uuidBracket) or petMover:FindFirstChild(uuidStr)
-                        if not placed then
-                            -- Pet tim ke-pickup manual ATAU belum di-place. Re-equip.
-                            dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak placed, re-equip")
-                            equipPet(uuid)
-                            task.wait(0.2)
-                        end
+                        dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak di UI, re-equip")
+                        equipPet(uuid)
+                        task.wait(0.2)
                     end
                 end
             end
@@ -2307,8 +2320,8 @@ local function getQueue()
             local uuid=getPetUUID(item)
             local uuidStr=uuid and tostring(uuid) or ""
             if uuid and not teamPetUUIDs[uuidStr] then
-                -- Skip pet yg lagi tracked (jangan re-queue pet yg baru aja kelar/lagi di-level)
-                if not currentLevelingUUIDs[uuidStr] then
+                -- v8.0: skip pet yg udah completed (hit toAge sebelumnya), biar gak re-cycle
+                if not currentLevelingUUIDs[uuidStr] and not completedPets[uuidStr] then
                     local name=getPetName(item)
                     if isTargetPet(name) then
                         local age=getAgeFromKG(item)
@@ -2420,6 +2433,7 @@ end
 local function doStart()
     dbg("[doStart] dipanggil")
     currentLevelingUUIDs={}
+    completedPets={}  -- v8.0: reset list pet completed pas RUN baru
     if isRunning then dbg("[doStart] sudah running, skip") return end
     if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
@@ -2518,7 +2532,8 @@ local function doStart()
                 end
 
                 if age and age>=toAge then
-                    dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done")
+                    dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done (PERMANENT)")
+                    completedPets[uuid]=true  -- v8.0: jangan re-cycle, even if age detection gagal nanti
                     table.insert(doneList,uuid)
                 else
                     -- Cek pet beneran ilang (UI gak ada, Tool gak ada di backpack, gak placed)
@@ -2551,7 +2566,8 @@ local function doStart()
                             if recheckItem then
                                 local newAge=getAgeFromKG(recheckItem)
                                 if newAge and newAge>=toAge then
-                                    dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck) -> done")
+                                    dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck) -> done (PERMANENT)")
+                                    completedPets[uuid]=true
                                     table.insert(doneList,uuid)
                                 else
                                     pcall(function() equipPet(uuid) end)
@@ -2718,4 +2734,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! 3 tombol debug di tab 1 (Scan Attr/Garden/UI Age) styling-nya udah subtle gak ngejreng lagi")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Fix 2 critical bug: (1) teamKeeper pake ActivePetUI bukan PetMover (gak spam re-equip), (2) completedPets tracking (gak re-cycle pet yg udah age 100)")
