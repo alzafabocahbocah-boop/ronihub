@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v6.8"
+local SCRIPT_VERSION="v7.0"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -328,12 +328,32 @@ end
 -- Coba baca age dari placed pet model (workspace), tanpa harus pickup dulu
 local function getPlacedPetAge(placedModel)
     if not placedModel then return nil end
-    -- 1) Attributes umum
+    -- 1) PRIMARY: Try UI lookup by model name (UUID) — paling reliable utk game ini
+    local modelName=placedModel.Name
+    local uuidStr=modelName:gsub("^{",""):gsub("}$","")
+    if #uuidStr>=20 then
+        local pg=player:FindFirstChild("PlayerGui")
+        if pg then
+            local ok,age=pcall(function()
+                local lbl=pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame[modelName].Main.PET_AGE
+                return tonumber(lbl.Text:match("(%d+)"))
+            end)
+            if ok and age then return age end
+            -- Try also without/with brace
+            local altName=modelName:sub(1,1)=="{" and uuidStr or "{"..uuidStr.."}"
+            local ok2,age2=pcall(function()
+                local lbl=pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame[altName].Main.PET_AGE
+                return tonumber(lbl.Text:match("(%d+)"))
+            end)
+            if ok2 and age2 then return age2 end
+        end
+    end
+    -- 2) Attributes umum (legacy fallback)
     for _,attr in ipairs({"Age","Level","PetAge","PetLevel","CurrentAge","CurrentLevel","AGE"}) do
         local v=placedModel:GetAttribute(attr)
         if type(v)=="number" then return v end
     end
-    -- 2) IntValue/NumberValue child
+    -- 3) IntValue/NumberValue child
     for _,d in ipairs(placedModel:GetDescendants()) do
         if (d:IsA("IntValue") or d:IsA("NumberValue")) then
             if d.Name=="Age" or d.Name=="Level" or d.Name=="PetAge" or d.Name=="PetLevel" then
@@ -494,12 +514,86 @@ local function getMaxKGForPet(name)
     end
     return nil
 end
+
+-- ============= REAL-TIME AGE DETECTION dari ActivePetUI =============
+-- Game punya UI di PlayerGui.ActivePetUI yg display age per pet active.
+-- Path: ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame.{uuid}.Main.PET_AGE.Text = "Age: 15"
+-- v7.0 pake ini sebagai source PRIMARY karena reliable & realtime.
+local function getAgeFromUI(uuid)
+    if not uuid then return nil end
+    local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
+    local activePetUI=pg:FindFirstChild("ActivePetUI") if not activePetUI then return nil end
+    local frame=activePetUI:FindFirstChild("Frame") if not frame then return nil end
+    local mainF=frame:FindFirstChild("Main") if not mainF then return nil end
+    local petDisplay=mainF:FindFirstChild("PetDisplay") if not petDisplay then return nil end
+    local scroll=petDisplay:FindFirstChild("ScrollingFrame") if not scroll then return nil end
+
+    local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
+    local uuidBraced="{"..uuidStr.."}"
+    local petFrame=scroll:FindFirstChild(uuidBraced) or scroll:FindFirstChild(uuidStr)
+    if not petFrame then return nil end
+
+    local petMain=petFrame:FindFirstChild("Main") if not petMain then return nil end
+    local ageLbl=petMain:FindFirstChild("PET_AGE") if not ageLbl then return nil end
+    local txt=""
+    pcall(function() txt=ageLbl.Text end)
+    if not txt or #txt==0 then return nil end
+    -- Format: "Age: 15", "Age 100", "Age:100"
+    local age=tonumber(txt:match("(%d+)"))
+    return age
+end
+
+-- Get pet type+mutation dari UI (e.g. "Everchanted Peryton")
+local function getPetTypeFromUI(uuid)
+    if not uuid then return nil end
+    local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
+    local petFrame=nil
+    pcall(function()
+        local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
+        local uuidBraced="{"..uuidStr.."}"
+        petFrame=pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame:FindFirstChild(uuidBraced)
+            or pg.ActivePetUI.Frame.Main.PetDisplay.ScrollingFrame:FindFirstChild(uuidStr)
+    end)
+    if not petFrame then return nil end
+    local typeLbl=nil
+    pcall(function() typeLbl=petFrame.Main.PET_TYPE end)
+    if typeLbl then
+        local txt=""
+        pcall(function() txt=typeLbl.Text end)
+        if txt and #txt>0 then return txt end
+    end
+    return nil
+end
+
+-- Universal getAge: UI first (paling reliable), Tool [Age N] tag, then KG formula fallback
 function getAgeFromKG(item)
+    if not item then return nil end
+    -- Try UI first (works kalo pet di-equip / placed)
+    local uuid=getPetUUID(item)
+    if uuid then
+        local uiAge=getAgeFromUI(uuid)
+        if uiAge then return uiAge end
+    end
+    -- Fallback 1: parse [Age N] dari Tool name (cuma muncul kalo pet udah max age)
     local age=getAge(item) if age then return age end
+    -- Fallback 2: hitung dari KG (legacy, often fails di game ini karena no [Age] di name selama leveling)
     local kg=getKG(item) if not kg then return nil end
     local maxKG=getMaxKGForPet(getPetName(item)) if not maxKG then return nil end
     return math.max(1,math.min(100,math.floor(kg*110/maxKG - 10)))
 end
+
+-- Get age by UUID directly (untuk pet yg lagi placed, gak ada Tool di backpack)
+local function getAgeByUUID(uuid)
+    if not uuid then return nil end
+    -- UI primary
+    local ui=getAgeFromUI(uuid)
+    if ui then return ui end
+    -- Backpack Tool fallback
+    local item=findPetInBackpack(uuid)
+    if item then return getAgeFromKG(item) end
+    return nil
+end
+
 local function getPetInfo(item)
     local name=getPetName(item)
     local age=getAgeFromKG(item)
@@ -2029,77 +2123,75 @@ local function doStart()
 
     monitorTask=task.spawn(function()
         local equipTime={} -- uuid -> tick saat pet pertama kali di-track
-        local lastRecheck={} -- uuid -> tick saat force recheck terakhir
+        local lastRecheck={} -- uuid -> tick saat fallback recheck terakhir
         local SAFETY_TIMEOUT=10*60 -- 10 menit failsafe
         while isRunning do
             local doneList={}
             for uuid,_ in pairs(currentLevelingUUIDs) do
                 if not equipTime[uuid] then equipTime[uuid]=tick() end
 
-                local item=findPetInBackpack(uuid)
-                local placed=findPlacedPetByUUID(uuid)
+                -- v7.0: PRIMARY = UI realtime (paling reliable & gak butuh unequip)
+                local age=getAgeFromUI(uuid)
+                local source=age and "ui" or nil
 
-                -- Cari age dari Tool name OR placed model attributes
-                local age=nil
-                local source=nil
-                if item then
-                    age=getAgeFromKG(item)
-                    if age then source="tool" end
-                end
-                if not age and placed then
-                    age=getPlacedPetAge(placed)
-                    if age then source="placed" end
+                local item=nil
+                local placed=nil
+                if not age then
+                    -- UI gak nemu (mungkin pet baru di-equip, UI belum spawn)
+                    item=findPetInBackpack(uuid)
+                    placed=findPlacedPetByUUID(uuid)
+                    if item then
+                        age=getAgeFromKG(item)
+                        if age then source="tool" end
+                    end
+                    if not age and placed then
+                        age=getPlacedPetAge(placed)
+                        if age then source="placed" end
+                    end
                 end
 
                 if age and age>=toAge then
-                    -- Done!
                     dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done")
                     table.insert(doneList,uuid)
-                elseif (not item) and (not placed) then
-                    -- Pet beneran ilang
-                    dbg("[monitor] "..uuid:sub(1,8).." beneran ilang -> drop")
-                    table.insert(doneList,uuid)
                 else
-                    -- Pet ada (age <toAge ATAU age unknown)
-                    -- Force recheck SELALU jalan periodik (cegah stuck karena age detection wrong/stale)
-                    local elapsed=tick()-equipTime[uuid]
-                    local lastRC=lastRecheck[uuid] or 0
-                    -- Interval recheck: 30s kalau age unknown (urgent), 90s kalau age known<toAge (sanity check)
-                    local recheckInterval=age and 90 or 30
+                    -- Cek pet beneran ilang (UI gak ada, Tool gak ada di backpack, gak placed)
+                    if not age then
+                        if not item then item=findPetInBackpack(uuid) end
+                        if not placed then placed=findPlacedPetByUUID(uuid) end
+                        if (not item) and (not placed) then
+                            dbg("[monitor] "..uuid:sub(1,8).." beneran ilang (no UI/no Tool/no placed) -> drop")
+                            table.insert(doneList,uuid)
+                        end
+                    end
 
+                    -- Failsafe: drop after 10 min tracked
+                    local elapsed=tick()-equipTime[uuid]
                     if elapsed > SAFETY_TIMEOUT then
-                        -- Failsafe: drop after 10 min tracked
                         dbg("[monitor] "..uuid:sub(1,8).." SAFETY TIMEOUT >10 menit, force drop")
                         table.insert(doneList,uuid)
-                    elseif elapsed > 15 and (tick()-lastRC) > recheckInterval then
-                        -- Force unequip → baca age dari Tool yg balik ke backpack → equip lagi
-                        local logAge=age and tostring(math.floor(age)) or "unknown"
-                        dbg("[monitor] force recheck "..uuid:sub(1,8).." (elapsed "..math.floor(elapsed).."s, age="..logAge..", interval "..recheckInterval.."s)")
-                        lastRecheck[uuid]=tick()
-                        pcall(function() unequipPet(uuid) end)
-                        task.wait(0.5)
-                        local recheckItem=findPetInBackpack(uuid)
-                        if not recheckItem then
+                    end
+
+                    -- Fallback force recheck — cuma kalo age TOTALLY UNKNOWN selama >60 detik
+                    -- (UI normalnya nyala instant pas pet placed, kalo lebih dari 60s gak ke-detect = anomaly)
+                    if not age and elapsed > 60 then
+                        local lastRC=lastRecheck[uuid] or 0
+                        if (tick()-lastRC) > 60 then
+                            dbg("[monitor] "..uuid:sub(1,8).." age unknown >60s, fallback recheck")
+                            lastRecheck[uuid]=tick()
+                            pcall(function() unequipPet(uuid) end)
                             task.wait(0.5)
-                            recheckItem=findPetInBackpack(uuid)
-                        end
-                        if recheckItem then
-                            local newAge=getAgeFromKG(recheckItem)
-                            if newAge then
-                                if newAge>=toAge then
-                                    dbg("[monitor] "..uuid:sub(1,8).." age "..newAge..">="..toAge.." (recheck) -> done")
+                            local recheckItem=findPetInBackpack(uuid)
+                            if recheckItem then
+                                local newAge=getAgeFromKG(recheckItem)
+                                if newAge and newAge>=toAge then
+                                    dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck) -> done")
                                     table.insert(doneList,uuid)
                                 else
-                                    dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck), lanjut leveling")
                                     pcall(function() equipPet(uuid) end)
                                 end
                             else
-                                dbg("[monitor] "..uuid:sub(1,8).." age GAK ke-baca (Tool name: "..tostring(recheckItem.Name)..")")
                                 pcall(function() equipPet(uuid) end)
                             end
-                        else
-                            dbg("[monitor] "..uuid:sub(1,8).." Tool gak balik abis unequip, equip ulang")
-                            pcall(function() equipPet(uuid) end)
                         end
                     end
                 end
@@ -2223,4 +2315,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Force recheck SELALU jalan periodik (90s kalo age known, 30s kalo unknown), cegah pet stuck karena age detection wrong/stale")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! REAL-TIME age detection via ActivePetUI - pet ke-swap instant pas hit toAge")
