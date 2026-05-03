@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v5.9" 
+local SCRIPT_VERSION="v6.1"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -1153,8 +1153,11 @@ buildSwapList=function()
                     pl.TextColor3=C.Gray
                 end
                 save()
-                if isRunning and _G.ZenxStartSwap then
-                    _G.ZenxStartSwap(cu1)
+                -- Auto-action: ON -> equip pet biar swap langsung kerja, start poller
+                -- (poller jalan independen dari isRunning, lihat startGlobalPoller)
+                if p.enabled then
+                    pcall(function() equipPet(cu1) end)
+                    startGlobalPoller()
                 end
             end)
         end
@@ -1659,17 +1662,27 @@ end
 -- ============================================
 -- GLOBAL POLLER (FRIEND-7 MECHANIC)
 -- Poll semua pet enabled tiap 50ms, swap kalau Time<=0 (debounce 1.5s)
+-- INDEPENDEN dari isRunning: jalan selama ada minimal 1 pet swap-ON
 -- ============================================
+local function pollerShouldRun()
+    for _,cfg in pairs(swapPerPet) do
+        if cfg.enabled then return true end
+    end
+    return false
+end
+
 local function startGlobalPoller()
     if pollerTask then return end
+    if not pollerShouldRun() then return end
     pollerTask=task.spawn(function()
         dbg("[poller] global poller START")
         local cycles=0
-        while isRunning do
+        while pollerShouldRun() do
             cycles=cycles+1
             -- Batch poll semua pet yg ON (independen dari Tim Leveling)
+            -- TAPI skip pet yg lagi di-level (target pet) biar swap gak ganggu leveling
             for uuid,cfg in pairs(swapPerPet) do
-                if cfg.enabled then
+                if cfg.enabled and not currentLevelingUUIDs[uuid] then
                     local t=getPetTime(uuid)
                     if t~=nil and t<=0 then
                         local last=lastSwap[uuid] or 0
@@ -1687,21 +1700,25 @@ local function startGlobalPoller()
             end
             -- Status update tiap 100 cycle (~5 detik @ 50ms)
             if cycles%100==0 then
-                local active,ready,idle=0,0,0
+                local active,ready,idle,skipped=0,0,0,0
                 for uuid,cfg in pairs(swapPerPet) do
                     if cfg.enabled then
-                        local t=getPetTime(uuid)
-                        if t==nil then idle=idle+1
-                        elseif t<=0 then ready=ready+1
-                        else active=active+1 end
+                        if currentLevelingUUIDs[uuid] then
+                            skipped=skipped+1
+                        else
+                            local t=getPetTime(uuid)
+                            if t==nil then idle=idle+1
+                            elseif t<=0 then ready=ready+1
+                            else active=active+1 end
+                        end
                     end
                 end
-                dbg(string.format("[alive] cycle=%d active=%d ready=%d idle=%d",cycles,active,ready,idle))
+                dbg(string.format("[alive] cycle=%d active=%d ready=%d idle=%d skip=%d",cycles,active,ready,idle,skipped))
             end
             task.wait(0.05)
         end
         pollerTask=nil
-        dbg("[poller] global poller STOP")
+        dbg("[poller] global poller STOP (semua toggle OFF)")
     end)
 end
 
@@ -1713,12 +1730,10 @@ local function stopAllSwaps()
     lastSwap={}
 end
 
--- Public hooks (dipanggil dari UI toggle)
+-- Public hooks (dipanggil dari UI toggle atau external)
 local function startSwapForPet(uuid)
     -- Poller global pickup toggle dari swapPerPet[uuid].enabled, jadi cukup pastiin poller jalan
-    if isRunning and not pollerTask then
-        startGlobalPoller()
-    end
+    startGlobalPoller()
 end
 
 local function stopSwapForPet(uuid)
@@ -1754,14 +1769,25 @@ local function doStop(reason)
     isRunning=false
     if mainTask then task.cancel(mainTask) mainTask=nil end
     if monitorTask then task.cancel(monitorTask) monitorTask=nil end
-    stopAllSwaps()
+    -- NOTE: stopAllSwaps() tidak dipanggil di sini.
+    -- Swap config independen dari leveling, jadi tetep jalan walau STOP ditekan.
+    -- Buat stop swap, user harus toggle OFF di tab Swap Skill.
     statusLbl.Text="Unequip..." statusLbl.TextColor3=C.Gray
     for uuid,_ in pairs(currentLevelingUUIDs) do
-        pcall(function() unequipPet(uuid) end)
+        -- Skip pet yg swap-ON: jangan di-unequip biar swap bisa lanjut kerja
+        if not (swapPerPet[uuid] and swapPerPet[uuid].enabled) then
+            pcall(function() unequipPet(uuid) end)
+        end
         task.wait(0.05)
     end
     currentLevelingUUIDs={}
-    unequipTeam()
+    -- Unequip tim, kecuali yg swap-ON
+    for uuid,_ in pairs(teamPetUUIDs) do
+        if not (swapPerPet[uuid] and swapPerPet[uuid].enabled) then
+            unequipPet(uuid)
+            task.wait(0.1)
+        end
+    end
     setRunning(false)
     statusLbl.Text=reason or "Dihentikan" statusLbl.TextColor3=C.Gray
     buildTargetList()
@@ -1853,7 +1879,12 @@ local function doStart()
                     if age and age>=toAge then
                         table.insert(doneList,uuid)
                     end
+                elseif findPlacedPetByUUID(uuid) then
+                    -- Pet di garden tapi Tool gak di backpack: tetep di-level, JANGAN drop.
+                    -- (Game ngumpetin Tool dari backpack pas pet di-equip)
                 else
+                    -- Tool gak di backpack DAN gak di garden = pet beneran ilang (di-trade/gift)
+                    dbg("[monitor] pet "..uuid:sub(1,8).." beneran ilang (gak di backpack & gak di garden) -> drop")
                     table.insert(doneList,uuid)
                 end
             end
@@ -1901,6 +1932,11 @@ local function doStart()
                 if item then
                     local age=getAgeFromKG(item) or "?"
                     table.insert(activeNames,getPetName(item).." A"..tostring(age))
+                else
+                    -- Tool gak di backpack tapi pet ada di garden, tampilin info dari cache
+                    local cached=teamPetInfoCache[uuid] or swapPetInfoCache[uuid]
+                    local nm=(cached and cached.name) or uuid:sub(1,8)
+                    table.insert(activeNames,nm.." A?")
                 end
             end
             if #activeNames>0 then
@@ -1936,6 +1972,11 @@ closeBtn.MouseButton1Click:Connect(function()
             slot.autoSendGift=false slot.autoSendTrade=false slot.autoUnfav=false
         end
         autoAccGift=false autoAccTrade=false
+        -- Stop semua swap poller (pasti kelar walau toggle ON)
+        for _,cfg in pairs(swapPerPet) do
+            cfg.enabled=false
+        end
+        stopAllSwaps()
         if isAR then stopAR() end
         if isRunning then doStop("Closed") end
         save()
@@ -1950,4 +1991,16 @@ task.wait(1)
 if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Swap: friend-7 (favorited pets, independen tim) | START: pickup all garden -> place tim+target")
+-- Auto-start swap poller kalau ada pet swap-ON dari sesi sebelumnya
+do
+    local anyEnabled=false
+    for _,cfg in pairs(swapPerPet) do
+        if cfg.enabled then anyEnabled=true break end
+    end
+    if anyEnabled then
+        dbg("[init] auto-start poller (ada pet swap-ON dari saved config)")
+        startGlobalPoller()
+    end
+end
+
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! Swap config independen dari START, toggle ON langsung jalan")
