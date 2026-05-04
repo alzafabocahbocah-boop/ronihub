@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v8.0"
+local SCRIPT_VERSION="v8.2"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7)")
 
@@ -955,16 +955,17 @@ local autoSendGift=d.autoSendGift or false
 local autoSendTrade=d.autoSendTrade or false
 local sendInterval=d.sendInterval or 30
 local giftSlots=d.giftSlots or {
-    {target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false},
-    {target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false},
-    {target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false},
+    {target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false,autoTargetLatest=false},
+    {target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false,autoTargetLatest=false},
+    {target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false,autoTargetLatest=false},
 }
 for i=1,3 do
-    if not giftSlots[i] then giftSlots[i]={target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false} end
+    if not giftSlots[i] then giftSlots[i]={target="",petTypes={},kg="",age="",includeFav=false,autoSendGift=false,autoSendTrade=false,autoUnfav=false,autoTargetLatest=false} end
     giftSlots[i].petTypes=giftSlots[i].petTypes or {}
     giftSlots[i].target=giftSlots[i].target or ""
     giftSlots[i].kg=giftSlots[i].kg or ""
     giftSlots[i].age=giftSlots[i].age or ""
+    if giftSlots[i].autoTargetLatest==nil then giftSlots[i].autoTargetLatest=false end
 end
 local antiAfk=(d.antiAfk~=false)
 local showAllPets=d.showAllPets or false
@@ -1779,12 +1780,84 @@ local function buildAutoGift()
     local function buildGiftContent(slotIdx,parent)
         local slot=giftSlots[slotIdx]
 
+        -- v8.2: Target dropdown - pick player dari list player di server (auto-update)
+        local trPickerOpen=false
         local trRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
-        corner(trRow,6) stroke(trRow,C.Dim,1.1)
-        lbl(trRow,"Target:",9,C.Gray).Size=UDim2.new(0.25,0,1,0)
-        local trBox=mk("TextBox",{Size=UDim2.new(0.7,-10,0,20),Position=UDim2.new(0.27,0,0.5,-10),BackgroundColor3=C.Panel,Text=slot.target,PlaceholderText="username",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,Parent=trRow})
-        corner(trBox,5) stroke(trBox,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=trBox})
-        trBox:GetPropertyChangedSignal("Text"):Connect(function() slot.target=trBox.Text save() end)
+        corner(trRow,6) local trStroke=stroke(trRow,C.Dim,1.1)
+        local trPrefix=lbl(trRow,"Target:",9,C.Gray) trPrefix.Size=UDim2.new(0.22,0,1,0) trPrefix.Position=UDim2.new(0,8,0,0)
+        local trLbl=lbl(trRow,slot.target~="" and slot.target or "(belum dipilih)",9,slot.target~="" and C.Teal or C.Gray)
+        trLbl.Size=UDim2.new(0.6,0,1,0) trLbl.Position=UDim2.new(0.22,4,0,0)
+        local trArrow=lbl(trRow,"v",9,C.Teal,Enum.TextXAlignment.Right)
+        trArrow.Size=UDim2.new(0,20,1,0) trArrow.Position=UDim2.new(1,-24,0,0)
+        local trCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=trRow})
+
+        local trPicker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=1.5,Parent=parent})
+        corner(trPicker,7) stroke(trPicker,C.Teal,1.3)
+        mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=trPicker})
+        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=trPicker})
+
+        -- Toggle Auto Target Latest joiner
+        local atrRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=trPicker})
+        corner(atrRow,5) local atrStroke=stroke(atrRow,C.Dim,1.1)
+        lbl(atrRow,"Auto target player baru join",8,C.Gray).Size=UDim2.new(0.7,0,1,0)
+        local atrTog=btn(atrRow,slot.autoTargetLatest and "ON" or "OFF",8,slot.autoTargetLatest and C.TDim or C.Panel,slot.autoTargetLatest and C.Teal or C.Gray)
+        atrTog.Size=UDim2.new(0,40,0,18) atrTog.Position=UDim2.new(1,-44,0.5,-9)
+        local atrTogStroke=stroke(atrTog,slot.autoTargetLatest and C.Teal or C.Dim,1.1)
+        atrTog.MouseButton1Click:Connect(function()
+            slot.autoTargetLatest=not slot.autoTargetLatest
+            atrTog.Text=slot.autoTargetLatest and "ON" or "OFF"
+            atrTog.BackgroundColor3=slot.autoTargetLatest and C.TDim or C.Panel
+            atrTog.TextColor3=slot.autoTargetLatest and C.Teal or C.Gray
+            atrTogStroke.Color=slot.autoTargetLatest and C.Teal or C.Dim
+            save()
+        end)
+
+        local trList=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,140),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=trPicker})
+        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=trList})
+
+        local function buildPlayerList()
+            for _,c in pairs(trList:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+            local players=getServerPlayers()
+            if #players==0 then
+                local e=lbl(trList,"Cuma lo doang di server",8,C.Gray,Enum.TextXAlignment.Center)
+                e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=1
+                return
+            end
+            for i,name in ipairs(players) do
+                local sel=slot.target==name
+                local row=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=i,Parent=trList})
+                corner(row,4) if sel then stroke(row,C.Teal,1.1) end
+                local nl=lbl(row,"@"..name,8,sel and C.Teal or C.White) nl.Size=UDim2.new(0.75,0,1,0) nl.Position=UDim2.new(0,8,0,0)
+                local tb=btn(row,sel and "PICK" or "Pick",8,sel and C.TDim or C.Panel,sel and C.Teal or C.Gray)
+                tb.Size=UDim2.new(0,46,0,18) tb.Position=UDim2.new(1,-50,0.5,-9) stroke(tb,sel and C.Teal or C.Dim,1)
+                local cn=name
+                tb.MouseButton1Click:Connect(function()
+                    slot.target=cn
+                    trLbl.Text=cn trLbl.TextColor3=C.Teal
+                    save()
+                    buildPlayerList()
+                end)
+            end
+        end
+        buildPlayerList()
+
+        -- Register callback biar refresh otomatis pas player join/leave
+        table.insert(_playerListCallbacks,function()
+            if trPickerOpen then buildPlayerList() end
+            -- Update label kalo target ada perubahan (e.g. autoTargetLatest fired)
+            if slot.target~="" and trLbl.Text~=slot.target then
+                trLbl.Text=slot.target trLbl.TextColor3=C.Teal
+            end
+        end)
+
+        trCover.MouseButton1Click:Connect(function()
+            trPickerOpen=not trPickerOpen
+            trPicker.Visible=trPickerOpen
+            trPicker.Size=trPickerOpen and UDim2.new(1,0,0,180) or UDim2.new(1,0,0,0)
+            trArrow.Text=trPickerOpen and "^" or "v"
+            trStroke.Color=trPickerOpen and C.Teal or C.Dim
+            if trPickerOpen then buildPlayerList() end
+        end)
 
         local function countTypes() local n=0 for _ in pairs(slot.petTypes) do n=n+1 end return n end
         local function countMatching()
@@ -2038,48 +2111,62 @@ task.spawn(function()
     end
 
     while true do
+        local activeSlots=0
         for slotIdx=1,3 do
             local slot=giftSlots[slotIdx]
-            if slot and slot.target~="" and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
-                local matched=getPetsForSlot(slot)
-                if #matched>0 then
-                    if slot.autoUnfav then
-                        local unfavCount=0
+            if slot and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
+                activeSlots=activeSlots+1
+                -- v8.2: log status per slot biar jelas kenapa ada/gak ada output
+                if slot.target=="" then
+                    dbg("[autoSend] slot "..slotIdx..": SKIP - target kosong (pilih player dulu)")
+                elseif #slot.petTypes==0 and not next(slot.petTypes) then
+                    dbg("[autoSend] slot "..slotIdx..": SKIP - jenis pet kosong (pilih jenis dulu)")
+                else
+                    local matched=getPetsForSlot(slot)
+                    dbg("[autoSend] slot "..slotIdx.." target="..slot.target.." matched="..#matched.." pet")
+                    if #matched>0 then
+                        if slot.autoUnfav then
+                            local unfavCount=0
+                            for _,pet in ipairs(matched) do
+                                if pet.fav then
+                                    unfavoritePet(pet.uuid)
+                                    unfavCount=unfavCount+1
+                                    task.wait(0.2)
+                                end
+                            end
+                            if unfavCount>0 then
+                                dbg("[autoSend] slot "..slotIdx.." unfav "..unfavCount.." pet")
+                                if sendStatusLbl then
+                                    sendStatusLbl.Text="Slot "..slotIdx.." unfav "..unfavCount.." pet" sendStatusLbl.TextColor3=C.Gold
+                                end
+                                task.wait(0.8)
+                            end
+                            matched=getPetsForSlot(slot)
+                        end
+
+                        local sendable={}
                         for _,pet in ipairs(matched) do
-                            if pet.fav then
-                                unfavoritePet(pet.uuid)
-                                print("[ZenxUnfav] slot "..slotIdx.." unfav "..pet.uuid)
-                                unfavCount=unfavCount+1
-                                task.wait(0.2)
+                            if slot.includeFav or (not pet.fav) then
+                                table.insert(sendable,pet.uuid)
                             end
                         end
-                        if unfavCount>0 and sendStatusLbl then
-                            sendStatusLbl.Text="Slot "..slotIdx.." unfav "..unfavCount.." pet" sendStatusLbl.TextColor3=C.Gold
-                            task.wait(0.8)
-                        end
-                        matched=getPetsForSlot(slot)
-                    end
 
-                    local sendable={}
-                    for _,pet in ipairs(matched) do
-                        if slot.includeFav or (not pet.fav) then
-                            table.insert(sendable,pet.uuid)
-                        end
-                    end
-
-                    if #sendable>0 then
-                        if slot.autoSendGift then
-                            if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": gift "..#sendable.." -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
-                            for _,uuid in ipairs(sendable) do
-                                sendGiftToPlayer(slot.target,uuid)
-                                print("[ZenxGift] slot "..slotIdx.." gift "..uuid.." -> "..slot.target)
-                                task.wait(0.5)
+                        if #sendable>0 then
+                            if slot.autoSendGift then
+                                dbg("[autoSend] slot "..slotIdx.." GIFT "..#sendable.." pet -> @"..slot.target)
+                                if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": gift "..#sendable.." -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
+                                for _,uuid in ipairs(sendable) do
+                                    sendGiftToPlayer(slot.target,uuid)
+                                    task.wait(0.5)
+                                end
                             end
-                        end
-                        if slot.autoSendTrade then
-                            if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": trade -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
-                            sendTradeToPlayer(slot.target,sendable[1])
-                            print("[ZenxGift] slot "..slotIdx.." trade -> "..slot.target)
+                            if slot.autoSendTrade then
+                                dbg("[autoSend] slot "..slotIdx.." TRADE 1 pet -> @"..slot.target)
+                                if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": trade -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
+                                sendTradeToPlayer(slot.target,sendable[1])
+                            end
+                        else
+                            dbg("[autoSend] slot "..slotIdx..": SKIP - sendable kosong (semua pet fav, includeFav OFF)")
                         end
                     end
                 end
@@ -2160,6 +2247,60 @@ local function isPetEquippedInUI(uuid)
     return false
 end
 
+-- v8.2: list player di server (exclude diri sendiri) untuk dropdown target gift
+local function getServerPlayers()
+    local list={}
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=player then
+            table.insert(list,p.Name)
+        end
+    end
+    table.sort(list,function(a,b) return a:lower()<b:lower() end)
+    return list
+end
+
+-- Registry callback buat refresh semua dropdown target pas ada player join/leave
+local _playerListCallbacks={}
+Players.PlayerAdded:Connect(function(p)
+    if p==player then return end
+    -- v8.2: auto-target latest joiner buat slot yg toggle-nya ON
+    for _,slot in ipairs(giftSlots or {}) do
+        if slot.autoTargetLatest then
+            slot.target=p.Name
+        end
+    end
+    saveToFile(getgenv().ZenxData)
+    for _,cb in ipairs(_playerListCallbacks) do
+        pcall(cb)
+    end
+end)
+Players.PlayerRemoving:Connect(function(p)
+    if p==player then return end
+    for _,cb in ipairs(_playerListCallbacks) do
+        pcall(cb)
+    end
+end)
+
+-- v8.1: get all favorited pet UUIDs di backpack, exclude yg di team
+-- Dipake buat auto-equip favorit + auto-keep equipped (mirip team)
+local function getFavoriteUUIDs()
+    local favs={}
+    local bp=player:FindFirstChild("Backpack")
+    if not bp then return favs end
+    for _,item in pairs(bp:GetChildren()) do
+        if isPet(item) and isFavorite(item) then
+            local uuid=getPetUUID(item)
+            if uuid then
+                local uuidStr=tostring(uuid)
+                if not teamPetUUIDs[uuidStr] then
+                    favs[uuidStr]=true
+                end
+            end
+        end
+    end
+    return favs
+end
+
 local function equipTeam()
     -- v8.0: pake ActivePetUI check, bukan PetMover (team pet gak masuk PetMover di game ini)
     for uuid,_ in pairs(teamPetUUIDs) do
@@ -2186,7 +2327,9 @@ end
 local teamKeeperTask=nil
 
 local function teamKeeperShouldRun()
+    -- v8.1: jalan kalau ada team OR ada fav. Cek fav selalu re-poll inside loop.
     for _ in pairs(teamPetUUIDs) do return true end
+    for _ in pairs(getFavoriteUUIDs()) do return true end
     return false
 end
 
@@ -2194,14 +2337,21 @@ local function startTeamKeeper()
     if teamKeeperTask then return end
     if not teamKeeperShouldRun() then return end
     teamKeeperTask=task.spawn(function()
-        dbg("[teamKeeper] START (cek ActivePetUI, bukan PetMover)")
+        dbg("[teamKeeper] START (handle team + favs via ActivePetUI)")
         while teamKeeperShouldRun() do
-            for uuid,_ in pairs(teamPetUUIDs) do
-                if not isPetInSwap(uuid) then
+            -- Build combined list: team + fav
+            local toCheck={}
+            for u in pairs(teamPetUUIDs) do toCheck[u]="tim" end
+            for u in pairs(getFavoriteUUIDs()) do
+                if not toCheck[u] then toCheck[u]="fav" end
+            end
+
+            for uuid,kind in pairs(toCheck) do
+                if not isPetInSwap(uuid) and not currentLevelingUUIDs[uuid] then
                     -- v8.0: cek lewat ActivePetUI (lebih akurat dari PetMover di game ini)
                     if not isPetEquippedInUI(uuid) then
                         local uuidStr=tostring(uuid)
-                        dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak di UI, re-equip")
+                        dbg("[teamKeeper] "..kind.." "..uuidStr:sub(1,8).." gak di UI, re-equip")
                         equipPet(uuid)
                         task.wait(0.2)
                     end
@@ -2209,7 +2359,7 @@ local function startTeamKeeper()
             end
             task.wait(2)
         end
-        dbg("[teamKeeper] STOP (team kosong)")
+        dbg("[teamKeeper] STOP (gak ada team & fav)")
         teamKeeperTask=nil
     end)
 end
@@ -2321,7 +2471,8 @@ local function getQueue()
             local uuidStr=uuid and tostring(uuid) or ""
             if uuid and not teamPetUUIDs[uuidStr] then
                 -- v8.0: skip pet yg udah completed (hit toAge sebelumnya), biar gak re-cycle
-                if not currentLevelingUUIDs[uuidStr] and not completedPets[uuidStr] then
+                -- v8.1: skip pet favorit (love icon ON) biar tetep equipped, gak ke-level
+                if not currentLevelingUUIDs[uuidStr] and not completedPets[uuidStr] and not isFavorite(item) then
                     local name=getPetName(item)
                     if isTargetPet(name) then
                         local age=getAgeFromKG(item)
@@ -2469,6 +2620,19 @@ local function doStart()
     end
     if teamPlaced>0 then
         dbg("[doStart] tim "..teamPlaced.." pet di-place")
+        task.wait(0.3)
+    end
+
+    -- v8.1: 2b) Place pet favorit (yg di-love tapi bukan team) - biar tetep equipped selama leveling
+    statusLbl.Text="Pasang pet favorit..." statusLbl.TextColor3=C.Gold
+    local favPlaced=0
+    for uuid in pairs(getFavoriteUUIDs()) do
+        equipPet(uuid)
+        favPlaced=favPlaced+1
+        task.wait(0.1)
+    end
+    if favPlaced>0 then
+        dbg("[doStart] favorit "..favPlaced.." pet di-place")
         task.wait(0.3)
     end
 
@@ -2724,14 +2888,16 @@ do
     end
 end
 
--- Auto-start team keeper kalau ada saved team pets
+-- Auto-start team keeper kalau ada saved team pets ATAU ada pet favorit
 do
     local hasTeam=false
     for _ in pairs(teamPetUUIDs) do hasTeam=true break end
-    if hasTeam then
-        dbg("[init] auto-start teamKeeper (ada team pet dari saved config)")
+    local hasFavs=false
+    for _ in pairs(getFavoriteUUIDs()) do hasFavs=true break end
+    if hasTeam or hasFavs then
+        dbg("[init] auto-start teamKeeper (team="..tostring(hasTeam)..", favs="..tostring(hasFavs)..")")
         startTeamKeeper()
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! Fix 2 critical bug: (1) teamKeeper pake ActivePetUI bukan PetMover (gak spam re-equip), (2) completedPets tracking (gak re-cycle pet yg udah age 100)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.2: target gift skrg dropdown auto dari list player di server, plus toggle 'auto target player baru join' + debug log per slot biar tau kenapa auto-send gak jalan")
