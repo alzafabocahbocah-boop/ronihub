@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v8.5"
+local SCRIPT_VERSION="v8.6"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift/trade FIXED + nodehub-style UI + AGGRESSIVE perf fix)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift/trade FIXED + mutation filter)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1749,440 +1749,190 @@ end
 -- ============================================
 -- TAB 5: AUTO GIFT
 -- ============================================
--- ============================================
--- TAB 5: AUTO GIFT (NODEHUB-STYLE: modal pickers + pill toggles)
--- ============================================
 local accStatusLbl=nil
 local sendStatusLbl=nil
-
--- Modal helper: search-list overlay
--- opts = {multi=bool, current=val, selectedDict=dict, onSelect=fn(val), onChange=fn()}
-local function openListModal(title, items, opts)
-    opts = opts or {}
-    local multi = opts.multi == true
-
-    local backdrop = mk("Frame", {
-        Size = UDim2.new(1, 0, 1, -34),
-        Position = UDim2.new(0, 0, 0, 34),
-        BackgroundColor3 = Color3.fromRGB(0,0,0),
-        BackgroundTransparency = 0.45,
-        BorderSizePixel = 0,
-        ZIndex = 50,
-        Parent = main,
-    })
-
-    local modal = mk("Frame", {
-        Size = UDim2.new(0, 360, 0, 380),
-        Position = UDim2.new(0.5, -180, 0.5, -190),
-        BackgroundColor3 = C.Panel,
-        BorderSizePixel = 0,
-        ZIndex = 51,
-        Parent = backdrop,
-    })
-    corner(modal, 8)
-    stroke(modal, C.Gold, 1.5)
-
-    local hdrLbl = lbl(modal, title, 11, C.Gold)
-    hdrLbl.Size = UDim2.new(1, -40, 0, 26)
-    hdrLbl.Position = UDim2.new(0, 12, 0, 4)
-    hdrLbl.ZIndex = 52
-
-    local closeMod = btn(modal, "X", 11, C.RDim, C.Red)
-    closeMod.Size = UDim2.new(0, 26, 0, 22)
-    closeMod.Position = UDim2.new(1, -32, 0, 6)
-    closeMod.ZIndex = 52
-    stroke(closeMod, C.Red, 1)
-    closeMod.MouseButton1Click:Connect(function() backdrop:Destroy() end)
-
-    local searchBox = mk("TextBox", {
-        Size = UDim2.new(1, -20, 0, 26),
-        Position = UDim2.new(0, 10, 0, 34),
-        BackgroundColor3 = C.Card,
-        Text = "",
-        PlaceholderText = "Search...",
-        PlaceholderColor3 = C.Dim,
-        TextColor3 = C.White,
-        Font = Enum.Font.Gotham,
-        TextSize = 10,
-        TextScaled = false,
-        TextXAlignment = Enum.TextXAlignment.Center,
-        ClearTextOnFocus = false,
-        ZIndex = 52,
-        Parent = modal,
-    })
-    corner(searchBox, 5)
-    stroke(searchBox, C.Dim, 1)
-
-    -- v8.5: disable AutomaticCanvasSize + UIListLayout, manual position untuk speed
-    local listScroll = mk("ScrollingFrame", {
-        Size = UDim2.new(1, -20, 1, -76),
-        Position = UDim2.new(0, 10, 0, 68),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ScrollBarThickness = 4,
-        ScrollBarImageColor3 = C.Gold,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        AutomaticCanvasSize = Enum.AutomaticSize.None,
-        ZIndex = 52,
-        Parent = modal,
-    })
-
-    -- v8.5: super fast buildList — manual position, no UICorner, raw Instance.new, chunk 8
-    local buildGen = 0
-    local ROW_H = 26
-    local ROW_PAD = 2
-    local function buildList(filter)
-        buildGen = buildGen + 1
-        local myGen = buildGen
-        -- Clear children (faster: ClearAllChildren keeps script-attached but removes all UI)
-        for _,c in ipairs(listScroll:GetChildren()) do
-            if c:IsA("GuiObject") then c:Destroy() end
-        end
-        filter = (filter or ""):lower()
-
-        -- Pre-filter (cheap, no instance creation)
-        local matches = {}
-        for _, item in ipairs(items) do
-            local label, value
-            if type(item) == "table" then label = item.label or tostring(item.value) value = item.value
-            else label = tostring(item) value = item end
-            if filter == "" or label:lower():find(filter, 1, true) then
-                table.insert(matches, {label=label, value=value})
-            end
-        end
-
-        if #matches == 0 then
-            local empty = Instance.new("TextLabel")
-            empty.Size = UDim2.new(1, 0, 0, 24)
-            empty.BackgroundTransparency = 1
-            empty.Text = "(no match)"
-            empty.TextColor3 = C.Dim
-            empty.Font = Enum.Font.Gotham
-            empty.TextSize = 10
-            empty.ZIndex = 52
-            empty.Parent = listScroll
-            listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-            return
-        end
-
-        -- Set canvas size upfront (avoid AutomaticCanvasSize overhead)
-        listScroll.CanvasSize = UDim2.new(0, 0, 0, #matches * (ROW_H + ROW_PAD))
-
-        -- Render in chunks of 8
-        for i, m in ipairs(matches) do
-            if i % 8 == 0 then
-                task.wait()
-                if myGen ~= buildGen then return end
-                if not backdrop or not backdrop.Parent then return end
-            end
-            local label, value = m.label, m.value
-            local isSel
-            if multi then isSel = opts.selectedDict and opts.selectedDict[value] == true
-            else isSel = opts.current == value end
-
-            -- Raw Instance.new (skip mk overhead, skip UICorner)
-            local rowBtn = Instance.new("TextButton")
-            rowBtn.Size = UDim2.new(1, 0, 0, ROW_H)
-            rowBtn.Position = UDim2.new(0, 0, 0, (i-1) * (ROW_H + ROW_PAD))
-            rowBtn.BackgroundColor3 = isSel and C.Gold or C.Card
-            rowBtn.BorderSizePixel = 0
-            rowBtn.Text = label
-            rowBtn.TextColor3 = isSel and Color3.fromRGB(0,0,0) or C.White
-            rowBtn.Font = Enum.Font.GothamBold
-            rowBtn.TextSize = 10
-            rowBtn.AutoButtonColor = false
-            rowBtn.ZIndex = 52
-            rowBtn.Parent = listScroll
-
-            rowBtn.MouseButton1Click:Connect(function()
-                if multi then
-                    if opts.selectedDict[value] then opts.selectedDict[value] = nil else opts.selectedDict[value] = true end
-                    if opts.onChange then opts.onChange() end
-                    buildList(searchBox.Text)
-                else
-                    if opts.onSelect then opts.onSelect(value) end
-                    backdrop:Destroy()
-                end
-            end)
-        end
-    end
-
-    -- v8.4: defer initial render biar modal frame muncul instan, baru list nya populate after
-    local loadingLbl = lbl(listScroll, "Loading...", 10, C.Dim, Enum.TextXAlignment.Center)
-    loadingLbl.Size = UDim2.new(1, 0, 0, 30)
-    loadingLbl.LayoutOrder = 0
-    loadingLbl.ZIndex = 52
-    task.defer(function()
-        if loadingLbl and loadingLbl.Parent then loadingLbl:Destroy() end
-        buildList("")
-    end)
-    -- v8.4: debounce search 150ms biar gak rebuild list tiap keystroke
-    local searchToken = 0
-    searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-        searchToken = searchToken + 1
-        local myToken = searchToken
-        task.delay(0.15, function()
-            if myToken == searchToken then
-                buildList(searchBox.Text)
-            end
-        end)
-    end)
-end
-
--- Pill toggle helper
-local function makePillToggle(parent, initialValue, onChange)
-    local on = initialValue == true
-    local pill = mk("Frame", {
-        Size = UDim2.new(0, 36, 0, 18),
-        BackgroundColor3 = on and C.Gold or C.Dim,
-        BorderSizePixel = 0,
-        Parent = parent,
-    })
-    corner(pill, 9)
-    local circle = mk("Frame", {
-        Size = UDim2.new(0, 14, 0, 14),
-        Position = on and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7),
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BorderSizePixel = 0,
-        Parent = pill,
-    })
-    corner(circle, 7)
-    local cover = mk("TextButton", {
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        Text = "",
-        AutoButtonColor = false,
-        Parent = pill,
-    })
-    cover.MouseButton1Click:Connect(function()
-        on = not on
-        pill.BackgroundColor3 = on and C.Gold or C.Dim
-        circle.Position = on and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
-        onChange(on)
-    end)
-    return pill
-end
-
 local function buildAutoGift()
     for _,c in pairs(areas[5]:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextLabel") or c:IsA("TextButton") then c:Destroy() end
     end
 
-    -- Interval row
-    local ivRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=areas[5]})
+    local ivRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=areas[5]})
     corner(ivRow,6) stroke(ivRow,C.Dim,1.1)
     lbl(ivRow,"Interval Send (dtk):",9,C.Gray).Size=UDim2.new(0.6,0,1,0)
     local ivBox=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(sendInterval),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ivRow})
     corner(ivBox,5) stroke(ivBox,C.Dim,1)
     ivBox:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(ivBox.Text) if v then sendInterval=math.max(5,v) save() end end)
 
-    -- Helpers utk get list isi modal
-    -- v8.4: cache 3 sec TTL biar click ke-2 dst gak iterate backpack lagi
-    local _ptCache, _ptCacheT = nil, 0
-    local function getAllPetTypes()
-        if _ptCache and tick() - _ptCacheT < 3 then return _ptCache end
-        local types={} local seen={}
-        local bp=player:FindFirstChild("Backpack")
-        if bp then
-            for _,it in pairs(bp:GetChildren()) do
-                if isPet(it) then
-                    local base=getBaseName(getPetName(it))
-                    if not seen[base] then seen[base]=true table.insert(types,base) end
+    local function makeCollapsible(title,layoutOrder)
+        local hdr=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=layoutOrder,Parent=areas[5]})
+        corner(hdr,7) local hdrStroke=stroke(hdr,C.Dim,1.2)
+        local titleLbl=lbl(hdr,title,11,C.White) titleLbl.Size=UDim2.new(0.85,0,1,0) titleLbl.Position=UDim2.new(0,12,0,0) titleLbl.Font=Enum.Font.GothamBold
+        local arrow=lbl(hdr,"v",11,C.Teal,Enum.TextXAlignment.Right) arrow.Size=UDim2.new(0,24,1,0) arrow.Position=UDim2.new(1,-30,0,0)
+        local cover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=hdr})
+        local content=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=layoutOrder+1,ClipsDescendants=true,AutomaticSize=Enum.AutomaticSize.None,Parent=areas[5]})
+        corner(content,7) stroke(content,C.Dim,1)
+        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=content})
+        mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=content})
+        local open=false
+        cover.MouseButton1Click:Connect(function()
+            open=not open
+            content.Visible=open
+            if open then
+                content.AutomaticSize=Enum.AutomaticSize.Y
+                arrow.Text="^" hdrStroke.Color=C.Teal
+            else
+                content.AutomaticSize=Enum.AutomaticSize.None
+                content.Size=UDim2.new(1,0,0,0)
+                arrow.Text="v" hdrStroke.Color=C.Dim
+            end
+        end)
+        return content
+    end
+
+    local function buildGiftContent(slotIdx,parent)
+        local slot=giftSlots[slotIdx]
+
+        local trRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
+        corner(trRow,6) stroke(trRow,C.Dim,1.1)
+        lbl(trRow,"Target:",9,C.Gray).Size=UDim2.new(0.25,0,1,0)
+        local trBox=mk("TextBox",{Size=UDim2.new(0.7,-10,0,20),Position=UDim2.new(0.27,0,0.5,-10),BackgroundColor3=C.Panel,Text=slot.target,PlaceholderText="username",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,Parent=trRow})
+        corner(trBox,5) stroke(trBox,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=trBox})
+        trBox:GetPropertyChangedSignal("Text"):Connect(function() slot.target=trBox.Text save() end)
+
+        local function countTypes() local n=0 for _ in pairs(slot.petTypes) do n=n+1 end return n end
+        local function countMatching()
+            local n=0 local bp=player:FindFirstChild("Backpack")
+            if bp then for _,it in pairs(bp:GetChildren()) do if isPet(it) and slot.petTypes[getBaseName(getPetName(it))] then n=n+1 end end end
+            return n
+        end
+
+        local pickerOpen=false
+        local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=2,Parent=parent})
+        corner(pickRow,6) local pickStroke=stroke(pickRow,C.Dim,1.1)
+        local pickLbl=lbl(pickRow,"Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)",9,C.White)
+        pickLbl.Size=UDim2.new(0.85,0,1,0) pickLbl.Position=UDim2.new(0,10,0,0)
+        local pickArrow=lbl(pickRow,"v",9,C.Teal,Enum.TextXAlignment.Right) pickArrow.Size=UDim2.new(0,20,1,0) pickArrow.Position=UDim2.new(1,-24,0,0)
+        local pickCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=pickRow})
+        local picker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.BG,BorderSizePixel=0,Visible=false,LayoutOrder=3,Parent=parent})
+        corner(picker,6) stroke(picker,C.Teal,1.2)
+        mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=picker})
+        local typeScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,140),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,Parent=picker})
+        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=typeScroll})
+
+        local function buildTypeList()
+            for _,c in pairs(typeScroll:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+            local types={}
+            local bp=player:FindFirstChild("Backpack")
+            if bp then
+                for _,it in pairs(bp:GetChildren()) do
+                    if isPet(it) then
+                        local name=getPetName(it) local base=getBaseName(name)
+                        if not types[base] then types[base]={count=0,mut=0} end
+                        types[base].count=types[base].count+1
+                        if name~=base then types[base].mut=types[base].mut+1 end
+                    end
                 end
             end
-        end
-        table.sort(types)
-        _ptCache=types _ptCacheT=tick()
-        return types
-    end
-
-    local function getAllMutations()
-        local list = {
-            {value="", label="(All — tanpa filter)"},
-            {value="__nomut__", label="[TANPA MUTASI]"},
-        }
-        local seen={}
-        for _, prefix in ipairs(MUTATION_PREFIXES) do
-            local clean = prefix:gsub("%s+$","")
-            if clean ~= "" and not seen[clean] then
-                seen[clean]=true
-                table.insert(list, {value=clean, label=clean})
+            local sorted={} for b,_ in pairs(types) do table.insert(sorted,b) end
+            table.sort(sorted,function(a,b) return types[a].count>types[b].count end)
+            local n=0
+            for _,base in ipairs(sorted) do
+                n=n+1 local data=types[base] local sel=slot.petTypes[base]==true
+                local row=mk("Frame",{Size=UDim2.new(1,0,0,24),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=typeScroll})
+                corner(row,5) if sel then stroke(row,C.Teal,1.1) end
+                local txt=base.." ("..data.count..(data.mut>0 and ", "..data.mut.." mut" or "")..")"
+                local nl=lbl(row,txt,8,sel and C.Teal or C.White) nl.Size=UDim2.new(0.72,0,1,0) nl.Position=UDim2.new(0,8,0,0)
+                local tb=btn(row,sel and "ON" or "OFF",8,sel and C.TDim or C.Panel,sel and C.Teal or C.Gray)
+                tb.Size=UDim2.new(0,44,0,18) tb.Position=UDim2.new(1,-48,0.5,-9)
+                local ts=stroke(tb,sel and C.Teal or C.Dim,1.1)
+                local cb=base
+                tb.MouseButton1Click:Connect(function()
+                    if slot.petTypes[cb] then slot.petTypes[cb]=nil else slot.petTypes[cb]=true end
+                    local now=slot.petTypes[cb]==true
+                    row.BackgroundColor3=now and C.TDim or C.Card
+                    local rs=row:FindFirstChildWhichIsA("UIStroke")
+                    if now then if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.1) end
+                    else if rs then rs:Destroy() end end
+                    nl.TextColor3=now and C.Teal or C.White
+                    tb.Text=now and "ON" or "OFF" tb.BackgroundColor3=now and C.TDim or C.Panel tb.TextColor3=now and C.Teal or C.Gray ts.Color=now and C.Teal or C.Dim
+                    pickLbl.Text="Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)"
+                    save()
+                end)
             end
+            if n==0 then local e=lbl(typeScroll,"Backpack kosong",8,C.Red,Enum.TextXAlignment.Center) e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=1 end
         end
-        return list
-    end
-
-    local function getAllPlayers()
-        local list = {}
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= player then table.insert(list, p.Name) end
-        end
-        table.sort(list)
-        return list
-    end
-
-    -- Build single Gift card (collapsible)
-    local function buildGiftCard(slotIdx, layoutOrder)
-        local slot = giftSlots[slotIdx]
-        slot.mutationFilter = slot.mutationFilter or ""
-
-        local card = mk("Frame", {
-            Size = UDim2.new(1, 0, 0, 32),
-            AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundColor3 = C.Card,
-            ClipsDescendants = true,
-            BorderSizePixel = 0,
-            LayoutOrder = layoutOrder,
-            Parent = areas[5],
-        })
-        corner(card, 7)
-        local cardStroke = stroke(card, C.Dim, 1.2)
-        mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Parent=card})
-
-        -- Header
-        local header = mk("Frame", {
-            Size = UDim2.new(1, 0, 0, 32),
-            BackgroundTransparency = 1,
-            LayoutOrder = 1,
-            Parent = card,
-        })
-        local hdrTitle = lbl(header, "Gift "..slotIdx, 11, C.White)
-        hdrTitle.Size = UDim2.new(0.85, 0, 1, 0)
-        hdrTitle.Position = UDim2.new(0, 12, 0, 0)
-        hdrTitle.Font = Enum.Font.GothamBold
-        local hdrArrow = lbl(header, ">", 11, C.Gold, Enum.TextXAlignment.Right)
-        hdrArrow.Size = UDim2.new(0, 24, 1, 0)
-        hdrArrow.Position = UDim2.new(1, -30, 0, 0)
-        hdrArrow.Font = Enum.Font.GothamBold
-        local hdrCover = mk("TextButton", {
-            Size = UDim2.new(1, 0, 1, 0),
-            BackgroundTransparency = 1,
-            Text = "",
-            AutoButtonColor = false,
-            Parent = header,
-        })
-
-        -- Body (collapsible)
-        local body = mk("Frame", {
-            Size = UDim2.new(1, 0, 0, 0),
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0,
-            ClipsDescendants = true,
-            Visible = false,
-            LayoutOrder = 2,
-            Parent = card,
-        })
-        mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0, 4), Parent=body})
-        mk("UIPadding", {PaddingTop=UDim.new(0,4), PaddingLeft=UDim.new(0,8), PaddingRight=UDim.new(0,8), PaddingBottom=UDim.new(0,8), Parent=body})
-
-        -- Row helpers (inside body)
-        local function dropdownRow(labelText, currentText, lo, onClick)
-            local row = mk("Frame", {Size=UDim2.new(1,0,0,28), BackgroundColor3=C.Panel, BorderSizePixel=0, LayoutOrder=lo, Parent=body})
-            corner(row, 5) stroke(row, C.Dim, 1)
-            local nameLbl = lbl(row, labelText, 9, C.Gray)
-            nameLbl.Size = UDim2.new(0.4, -10, 1, 0)
-            nameLbl.Position = UDim2.new(0, 10, 0, 0)
-            local valLbl = lbl(row, currentText, 9, C.White, Enum.TextXAlignment.Right)
-            valLbl.Size = UDim2.new(0.55, -22, 1, 0)
-            valLbl.Position = UDim2.new(0.4, 0, 0, 0)
-            valLbl.Font = Enum.Font.GothamBold
-            local arrow = lbl(row, "v", 9, C.Gold, Enum.TextXAlignment.Right)
-            arrow.Size = UDim2.new(0, 16, 1, 0)
-            arrow.Position = UDim2.new(1, -20, 0, 0)
-            local cover = mk("TextButton", {Size=UDim2.new(1,0,1,0), BackgroundTransparency=1, Text="", AutoButtonColor=false, Parent=row})
-            cover.MouseButton1Click:Connect(onClick)
-            return row, valLbl
-        end
-
-        local function inputRow(labelText, currentValue, lo, onChange)
-            local row = mk("Frame", {Size=UDim2.new(1,0,0,28), BackgroundColor3=C.Panel, BorderSizePixel=0, LayoutOrder=lo, Parent=body})
-            corner(row, 5) stroke(row, C.Dim, 1)
-            local nameLbl = lbl(row, labelText, 9, C.Gray)
-            nameLbl.Size = UDim2.new(0.65, -10, 1, 0)
-            nameLbl.Position = UDim2.new(0, 10, 0, 0)
-            local box = mk("TextBox", {
-                Size = UDim2.new(0, 70, 0, 20),
-                Position = UDim2.new(1, -76, 0.5, -10),
-                BackgroundColor3 = C.Card,
-                Text = tostring(currentValue or ""),
-                PlaceholderText = "",
-                TextColor3 = C.White,
-                Font = Enum.Font.GothamBold,
-                TextSize = 10,
-                TextScaled = false,
-                TextXAlignment = Enum.TextXAlignment.Center,
-                ClearTextOnFocus = false,
-                Parent = row,
-            })
-            corner(box, 4) stroke(box, C.Dim, 1)
-            box:GetPropertyChangedSignal("Text"):Connect(function() onChange(box.Text) end)
-            return row
-        end
-
-        local function toggleRow(labelText, currentValue, lo, onChange)
-            local row = mk("Frame", {Size=UDim2.new(1,0,0,28), BackgroundColor3=C.Panel, BorderSizePixel=0, LayoutOrder=lo, Parent=body})
-            corner(row, 5) stroke(row, C.Dim, 1)
-            local nameLbl = lbl(row, labelText, 9, C.Gray)
-            nameLbl.Size = UDim2.new(0.75, -10, 1, 0)
-            nameLbl.Position = UDim2.new(0, 10, 0, 0)
-            local pill = makePillToggle(row, currentValue, onChange)
-            pill.Position = UDim2.new(1, -42, 0.5, -9)
-            return row
-        end
-
-        -- Target
-        local function targetText() return slot.target == "" and "(klik pilih)" or slot.target end
-        local _, targetVal = dropdownRow("Target", targetText(), 1, function()
-            openListModal("Target", getAllPlayers(), {
-                current = slot.target,
-                onSelect = function(sel) slot.target = sel save() targetVal.Text = targetText() end,
-            })
+        buildTypeList()
+        pickCover.MouseButton1Click:Connect(function()
+            pickerOpen=not pickerOpen
+            picker.Visible=pickerOpen
+            picker.Size=pickerOpen and UDim2.new(1,0,0,148) or UDim2.new(1,0,0,0)
+            pickArrow.Text=pickerOpen and "^" or "v" pickStroke.Color=pickerOpen and C.Teal or C.Dim
+            if pickerOpen then buildTypeList() end
         end)
 
-        -- Pet Type (multi-select)
-        local function ptText()
-            local n = 0 local first = nil
-            for k,_ in pairs(slot.petTypes) do n = n + 1 if not first then first = k end end
-            if n == 0 then return "(klik pilih)" end
-            if n == 1 then return first end
-            return first .. " +" .. (n-1)
-        end
-        local _, petTypeVal = dropdownRow("Pet Type", ptText(), 2, function()
-            openListModal("Select Pet Type", getAllPetTypes(), {
-                multi = true,
-                selectedDict = slot.petTypes,
-                onChange = function() save() petTypeVal.Text = ptText() end,
-            })
-        end)
-
-        -- Mutation Filter
+        -- v8.6: Mutation Filter inline picker (single select, lightweight)
         local function mfText()
-            if slot.mutationFilter == "" then return "(Optional) Pilih mutasi..." end
+            if slot.mutationFilter == "" then return "(Semua mutasi)" end
             if slot.mutationFilter == "__nomut__" then return "[TANPA MUTASI]" end
             return slot.mutationFilter
         end
-        local _, mfVal = dropdownRow("Mutation Filter", mfText(), 3, function()
-            openListModal("Mutation Filter", getAllMutations(), {
-                current = slot.mutationFilter,
-                onSelect = function(sel) slot.mutationFilter = sel save() mfVal.Text = mfText() end,
-            })
+        local mfOpen=false
+        local mfRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=350,Parent=parent})
+        corner(mfRow,6) local mfStroke=stroke(mfRow,C.Dim,1.1)
+        local mfLbl=lbl(mfRow,"Mutasi: "..mfText(),9,C.White) mfLbl.Size=UDim2.new(0.85,0,1,0) mfLbl.Position=UDim2.new(0,10,0,0)
+        local mfArrow=lbl(mfRow,"v",9,C.Teal,Enum.TextXAlignment.Right) mfArrow.Size=UDim2.new(0,20,1,0) mfArrow.Position=UDim2.new(1,-24,0,0)
+        local mfCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=mfRow})
+        local mfPicker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.BG,BorderSizePixel=0,Visible=false,LayoutOrder=351,Parent=parent})
+        corner(mfPicker,6) stroke(mfPicker,C.Teal,1.2)
+        mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=mfPicker})
+        local mfScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,120),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,Parent=mfPicker})
+        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=mfScroll})
+        local function buildMutationList()
+            for _,c in pairs(mfScroll:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+            local list = {{value="",label="(Semua mutasi)"},{value="__nomut__",label="[TANPA MUTASI]"}}
+            for _,prefix in ipairs(MUTATION_PREFIXES) do
+                local clean = prefix:gsub("%s+$","")
+                if clean ~= "" then table.insert(list,{value=clean,label=clean}) end
+            end
+            for i,item in ipairs(list) do
+                local sel = slot.mutationFilter == item.value
+                local row=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=i,Parent=mfScroll})
+                corner(row,5) if sel then stroke(row,C.Teal,1.1) end
+                local nl=lbl(row,item.label,8,sel and C.Teal or C.White) nl.Size=UDim2.new(1,-12,1,0) nl.Position=UDim2.new(0,8,0,0)
+                local cv=item.value
+                local cover2=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=row})
+                cover2.MouseButton1Click:Connect(function()
+                    slot.mutationFilter=cv
+                    mfLbl.Text="Mutasi: "..mfText()
+                    save()
+                    buildMutationList()
+                end)
+            end
+        end
+        buildMutationList()
+        mfCover.MouseButton1Click:Connect(function()
+            mfOpen=not mfOpen
+            mfPicker.Visible=mfOpen
+            mfPicker.Size=mfOpen and UDim2.new(1,0,0,128) or UDim2.new(1,0,0,0)
+            mfArrow.Text=mfOpen and "^" or "v" mfStroke.Color=mfOpen and C.Teal or C.Dim
         end)
 
-        inputRow("Age (-N=bawah, N=atas)", slot.age, 4, function(t) slot.age = t save() end)
-        inputRow("KG (-N=bawah, N=atas)", slot.kg, 5, function(t) slot.kg = t save() end)
+        local kgRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=4,Parent=parent})
+        corner(kgRow,6) stroke(kgRow,C.Dim,1.1)
+        lbl(kgRow,"KG: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0)
+        local kgBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.kg,PlaceholderText="-60",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=kgRow})
+        corner(kgBox,5) stroke(kgBox,C.Dim,1)
+        kgBox:GetPropertyChangedSignal("Text"):Connect(function() slot.kg=kgBox.Text save() end)
 
-        mk("Frame", {Size=UDim2.new(1,0,0,4), BackgroundTransparency=1, LayoutOrder=6, Parent=body})
+        local ageRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=parent})
+        corner(ageRow,6) stroke(ageRow,C.Dim,1.1)
+        lbl(ageRow,"Age: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0)
+        local ageBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.age,PlaceholderText="-100",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ageRow})
+        corner(ageBox,5) stroke(ageBox,C.Dim,1)
+        ageBox:GetPropertyChangedSignal("Text"):Connect(function() slot.age=ageBox.Text save() end)
 
-        toggleRow("Kirim pet di-love juga", slot.includeFav, 7, function(v) slot.includeFav=v save() end)
-        toggleRow("Auto Send Gift", slot.autoSendGift, 8, function(v) slot.autoSendGift=v save() end)
-        toggleRow("Auto Send Trade", slot.autoSendTrade, 9, function(v) slot.autoSendTrade=v save() end)
-        toggleRow("Auto Unfav Pet", slot.autoUnfav, 10, function(v) slot.autoUnfav=v save() end)
-
-        mk("Frame", {Size=UDim2.new(1,0,0,4), BackgroundTransparency=1, LayoutOrder=11, Parent=body})
-
-        local function getPetsForSlotLocal()
-            local list = {}
-            local bp=player:FindFirstChild("Backpack")
+        local function getPetsForSlot()
+            local list={} local bp=player:FindFirstChild("Backpack")
             if bp then
                 for _,it in pairs(bp:GetChildren()) do
                     if isPet(it) then
@@ -2194,10 +1944,8 @@ local function buildAutoGift()
                             if mf == "" then mfPass = true
                             elseif mf == "__nomut__" then mfPass = (base == fullName)
                             else mfPass = fullName:find(mf, 1, true) ~= nil end
-                            if mfPass then
-                                if (slot.includeFav or not isFavorite(it)) and passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
-                                    local uuid=getPetUUID(it) if uuid then table.insert(list, tostring(uuid)) end
-                                end
+                            if mfPass and (slot.includeFav or not isFavorite(it)) and passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                                local uuid=getPetUUID(it) if uuid then table.insert(list,tostring(uuid)) end
                             end
                         end
                     end
@@ -2206,110 +1954,67 @@ local function buildAutoGift()
             return list
         end
 
-        local snBtn = btn(body, "SEND GIFT NOW (test)", 10, C.Gold, Color3.fromRGB(0,0,0))
-        snBtn.Size = UDim2.new(1, 0, 0, 26)
-        snBtn.LayoutOrder = 12
-        snBtn.Font = Enum.Font.GothamBold
-        stroke(snBtn, C.Gold, 1.5)
+        local snBtn=btn(parent,"SEND GIFT SEKARANG (test)",9,C.TDim,C.Teal)
+        snBtn.Size=UDim2.new(1,0,0,22) snBtn.LayoutOrder=6 stroke(snBtn,C.Teal,1.3)
         snBtn.MouseButton1Click:Connect(function()
-            if slot.target=="" then
-                if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": isi target dulu" sendStatusLbl.TextColor3=C.Red end
-                return
-            end
-            local pets = getPetsForSlotLocal()
-            if #pets==0 then
-                if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": tidak ada pet match" sendStatusLbl.TextColor3=C.Red end
-                return
-            end
-            if sendStatusLbl then sendStatusLbl.Text="Test slot "..slotIdx..": "..#pets.." pet -> "..slot.target sendStatusLbl.TextColor3=C.Gold end
+            if slot.target=="" then sendStatusLbl.Text="Slot "..slotIdx..": isi target dulu" sendStatusLbl.TextColor3=C.Red return end
+            local pets=getPetsForSlot()
+            if #pets==0 then sendStatusLbl.Text="Slot "..slotIdx..": tidak ada pet match" sendStatusLbl.TextColor3=C.Red return end
+            sendStatusLbl.Text="Test slot "..slotIdx..": "..#pets.." pet -> "..slot.target sendStatusLbl.TextColor3=C.Teal
             task.spawn(function()
                 local ok=0
                 for _,uuid in ipairs(pets) do
                     if sendGiftToPlayer(slot.target,uuid) then ok=ok+1 end
                     task.wait(0.6)
                 end
-                if sendStatusLbl then
-                    sendStatusLbl.Text="Test slot "..slotIdx.." done: "..ok.."/"..#pets.." pet -> "..slot.target
-                    sendStatusLbl.TextColor3=ok==#pets and C.Gold or C.Red
-                end
+                sendStatusLbl.Text="Test slot "..slotIdx.." done: "..ok.."/"..#pets.." pet -> "..slot.target
+                sendStatusLbl.TextColor3=ok==#pets and C.Teal or C.Gold
             end)
         end)
 
-        local expanded = false
-        hdrCover.MouseButton1Click:Connect(function()
-            expanded = not expanded
-            if expanded then
-                body.Visible = true
-                body.AutomaticSize = Enum.AutomaticSize.Y
-                hdrArrow.Text = "v"
-                cardStroke.Color = C.Gold
-            else
-                body.AutomaticSize = Enum.AutomaticSize.None
-                body.Size = UDim2.new(1, 0, 0, 0)
-                body.Visible = false
-                hdrArrow.Text = ">"
-                cardStroke.Color = C.Dim
-            end
-        end)
+        local _,fvTog,fvTS,fvSS=togRow(parent,"Kirim pet di-love juga","Default OFF: skip pet love",7)
+        local function setFv(v) fvTog.Text=v and "ON" or "OFF" fvTog.BackgroundColor3=v and C.TDim or C.Panel fvTog.TextColor3=v and C.Teal or C.Gray fvTS.Color=v and C.Teal or C.Dim fvSS.Color=v and C.Teal or C.Dim end
+        setFv(slot.includeFav)
+        fvTog.MouseButton1Click:Connect(function() slot.includeFav=not slot.includeFav setFv(slot.includeFav) save() end)
+
+        local _,sgTog,sgTS,sgSS=togRow(parent,"Auto Send Gift","Kirim gift otomatis",8)
+        local function setSg(v) sgTog.Text=v and "ON" or "OFF" sgTog.BackgroundColor3=v and C.TDim or C.Panel sgTog.TextColor3=v and C.Teal or C.Gray sgTS.Color=v and C.Teal or C.Dim sgSS.Color=v and C.Teal or C.Dim end
+        setSg(slot.autoSendGift)
+        sgTog.MouseButton1Click:Connect(function() slot.autoSendGift=not slot.autoSendGift setSg(slot.autoSendGift) save() end)
+
+        local _,stTog,stTS,stSS=togRow(parent,"Auto Send Trade","Kirim trade otomatis",9)
+        local function setSt(v) stTog.Text=v and "ON" or "OFF" stTog.BackgroundColor3=v and C.TDim or C.Panel stTog.TextColor3=v and C.Teal or C.Gray stTS.Color=v and C.Teal or C.Dim stSS.Color=v and C.Teal or C.Dim end
+        setSt(slot.autoSendTrade)
+        stTog.MouseButton1Click:Connect(function() slot.autoSendTrade=not slot.autoSendTrade setSt(slot.autoSendTrade) save() end)
+
+        local _,uvTog,uvTS,uvSS=togRow(parent,"Auto Unfav Pet","Auto unlove pet match filter",10)
+        local function setUv(v) uvTog.Text=v and "ON" or "OFF" uvTog.BackgroundColor3=v and C.TDim or C.Panel uvTog.TextColor3=v and C.Teal or C.Gray uvTS.Color=v and C.Teal or C.Dim uvSS.Color=v and C.Teal or C.Dim end
+        setUv(slot.autoUnfav)
+        uvTog.MouseButton1Click:Connect(function() slot.autoUnfav=not slot.autoUnfav setUv(slot.autoUnfav) save() end)
     end
 
-    -- Build 3 gift cards
-    for i=1,3 do buildGiftCard(i, i*10) end
-
-    -- Auto Accept Gift / Trade card
-    local accCard = mk("Frame", {
-        Size = UDim2.new(1, 0, 0, 32),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundColor3 = C.Card,
-        ClipsDescendants = true,
-        BorderSizePixel = 0,
-        LayoutOrder = 50,
-        Parent = areas[5],
-    })
-    corner(accCard, 7)
-    local accStroke_ = stroke(accCard, C.Dim, 1.2)
-    mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Parent=accCard})
-
-    local accHdr = mk("Frame", {Size=UDim2.new(1,0,0,32), BackgroundTransparency=1, LayoutOrder=1, Parent=accCard})
-    local accTitle = lbl(accHdr, "Auto Accept Gift / Trade", 11, C.White)
-    accTitle.Size=UDim2.new(0.85,0,1,0) accTitle.Position=UDim2.new(0,12,0,0) accTitle.Font=Enum.Font.GothamBold
-    local accArrow = lbl(accHdr, ">", 11, C.Gold, Enum.TextXAlignment.Right)
-    accArrow.Size=UDim2.new(0,24,1,0) accArrow.Position=UDim2.new(1,-30,0,0) accArrow.Font=Enum.Font.GothamBold
-    local accCover = mk("TextButton", {Size=UDim2.new(1,0,1,0), BackgroundTransparency=1, Text="", AutoButtonColor=false, Parent=accHdr})
-
-    local accBody = mk("Frame", {Size=UDim2.new(1,0,0,0), BackgroundTransparency=1, BorderSizePixel=0, ClipsDescendants=true, Visible=false, LayoutOrder=2, Parent=accCard})
-    mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,4), Parent=accBody})
-    mk("UIPadding", {PaddingTop=UDim.new(0,4), PaddingLeft=UDim.new(0,8), PaddingRight=UDim.new(0,8), PaddingBottom=UDim.new(0,8), Parent=accBody})
-
-    local function accToggleRow(labelText, currentValue, lo, onChange)
-        local row = mk("Frame", {Size=UDim2.new(1,0,0,28), BackgroundColor3=C.Panel, BorderSizePixel=0, LayoutOrder=lo, Parent=accBody})
-        corner(row, 5) stroke(row, C.Dim, 1)
-        local nameLbl = lbl(row, labelText, 9, C.Gray)
-        nameLbl.Size = UDim2.new(0.75, -10, 1, 0)
-        nameLbl.Position = UDim2.new(0, 10, 0, 0)
-        local pill = makePillToggle(row, currentValue, onChange)
-        pill.Position = UDim2.new(1, -42, 0.5, -9)
-        return row
+    for i=1,3 do
+        local content=makeCollapsible("Gift "..i,i*10)
+        buildGiftContent(i,content)
     end
 
-    accToggleRow("Auto Accept Gift", autoAccGift, 1, function(v) autoAccGift=v save() end)
-    accToggleRow("Auto Accept Trade", autoAccTrade, 2, function(v) autoAccTrade=v save() end)
+    local accContent=makeCollapsible("Auto Accept Gift / Trade",50)
+    local _,agTog,agTS,agSS=togRow(accContent,"Auto Accept Gift","Auto terima gift masuk",1)
+    agTog.Text=autoAccGift and "ON" or "OFF" agTog.BackgroundColor3=autoAccGift and C.TDim or C.Panel agTog.TextColor3=autoAccGift and C.Teal or C.Gray agTS.Color=autoAccGift and C.Teal or C.Dim agSS.Color=autoAccGift and C.Teal or C.Dim
+    agTog.MouseButton1Click:Connect(function()
+        autoAccGift=not autoAccGift
+        if autoAccGift then agTog.Text="ON" agTog.BackgroundColor3=C.TDim agTog.TextColor3=C.Teal agTS.Color=C.Teal agSS.Color=C.Teal
+        else agTog.Text="OFF" agTog.BackgroundColor3=C.Panel agTog.TextColor3=C.Gray agTS.Color=C.Dim agSS.Color=C.Dim end
+        save()
+    end)
 
-    local accExpanded = false
-    accCover.MouseButton1Click:Connect(function()
-        accExpanded = not accExpanded
-        if accExpanded then
-            accBody.Visible = true
-            accBody.AutomaticSize = Enum.AutomaticSize.Y
-            accArrow.Text = "v"
-            accStroke_.Color = C.Gold
-        else
-            accBody.AutomaticSize = Enum.AutomaticSize.None
-            accBody.Size = UDim2.new(1, 0, 0, 0)
-            accBody.Visible = false
-            accArrow.Text = ">"
-            accStroke_.Color = C.Dim
-        end
+    local _,atTog,atTS,atSS=togRow(accContent,"Auto Accept Trade","Auto terima trade masuk",2)
+    atTog.Text=autoAccTrade and "ON" or "OFF" atTog.BackgroundColor3=autoAccTrade and C.TDim or C.Panel atTog.TextColor3=autoAccTrade and C.Teal or C.Gray atTS.Color=autoAccTrade and C.Teal or C.Dim atSS.Color=autoAccTrade and C.Teal or C.Dim
+    atTog.MouseButton1Click:Connect(function()
+        autoAccTrade=not autoAccTrade
+        if autoAccTrade then atTog.Text="ON" atTog.BackgroundColor3=C.TDim atTog.TextColor3=C.Teal atTS.Color=C.Teal atSS.Color=C.Teal
+        else atTog.Text="OFF" atTog.BackgroundColor3=C.Panel atTog.TextColor3=C.Gray atTS.Color=C.Dim atSS.Color=C.Dim end
+        save()
     end)
 
     sendStatusLbl=lbl(areas[5],"Send: idle",9,C.Gray,Enum.TextXAlignment.Center)
@@ -2320,6 +2025,7 @@ local function buildAutoGift()
     accStatusLbl.Size=UDim2.new(1,0,0,18) accStatusLbl.LayoutOrder=61 accStatusLbl.BackgroundColor3=C.Panel accStatusLbl.BackgroundTransparency=0
     corner(accStatusLbl,5) stroke(accStatusLbl,C.Dim,1)
 end
+
 buildTimList() buildTargetList() buildSwapList() buildOtherSetting() buildAutoGift()
 switchTab(1)
 dbg("Step 5 OK: GUI READY! Klik tab di atas. Tutup debug ini -> klik X.")
@@ -3097,4 +2803,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.5: AGGRESSIVE perf fix - raw Instance.new + manual canvas + smaller chunks + no UICorner per row")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.6: ringan kayak v8.2 + mutation filter inline (gak modal)")
