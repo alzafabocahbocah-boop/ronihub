@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v8.4"
+local SCRIPT_VERSION="v8.5"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift/trade FIXED + nodehub-style UI + perf fix)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift/trade FIXED + nodehub-style UI + AGGRESSIVE perf fix)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1813,6 +1813,7 @@ local function openListModal(title, items, opts)
     corner(searchBox, 5)
     stroke(searchBox, C.Dim, 1)
 
+    -- v8.5: disable AutomaticCanvasSize + UIListLayout, manual position untuk speed
     local listScroll = mk("ScrollingFrame", {
         Size = UDim2.new(1, -20, 1, -76),
         Position = UDim2.new(0, 10, 0, 68),
@@ -1821,59 +1822,88 @@ local function openListModal(title, items, opts)
         ScrollBarThickness = 4,
         ScrollBarImageColor3 = C.Gold,
         CanvasSize = UDim2.new(0, 0, 0, 0),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        AutomaticCanvasSize = Enum.AutomaticSize.None,
         ZIndex = 52,
         Parent = modal,
     })
-    mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0, 4), Parent=listScroll})
 
-    -- v8.4: generation counter biar buildList yg di-cancel mid-way gak nge-pollute hasil
+    -- v8.5: super fast buildList — manual position, no UICorner, raw Instance.new, chunk 8
     local buildGen = 0
+    local ROW_H = 26
+    local ROW_PAD = 2
     local function buildList(filter)
         buildGen = buildGen + 1
         local myGen = buildGen
-        for _,c in pairs(listScroll:GetChildren()) do
-            if c:IsA("TextButton") or c:IsA("TextLabel") or c:IsA("Frame") then c:Destroy() end
+        -- Clear children (faster: ClearAllChildren keeps script-attached but removes all UI)
+        for _,c in ipairs(listScroll:GetChildren()) do
+            if c:IsA("GuiObject") then c:Destroy() end
         end
         filter = (filter or ""):lower()
-        local n = 0
-        for i, item in ipairs(items) do
-            -- Yield tiap 30 items biar frame gak freeze (untuk list 100+)
-            if i % 30 == 0 then
-                task.wait()
-                if myGen ~= buildGen then return end -- ke-cancel, batal
-                if not backdrop or not backdrop.Parent then return end -- modal udah ditutup
-            end
+
+        -- Pre-filter (cheap, no instance creation)
+        local matches = {}
+        for _, item in ipairs(items) do
             local label, value
             if type(item) == "table" then label = item.label or tostring(item.value) value = item.value
             else label = tostring(item) value = item end
             if filter == "" or label:lower():find(filter, 1, true) then
-                n = n + 1
-                local isSel
-                if multi then isSel = opts.selectedDict and opts.selectedDict[value] == true
-                else isSel = opts.current == value end
-                local rowBtn = btn(listScroll, label, 10, isSel and C.Gold or C.Card, isSel and Color3.fromRGB(0,0,0) or C.White)
-                rowBtn.Size = UDim2.new(1, 0, 0, 28)
-                rowBtn.LayoutOrder = n
-                rowBtn.ZIndex = 52
-                rowBtn.Font = Enum.Font.GothamBold
-                rowBtn.MouseButton1Click:Connect(function()
-                    if multi then
-                        if opts.selectedDict[value] then opts.selectedDict[value] = nil else opts.selectedDict[value] = true end
-                        if opts.onChange then opts.onChange() end
-                        buildList(searchBox.Text)
-                    else
-                        if opts.onSelect then opts.onSelect(value) end
-                        backdrop:Destroy()
-                    end
-                end)
+                table.insert(matches, {label=label, value=value})
             end
         end
-        if n == 0 then
-            local empty = lbl(listScroll, "(empty)", 9, C.Dim, Enum.TextXAlignment.Center)
+
+        if #matches == 0 then
+            local empty = Instance.new("TextLabel")
             empty.Size = UDim2.new(1, 0, 0, 24)
-            empty.LayoutOrder = 1
+            empty.BackgroundTransparency = 1
+            empty.Text = "(no match)"
+            empty.TextColor3 = C.Dim
+            empty.Font = Enum.Font.Gotham
+            empty.TextSize = 10
             empty.ZIndex = 52
+            empty.Parent = listScroll
+            listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+            return
+        end
+
+        -- Set canvas size upfront (avoid AutomaticCanvasSize overhead)
+        listScroll.CanvasSize = UDim2.new(0, 0, 0, #matches * (ROW_H + ROW_PAD))
+
+        -- Render in chunks of 8
+        for i, m in ipairs(matches) do
+            if i % 8 == 0 then
+                task.wait()
+                if myGen ~= buildGen then return end
+                if not backdrop or not backdrop.Parent then return end
+            end
+            local label, value = m.label, m.value
+            local isSel
+            if multi then isSel = opts.selectedDict and opts.selectedDict[value] == true
+            else isSel = opts.current == value end
+
+            -- Raw Instance.new (skip mk overhead, skip UICorner)
+            local rowBtn = Instance.new("TextButton")
+            rowBtn.Size = UDim2.new(1, 0, 0, ROW_H)
+            rowBtn.Position = UDim2.new(0, 0, 0, (i-1) * (ROW_H + ROW_PAD))
+            rowBtn.BackgroundColor3 = isSel and C.Gold or C.Card
+            rowBtn.BorderSizePixel = 0
+            rowBtn.Text = label
+            rowBtn.TextColor3 = isSel and Color3.fromRGB(0,0,0) or C.White
+            rowBtn.Font = Enum.Font.GothamBold
+            rowBtn.TextSize = 10
+            rowBtn.AutoButtonColor = false
+            rowBtn.ZIndex = 52
+            rowBtn.Parent = listScroll
+
+            rowBtn.MouseButton1Click:Connect(function()
+                if multi then
+                    if opts.selectedDict[value] then opts.selectedDict[value] = nil else opts.selectedDict[value] = true end
+                    if opts.onChange then opts.onChange() end
+                    buildList(searchBox.Text)
+                else
+                    if opts.onSelect then opts.onSelect(value) end
+                    backdrop:Destroy()
+                end
+            end)
         end
     end
 
@@ -3067,4 +3097,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.4: modal picker performance fix (defer render + debounce search + chunk yield)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.5: AGGRESSIVE perf fix - raw Instance.new + manual canvas + smaller chunks + no UICorner per row")
