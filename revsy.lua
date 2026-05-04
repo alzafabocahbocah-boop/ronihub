@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v8.3"
+local SCRIPT_VERSION="v8.4"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift/trade FIXED + nodehub-style UI)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift/trade FIXED + nodehub-style UI + perf fix)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1827,13 +1827,23 @@ local function openListModal(title, items, opts)
     })
     mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0, 4), Parent=listScroll})
 
+    -- v8.4: generation counter biar buildList yg di-cancel mid-way gak nge-pollute hasil
+    local buildGen = 0
     local function buildList(filter)
+        buildGen = buildGen + 1
+        local myGen = buildGen
         for _,c in pairs(listScroll:GetChildren()) do
             if c:IsA("TextButton") or c:IsA("TextLabel") or c:IsA("Frame") then c:Destroy() end
         end
         filter = (filter or ""):lower()
         local n = 0
-        for _, item in ipairs(items) do
+        for i, item in ipairs(items) do
+            -- Yield tiap 30 items biar frame gak freeze (untuk list 100+)
+            if i % 30 == 0 then
+                task.wait()
+                if myGen ~= buildGen then return end -- ke-cancel, batal
+                if not backdrop or not backdrop.Parent then return end -- modal udah ditutup
+            end
             local label, value
             if type(item) == "table" then label = item.label or tostring(item.value) value = item.value
             else label = tostring(item) value = item end
@@ -1867,8 +1877,26 @@ local function openListModal(title, items, opts)
         end
     end
 
-    buildList("")
-    searchBox:GetPropertyChangedSignal("Text"):Connect(function() buildList(searchBox.Text) end)
+    -- v8.4: defer initial render biar modal frame muncul instan, baru list nya populate after
+    local loadingLbl = lbl(listScroll, "Loading...", 10, C.Dim, Enum.TextXAlignment.Center)
+    loadingLbl.Size = UDim2.new(1, 0, 0, 30)
+    loadingLbl.LayoutOrder = 0
+    loadingLbl.ZIndex = 52
+    task.defer(function()
+        if loadingLbl and loadingLbl.Parent then loadingLbl:Destroy() end
+        buildList("")
+    end)
+    -- v8.4: debounce search 150ms biar gak rebuild list tiap keystroke
+    local searchToken = 0
+    searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        searchToken = searchToken + 1
+        local myToken = searchToken
+        task.delay(0.15, function()
+            if myToken == searchToken then
+                buildList(searchBox.Text)
+            end
+        end)
+    end)
 end
 
 -- Pill toggle helper
@@ -1919,7 +1947,10 @@ local function buildAutoGift()
     ivBox:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(ivBox.Text) if v then sendInterval=math.max(5,v) save() end end)
 
     -- Helpers utk get list isi modal
+    -- v8.4: cache 3 sec TTL biar click ke-2 dst gak iterate backpack lagi
+    local _ptCache, _ptCacheT = nil, 0
     local function getAllPetTypes()
+        if _ptCache and tick() - _ptCacheT < 3 then return _ptCache end
         local types={} local seen={}
         local bp=player:FindFirstChild("Backpack")
         if bp then
@@ -1931,6 +1962,7 @@ local function buildAutoGift()
             end
         end
         table.sort(types)
+        _ptCache=types _ptCacheT=tick()
         return types
     end
 
@@ -3035,4 +3067,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.3: NodeHub-style Auto Gift UI (modal pickers + pill toggles) + mutation filter")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.4: modal picker performance fix (defer render + debounce search + chunk yield)")
