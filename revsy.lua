@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v9.1"
+local SCRIPT_VERSION="v9.5"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift fixed + favorit GAK auto-equip lagi)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + GUI compact 480x380)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -664,7 +664,7 @@ local function sendGiftToPlayer(targetName, petUUID)
         local placed = findPlacedPetByUUID(petUUID)
         if placed then
             unequipPet(petUUID)
-            task.wait(0.5)
+            task.wait(0.2)
         end
 
         -- Step 2: hold pet as tool (di character, bukan garden)
@@ -673,7 +673,7 @@ local function sendGiftToPlayer(targetName, petUUID)
             dbg("[gift] FAIL: gagal hold pet "..tostring(petUUID):sub(1,8).." (gak di backpack/no character)")
             return false
         end
-        task.wait(0.4) -- kasih server waktu register tool equip
+        task.wait(0.15) -- kasih server waktu register tool equip
     end
 
     -- Step 3: fire GivePet dengan Player Instance
@@ -685,9 +685,9 @@ local function sendGiftToPlayer(targetName, petUUID)
         return false
     end
 
-    -- Step 4: verify pet hilang dari Backpack DAN Character (3s)
+    -- Step 4: verify pet hilang dari Backpack DAN Character (max ~1.4s)
     if petUUID then
-        for i = 1, 15 do
+        for i = 1, 7 do
             task.wait(0.2)
             if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
                 dbg("[gift] OK: "..tostring(petUUID):sub(1,8).." -> "..targetPlayer.Name)
@@ -943,7 +943,7 @@ local function getPetInfo(item)
 end
 
 -- GUI 600x420
-local GUI_W=600 local GUI_H=420
+local GUI_W=480 local GUI_H=380
 local sg=Instance.new("ScreenGui")
 sg.Name="ZenxLvlGui" sg.DisplayOrder=999 sg.ResetOnSpawn=false
 local mainParentResult=safeParent(sg)
@@ -1010,7 +1010,7 @@ end
 
 for i,name in ipairs(tabNames) do
     local b=btn(tabBar,name,8,C.Card,C.Gray)
-    b.Size=UDim2.new(0,113,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
+    b.Size=UDim2.new(0,94,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
     local ii=i b.MouseButton1Click:Connect(function() switchTab(ii) end)
 end
 
@@ -2223,7 +2223,7 @@ task.spawn(function()
                             local okCount=0
                             for _,uuid in ipairs(sendable) do
                                 if sendGiftToPlayer(slot.target,uuid) then okCount=okCount+1 end
-                                task.wait(0.6)
+                                task.wait(0.25)
                             end
                             if sendStatusLbl then
                                 sendStatusLbl.Text="Slot "..slotIdx.." gift: "..okCount.."/"..#sendable.." OK"
@@ -2249,25 +2249,57 @@ end)
 -- Gift: hook PetGiftingService:OnClientEvent
 -- ============================================
 pcall(function()
-    if tradeRespondRE then
-        local sendReqRE = RS:FindFirstChild("SendRequest", true)
-        if sendReqRE and sendReqRE:IsA("RemoteEvent") then
-            sendReqRE.OnClientEvent:Connect(function(senderPlayer, ...)
-                if autoAccTrade and senderPlayer and typeof(senderPlayer)=="Instance" then
-                    task.wait(0.3)
-                    pcall(function()
-                        tradeRespondRE:FireServer(senderPlayer, true)
-                    end)
-                    if accStatusLbl then
-                        accStatusLbl.Text = "Trade dari "..senderPlayer.Name.." diterima!"
-                        accStatusLbl.TextColor3 = C.Teal
-                        task.wait(2)
-                        if accStatusLbl then accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray end
+    -- v9.3: Hook SEMUA RemoteEvent di TradeEvents folder + log everything
+    local ge = RS:FindFirstChild("GameEvents")
+    local te = ge and ge:FindFirstChild("TradeEvents")
+    if te then
+        for _, remote in ipairs(te:GetChildren()) do
+            if remote:IsA("RemoteEvent") then
+                remote.OnClientEvent:Connect(function(...)
+                    if not autoAccTrade then return end
+                    local args = {...}
+                    -- Log apa yg fire (debug)
+                    local argDesc = {}
+                    for i=1, math.min(3, #args) do
+                        local a = args[i]
+                        if typeof(a) == "Instance" then
+                            table.insert(argDesc, "<"..a.ClassName..":"..a.Name..">")
+                        elseif type(a) == "table" then
+                            table.insert(argDesc, "<table>")
+                        else
+                            table.insert(argDesc, tostring(a):sub(1,30))
+                        end
                     end
-                end
-            end)
-            dbg("[autoAcc] trade hook installed (SendRequest -> RespondRequest)")
+                    dbg("[autoAcc-trade] event '"..remote.Name.."' args=("..table.concat(argDesc,", ")..")")
+
+                    -- Coba accept dengan beberapa pattern (whatever works)
+                    if tradeRespondRE then
+                        local arg1 = args[1]
+                        -- Pattern 1: Player Instance + true
+                        if typeof(arg1) == "Instance" and arg1:IsA("Player") then
+                            pcall(function() tradeRespondRE:FireServer(arg1, true) end)
+                            dbg("[autoAcc-trade] tried RespondRequest("..arg1.Name..", true)")
+                            if accStatusLbl then
+                                accStatusLbl.Text = "Trade dari "..arg1.Name.." -> accept!"
+                                accStatusLbl.TextColor3 = C.Teal
+                                task.delay(2, function() if accStatusLbl then accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray end end)
+                            end
+                        -- Pattern 2: numeric/string ID + true
+                        elseif arg1 ~= nil then
+                            pcall(function() tradeRespondRE:FireServer(arg1, true) end)
+                            dbg("[autoAcc-trade] tried RespondRequest("..tostring(arg1)..", true)")
+                        -- Pattern 3: just true
+                        else
+                            pcall(function() tradeRespondRE:FireServer(true) end)
+                            dbg("[autoAcc-trade] tried RespondRequest(true)")
+                        end
+                    end
+                end)
+            end
         end
+        dbg("[autoAcc] trade hooks installed di SEMUA TradeEvents remote")
+    else
+        dbg("[autoAcc] WARN: TradeEvents folder gak ketemu")
     end
 
     if giftRE and giftRE:IsA("RemoteEvent") then
@@ -2387,11 +2419,11 @@ startTeamKeeper=function()
                         local uuidStr=tostring(uuid)
                         dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak di UI, re-equip")
                         equipPet(uuid)
-                        task.wait(0.2)
+                        task.wait(0.1)
                     end
                 end
             end
-            task.wait(2)
+            task.wait(0.5)
         end
         dbg("[teamKeeper] STOP (gak ada team)")
         teamKeeperTask=nil
@@ -2614,7 +2646,7 @@ local function doStart()
     for uuid,_ in pairs(teamPetUUIDs) do
         equipPet(uuid)
         teamPlaced=teamPlaced+1
-        task.wait(0.1)
+        task.wait(0.05)
     end
     if teamPlaced>0 then
         dbg("[doStart] tim "..teamPlaced.." pet di-place")
@@ -2720,12 +2752,12 @@ local function doStart()
                 currentLevelingUUIDs[uuid]=nil
                 equipTime[uuid]=nil
                 lastRecheck[uuid]=nil
-                task.wait(0.1)
+                task.wait(0.03)
             end
 
             if #doneList>0 then
-                dbg("[monitor] "..#doneList.." pet selesai, tunggu 0.5s")
-                task.wait(0.5)
+                dbg("[monitor] "..#doneList.." pet selesai, tunggu 0.05s")
+                task.wait(0.05)
             end
 
             local slotsUsed=0
@@ -2757,7 +2789,6 @@ local function doStart()
                         dbg("[monitor]   -> equip "..petName.." uuid="..tostring(uuid):sub(1,8))
                         equipPet(uuid)
                         currentLevelingUUIDs[tostring(uuid)]=true
-                        task.wait(0.3)
                     end
                 end
             elseif #doneList>0 then
@@ -2791,7 +2822,7 @@ local function doStart()
             end
             statusLbl.TextColor3=C.Teal
 
-            task.wait(3)
+            task.wait(0.25)
         end
     end)
 end
@@ -2855,4 +2886,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v9.1: pet favorit gak auto-equip ke garden lagi (cuma team yg di-equip)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v9.5: GUI 480x380 (compact), font tetep sama")
