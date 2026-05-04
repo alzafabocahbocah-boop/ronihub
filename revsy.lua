@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v9.5"
+local SCRIPT_VERSION="v9.6"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + GUI compact 480x380)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + GUI compact + Z logo floating)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -39,6 +39,7 @@ pcall(function()
     if guiContainer:FindFirstChild("ZenxLvlGui") then guiContainer.ZenxLvlGui:Destroy() end
     if guiContainer:FindFirstChild("ZenxShowBtn") then guiContainer.ZenxShowBtn:Destroy() end
     if guiContainer:FindFirstChild("ZenxDebug") then guiContainer.ZenxDebug:Destroy() end
+    if guiContainer:FindFirstChild("ZenxLogo") then guiContainer.ZenxLogo:Destroy() end
 end)
 
 local debugSg, debugLbl
@@ -953,6 +954,42 @@ local main=mk("Frame",{
     BackgroundColor3=C.BG,BorderSizePixel=0,Active=true,Draggable=true,Parent=sg
 })
 corner(main,10) stroke(main,C.Teal,2)
+
+-- v9.6: Z logo floating button (toggle main GUI visibility)
+local logoSg = Instance.new("ScreenGui")
+logoSg.Name = "ZenxLogo"
+logoSg.IgnoreGuiInset = true
+logoSg.ResetOnSpawn = false
+logoSg.DisplayOrder = 998
+safeParent(logoSg)
+
+local logoBtn = Instance.new("TextButton")
+logoBtn.Name = "ZenxLogoBtn"
+logoBtn.Size = UDim2.new(0, 56, 0, 56)
+logoBtn.Position = UDim2.new(0, 100, 0, 200)  -- atas area Shop, draggable
+logoBtn.BackgroundColor3 = C.Teal
+logoBtn.Text = "Z"
+logoBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+logoBtn.Font = Enum.Font.GothamBold
+logoBtn.TextSize = 32
+logoBtn.AutoButtonColor = false
+logoBtn.BorderSizePixel = 0
+logoBtn.Active = true
+logoBtn.Draggable = true
+logoBtn.Parent = logoSg
+
+local logoCorner = Instance.new("UICorner")
+logoCorner.CornerRadius = UDim.new(1, 0)
+logoCorner.Parent = logoBtn
+
+local logoStroke = Instance.new("UIStroke")
+logoStroke.Color = Color3.fromRGB(15, 50, 40)
+logoStroke.Thickness = 2.5
+logoStroke.Parent = logoBtn
+
+logoBtn.MouseButton1Click:Connect(function()
+    main.Visible = not main.Visible
+end)
 
 local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=main})
 corner(TB,10)
@@ -2857,6 +2894,7 @@ closeBtn.MouseButton1Click:Connect(function()
         save()
         task.wait(0.3)
         sg:Destroy()
+        if logoSg and logoSg.Parent then logoSg:Destroy() end
         if playerGui:FindFirstChild("ZenxShowBtn") then playerGui.ZenxShowBtn:Destroy() end
         print("[ZenxLvl] Closed - all activity stopped")
     end)
@@ -2886,4 +2924,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v9.5: GUI 480x380 (compact), font tetep sama")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v9.6: Z logo floating button (klik = toggle, draggable)")
