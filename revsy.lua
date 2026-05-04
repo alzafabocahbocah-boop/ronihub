@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v8.8"
+local SCRIPT_VERSION="v8.9"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift fixed + target picker + cleaner UI)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift fixed + target picker w/ cancel)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1859,6 +1859,20 @@ local function buildAutoGift()
         mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=trScroll})
         local function buildPlayerList()
             for _,c in pairs(trScroll:GetChildren()) do if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end end
+
+            -- v8.9: opsi batalin di paling atas
+            local clrSel = slot.target == ""
+            local clrRow=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=clrSel and C.RDim or C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=trScroll})
+            corner(clrRow,5) if clrSel then stroke(clrRow,C.Red,1.1) else stroke(clrRow,C.Dim,1) end
+            local clrLbl=lbl(clrRow,"(Batalin pilihan)",8,clrSel and C.Red or C.Gray) clrLbl.Size=UDim2.new(1,-12,1,0) clrLbl.Position=UDim2.new(0,8,0,0)
+            local clrCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=clrRow})
+            clrCover.MouseButton1Click:Connect(function()
+                slot.target=""
+                trLbl.Text="Target: (klik pilih)"
+                save()
+                buildPlayerList()
+            end)
+
             local plist = {}
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= player then table.insert(plist, p.Name) end
@@ -1872,8 +1886,14 @@ local function buildAutoGift()
                 local cn=name
                 local cover2=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=row})
                 cover2.MouseButton1Click:Connect(function()
-                    slot.target=cn
-                    trLbl.Text="Target: "..cn
+                    -- v8.9: klik nama yg sama = batalin (toggle deselect)
+                    if slot.target == cn then
+                        slot.target = ""
+                        trLbl.Text = "Target: (klik pilih)"
+                    else
+                        slot.target = cn
+                        trLbl.Text = "Target: "..cn
+                    end
                     save()
                     buildPlayerList()
                 end)
@@ -2855,4 +2875,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.8: target jadi picker (gak ngetik) + remove tombol SEND GIFT test + layout order fixed")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.9: target picker bisa di-batalin (klik nama yg sama / pilih (Batalin pilihan))")
