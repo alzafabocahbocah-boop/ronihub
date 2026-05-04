@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v8.9"
+local SCRIPT_VERSION="v9.1"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift fixed + target picker w/ cancel)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift fixed + favorit GAK auto-equip lagi)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2030,14 +2030,14 @@ local function buildAutoGift()
             mfArrow.Text=mfOpen and "^" or "v" mfStroke.Color=mfOpen and C.Teal or C.Dim
         end)
 
-        local kgRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=7,Parent=parent})
+        local kgRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=8,Parent=parent})
         corner(kgRow,6) stroke(kgRow,C.Dim,1.1)
         lbl(kgRow,"KG: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0)
         local kgBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.kg,PlaceholderText="-60",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=kgRow})
         corner(kgBox,5) stroke(kgBox,C.Dim,1)
         kgBox:GetPropertyChangedSignal("Text"):Connect(function() slot.kg=kgBox.Text save() end)
 
-        local ageRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=8,Parent=parent})
+        local ageRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=7,Parent=parent})
         corner(ageRow,6) stroke(ageRow,C.Dim,1.1)
         lbl(ageRow,"Age: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0)
         local ageBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.age,PlaceholderText="-100",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ageRow})
@@ -2372,7 +2372,6 @@ local teamKeeperTask=nil
 
 teamKeeperShouldRun=function()
     for _ in pairs(teamPetUUIDs) do return true end
-    for _ in pairs(getFavoriteUUIDs()) do return true end
     return false
 end
 
@@ -2380,18 +2379,13 @@ startTeamKeeper=function()
     if teamKeeperTask then return end
     if not teamKeeperShouldRun() then return end
     teamKeeperTask=task.spawn(function()
-        dbg("[teamKeeper] START (handle team + favs via ActivePetUI)")
+        dbg("[teamKeeper] START (handle TIM only via ActivePetUI)")
         while teamKeeperShouldRun() do
-            local toCheck={}
-            for u in pairs(teamPetUUIDs) do toCheck[u]="tim" end
-            for u in pairs(getFavoriteUUIDs()) do
-                if not toCheck[u] then toCheck[u]="fav" end
-            end
-            for uuid,kind in pairs(toCheck) do
+            for uuid,_ in pairs(teamPetUUIDs) do
                 if not isPetInSwap(uuid) and not currentLevelingUUIDs[uuid] then
                     if not isPetEquippedInUI(uuid) then
                         local uuidStr=tostring(uuid)
-                        dbg("[teamKeeper] "..kind.." "..uuidStr:sub(1,8).." gak di UI, re-equip")
+                        dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak di UI, re-equip")
                         equipPet(uuid)
                         task.wait(0.2)
                     end
@@ -2399,7 +2393,7 @@ startTeamKeeper=function()
             end
             task.wait(2)
         end
-        dbg("[teamKeeper] STOP (gak ada team & fav)")
+        dbg("[teamKeeper] STOP (gak ada team)")
         teamKeeperTask=nil
     end)
 end
@@ -2624,18 +2618,6 @@ local function doStart()
     end
     if teamPlaced>0 then
         dbg("[doStart] tim "..teamPlaced.." pet di-place")
-        task.wait(0.3)
-    end
-
-    statusLbl.Text="Pasang pet favorit..." statusLbl.TextColor3=C.Gold
-    local favPlaced=0
-    for uuid in pairs(getFavoriteUUIDs()) do
-        equipPet(uuid)
-        favPlaced=favPlaced+1
-        task.wait(0.1)
-    end
-    if favPlaced>0 then
-        dbg("[doStart] favorit "..favPlaced.." pet di-place")
         task.wait(0.3)
     end
 
@@ -2867,12 +2849,10 @@ end
 do
     local hasTeam=false
     for _ in pairs(teamPetUUIDs) do hasTeam=true break end
-    local hasFavs=false
-    for _ in pairs(getFavoriteUUIDs()) do hasFavs=true break end
-    if hasTeam or hasFavs then
-        dbg("[init] auto-start teamKeeper (team="..tostring(hasTeam)..", favs="..tostring(hasFavs)..")")
+    if hasTeam then
+        dbg("[init] auto-start teamKeeper (team only)")
         startTeamKeeper()
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.9: target picker bisa di-batalin (klik nama yg sama / pilih (Batalin pilihan))")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v9.1: pet favorit gak auto-equip ke garden lagi (cuma team yg di-equip)")
