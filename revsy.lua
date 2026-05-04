@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v9.9"
+local SCRIPT_VERSION="v10.1"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + minimize Z neon + no debug UI)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + 1 logo + dones counter prominent)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -699,42 +699,6 @@ local main=mk("Frame",{
 })
 corner(main,10) stroke(main,C.Teal,2)
 
--- v9.6: Z logo floating button (toggle main GUI visibility)
-local logoSg = Instance.new("ScreenGui")
-logoSg.Name = "ZenxLogo"
-logoSg.IgnoreGuiInset = true
-logoSg.ResetOnSpawn = false
-logoSg.DisplayOrder = 998
-safeParent(logoSg)
-
-local logoBtn = Instance.new("TextButton")
-logoBtn.Name = "ZenxLogoBtn"
-logoBtn.Size = UDim2.new(0, 56, 0, 56)
-logoBtn.Position = UDim2.new(0, 100, 0, 200)  -- atas area Shop, draggable
-logoBtn.BackgroundColor3 = C.Teal
-logoBtn.Text = "Z"
-logoBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-logoBtn.Font = Enum.Font.GothamBold
-logoBtn.TextSize = 32
-logoBtn.AutoButtonColor = false
-logoBtn.BorderSizePixel = 0
-logoBtn.Active = true
-logoBtn.Draggable = true
-logoBtn.Parent = logoSg
-
-local logoCorner = Instance.new("UICorner")
-logoCorner.CornerRadius = UDim.new(1, 0)
-logoCorner.Parent = logoBtn
-
-local logoStroke = Instance.new("UIStroke")
-logoStroke.Color = Color3.fromRGB(15, 50, 40)
-logoStroke.Thickness = 2.5
-logoStroke.Parent = logoBtn
-
-logoBtn.MouseButton1Click:Connect(function()
-    main.Visible = not main.Visible
-end)
-
 local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=main})
 corner(TB,10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5),Position=UDim2.new(0,0,1,-1.5),BackgroundColor3=C.Teal,BorderSizePixel=0,Parent=TB})
@@ -771,12 +735,31 @@ local areas={} for i=1,5 do areas[i]=makeScroll(SCROLL_Y,SCROLL_H) end
 local botBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,SCROLL_Y+SCROLL_H+4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=content})
 corner(botBar,7) stroke(botBar,C.Dim,1.2)
 local statusLbl=lbl(botBar,"Status: Idle",9,C.Gray,Enum.TextXAlignment.Left)
-statusLbl.Size=UDim2.new(0.65,-10,1,0) statusLbl.Position=UDim2.new(0,8,0,0)
+statusLbl.Size=UDim2.new(1,-10,1,0) statusLbl.Position=UDim2.new(0,8,0,0)
 
--- v9.7: counter pet yg udah jadi (age >= toAge) di backpack, update tiap 2 detik
-local donesLbl=lbl(botBar,"Jadi: -",9,C.Teal,Enum.TextXAlignment.Right)
-donesLbl.Size=UDim2.new(0.35,-12,1,0) donesLbl.Position=UDim2.new(0.65,0,0,0)
-donesLbl.Font=Enum.Font.GothamBold
+local BOT_Y=SCROLL_Y+SCROLL_H+34
+local runBtn=btn(content,"RUNNING",10,C.Panel,C.Gray)
+runBtn.Size=UDim2.new(0,150,0,26) runBtn.Position=UDim2.new(0,5,0,BOT_Y)
+local runStroke=stroke(runBtn,C.Dim,1.5)
+local stopBtn=btn(content,"STOP",10,C.Panel,C.Gray)
+stopBtn.Size=UDim2.new(0,90,0,26) stopBtn.Position=UDim2.new(0,160,0,BOT_Y)
+local stopStroke=stroke(stopBtn,C.Dim,1.5)
+
+-- v10.1: dones counter sebagai stat card prominent di kanan tombol RUN/STOP
+local donesPanel = mk("Frame", {
+    Size = UDim2.new(0, 215, 0, 26),
+    Position = UDim2.new(0, 255, 0, BOT_Y),
+    BackgroundColor3 = C.Panel,
+    BorderSizePixel = 0,
+    Parent = content
+})
+corner(donesPanel, 7)
+stroke(donesPanel, C.Teal, 1.3)
+
+local donesLbl = lbl(donesPanel, "Pet jadi: 0 (100+)", 11, C.Teal, Enum.TextXAlignment.Center)
+donesLbl.Size = UDim2.new(1, -10, 1, 0)
+donesLbl.Position = UDim2.new(0, 5, 0, 0)
+donesLbl.Font = Enum.Font.GothamBold
 
 task.spawn(function()
     while donesLbl and donesLbl.Parent do
@@ -793,20 +776,12 @@ task.spawn(function()
             end
         end
         if donesLbl and donesLbl.Parent then
-            donesLbl.Text = "Jadi: "..count.." ("..toAge.."+)"
+            donesLbl.Text = "Pet jadi: "..count.." ("..toAge.."+)"
             donesLbl.TextColor3 = count > 0 and C.Teal or C.Gray
         end
         task.wait(2)
     end
 end)
-
-local BOT_Y=SCROLL_Y+SCROLL_H+34
-local runBtn=btn(content,"RUNNING",10,C.Panel,C.Gray)
-runBtn.Size=UDim2.new(0,150,0,26) runBtn.Position=UDim2.new(0,5,0,BOT_Y)
-local runStroke=stroke(runBtn,C.Dim,1.5)
-local stopBtn=btn(content,"STOP",10,C.Panel,C.Gray)
-stopBtn.Size=UDim2.new(0,90,0,26) stopBtn.Position=UDim2.new(0,160,0,BOT_Y)
-local stopStroke=stroke(stopBtn,C.Dim,1.5)
 
 local function switchTab(idx)
     for i,b in ipairs(tabBtns) do
@@ -2700,7 +2675,6 @@ closeBtn.MouseButton1Click:Connect(function()
         save()
         task.wait(0.3)
         sg:Destroy()
-        if logoSg and logoSg.Parent then logoSg:Destroy() end
         if playerGui:FindFirstChild("ZenxShowBtn") then playerGui.ZenxShowBtn:Destroy() end
         print("[ZenxLvl] Closed - all activity stopped")
     end)
@@ -2730,4 +2704,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v9.9: debug GUI dihapus, console (F9) tetep ada kalau perlu")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.1: dones counter prominent (panel sendiri di kanan tombol)")
