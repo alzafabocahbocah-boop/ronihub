@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v8.6"
+local SCRIPT_VERSION="v8.7"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift/trade FIXED + mutation filter)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + gift FIXED PROPERLY (tool hold) + mutation filter)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -611,8 +611,43 @@ local function petStillInBackpack(uuid)
     return findPetInBackpack(uuid) ~= nil
 end
 
--- ===== GIFT (PERSIS dari log: "GivePet", <Player>) =====
--- Workflow: equip pet -> wait -> fire GivePet(action, Player) -> verify pet hilang
+-- ===== GIFT (FIXED v8.7: hold pet as TOOL, bukan place di garden) =====
+-- Workflow: 
+--   1. Kalau pet di garden -> unequip dulu (balik ke backpack)
+--   2. Humanoid:EquipTool(petTool) -> pet pindah dari Backpack ke Character (di-pegang)
+--   3. Fire GivePet("GivePet", PlayerInstance) -> server gift pet yg lagi di-pegang
+--   4. Verify pet hilang dari Backpack DAN Character
+
+local function holdPetAsTool(uuid)
+    local item = findPetInBackpack(uuid)
+    if not item then return nil end
+    local char = player.Character
+    if not char then return nil end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    -- Method 1: Humanoid:EquipTool (proper way)
+    if hum then
+        local ok = pcall(function() hum:EquipTool(item) end)
+        if ok then return item end
+    end
+    -- Method 2: direct reparent fallback
+    if item:IsA("Tool") then
+        pcall(function() item.Parent = char end)
+        return item
+    end
+    return nil
+end
+
+local function petInCharacter(uuid)
+    local char = player.Character if not char then return false end
+    for _, it in ipairs(char:GetChildren()) do
+        if it:IsA("Tool") then
+            local u = it:GetAttribute("PET_UUID")
+            if u and tostring(u) == tostring(uuid) then return true end
+        end
+    end
+    return false
+end
+
 local function sendGiftToPlayer(targetName, petUUID)
     if not giftRE then
         dbg("[gift] FAIL: PetGiftingService remote gak ketemu")
@@ -625,10 +660,23 @@ local function sendGiftToPlayer(targetName, petUUID)
     end
 
     if petUUID then
-        equipPet(petUUID)
-        task.wait(0.4)
+        -- Step 1: kalau pet di garden, unequip dulu biar balik ke backpack
+        local placed = findPlacedPetByUUID(petUUID)
+        if placed then
+            unequipPet(petUUID)
+            task.wait(0.5)
+        end
+
+        -- Step 2: hold pet as tool (di character, bukan garden)
+        local item = holdPetAsTool(petUUID)
+        if not item then
+            dbg("[gift] FAIL: gagal hold pet "..tostring(petUUID):sub(1,8).." (gak di backpack/no character)")
+            return false
+        end
+        task.wait(0.4) -- kasih server waktu register tool equip
     end
 
+    -- Step 3: fire GivePet dengan Player Instance
     local ok, err = pcall(function()
         giftRE:FireServer("GivePet", targetPlayer)
     end)
@@ -637,15 +685,19 @@ local function sendGiftToPlayer(targetName, petUUID)
         return false
     end
 
+    -- Step 4: verify pet hilang dari Backpack DAN Character (3s)
     if petUUID then
         for i = 1, 15 do
             task.wait(0.2)
-            if not petStillInBackpack(petUUID) then
+            if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
                 dbg("[gift] OK: "..tostring(petUUID):sub(1,8).." -> "..targetPlayer.Name)
                 return true
             end
         end
-        dbg("[gift] WARN: pet "..tostring(petUUID):sub(1,8).." masih di backpack 3s (target reject?)")
+        -- Cleanup: kalau gagal, unequip tool biar gak stuck di tangan
+        local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+        if hum then pcall(function() hum:UnequipTools() end) end
+        dbg("[gift] WARN: pet "..tostring(petUUID):sub(1,8).." masih ada (target reject?)")
         return false
     end
     return true
@@ -2803,4 +2855,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.6: ringan kayak v8.2 + mutation filter inline (gak modal)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v8.7: gift FIXED - pakai Humanoid:EquipTool (hold) bukan EquipPet (place garden)")
