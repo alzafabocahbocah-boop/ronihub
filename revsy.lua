@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v9.6"
+local SCRIPT_VERSION="v9.9"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + GUI compact + Z logo floating)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + minimize Z neon + no debug UI)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -44,263 +44,7 @@ end)
 
 local debugSg, debugLbl
 local _dbgLines = {}
-do
-    debugSg = Instance.new("ScreenGui")
-    debugSg.Name = "ZenxDebug"
-    debugSg.DisplayOrder = 99999
-    debugSg.ResetOnSpawn = false
-    debugSg.IgnoreGuiInset = true
-    local parentResult = safeParent(debugSg)
-    print("[ZenxLvl] debug GUI parent: "..tostring(parentResult))
-
-    local fr = Instance.new("Frame")
-    fr.Size = UDim2.new(0,420,0,360)
-    fr.Position = UDim2.new(0,10,1,-370)
-    fr.BackgroundColor3 = Color3.fromRGB(0,0,0)
-    fr.BackgroundTransparency = 0.15
-    fr.BorderSizePixel = 0
-    fr.Active = true
-    fr.Draggable = true
-    fr.Parent = debugSg
-    local crn = Instance.new("UICorner") crn.CornerRadius = UDim.new(0,8) crn.Parent = fr
-    local strk = Instance.new("UIStroke") strk.Color = Color3.fromRGB(40,200,160) strk.Thickness = 1.5 strk.Parent = fr
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1,-30,0,20)
-    title.Position = UDim2.new(0,8,0,4)
-    title.BackgroundTransparency = 1
-    title.Text = "Zenx Debug "..SCRIPT_VERSION.." (parent: "..tostring(parentResult)..")"
-    title.TextColor3 = Color3.fromRGB(40,200,160)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 12
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = fr
-
-    local closeDbg = Instance.new("TextButton")
-    closeDbg.Size = UDim2.new(0,20,0,20)
-    closeDbg.Position = UDim2.new(1,-24,0,4)
-    closeDbg.BackgroundColor3 = Color3.fromRGB(60,30,30)
-    closeDbg.Text = "X"
-    closeDbg.TextColor3 = Color3.fromRGB(220,80,80)
-    closeDbg.Font = Enum.Font.GothamBold
-    closeDbg.TextSize = 11
-    closeDbg.AutoButtonColor = false
-    closeDbg.Parent = fr
-    local cc = Instance.new("UICorner") cc.CornerRadius = UDim.new(0,4) cc.Parent = closeDbg
-    closeDbg.MouseButton1Click:Connect(function() debugSg:Destroy() end)
-
-    local copyDbg = Instance.new("TextButton")
-    copyDbg.Size = UDim2.new(0,52,0,20)
-    copyDbg.Position = UDim2.new(1,-80,0,4)
-    copyDbg.BackgroundColor3 = Color3.fromRGB(20,60,40)
-    copyDbg.Text = "Copy"
-    copyDbg.TextColor3 = Color3.fromRGB(40,200,160)
-    copyDbg.Font = Enum.Font.GothamBold
-    copyDbg.TextSize = 11
-    copyDbg.AutoButtonColor = false
-    copyDbg.Parent = fr
-    local cc2 = Instance.new("UICorner") cc2.CornerRadius = UDim.new(0,4) cc2.Parent = copyDbg
-
-    local clearDbg = Instance.new("TextButton")
-    clearDbg.Size = UDim2.new(0,46,0,20)
-    clearDbg.Position = UDim2.new(1,-130,0,4)
-    clearDbg.BackgroundColor3 = Color3.fromRGB(40,40,40)
-    clearDbg.Text = "Clear"
-    clearDbg.TextColor3 = Color3.fromRGB(180,180,180)
-    clearDbg.Font = Enum.Font.GothamBold
-    clearDbg.TextSize = 11
-    clearDbg.AutoButtonColor = false
-    clearDbg.Parent = fr
-    local cc3 = Instance.new("UICorner") cc3.CornerRadius = UDim.new(0,4) cc3.Parent = clearDbg
-
-    local sfDbg = Instance.new("ScrollingFrame")
-    sfDbg.Size = UDim2.new(1,-16,1,-30)
-    sfDbg.Position = UDim2.new(0,8,0,26)
-    sfDbg.BackgroundTransparency = 1
-    sfDbg.BorderSizePixel = 0
-    sfDbg.ScrollBarThickness = 6
-    sfDbg.ScrollBarImageColor3 = Color3.fromRGB(40,200,160)
-    sfDbg.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    sfDbg.CanvasSize = UDim2.new(0,0,0,0)
-    sfDbg.Parent = fr
-
-    debugLbl = Instance.new("TextLabel")
-    debugLbl.Size = UDim2.new(1,-6,0,0)
-    debugLbl.Position = UDim2.new(0,2,0,0)
-    debugLbl.AutomaticSize = Enum.AutomaticSize.Y
-    debugLbl.BackgroundTransparency = 1
-    debugLbl.Text = "Loading..."
-    debugLbl.TextColor3 = Color3.fromRGB(220,220,220)
-    debugLbl.Font = Enum.Font.Code
-    debugLbl.TextSize = 10
-    debugLbl.TextXAlignment = Enum.TextXAlignment.Left
-    debugLbl.TextYAlignment = Enum.TextYAlignment.Top
-    debugLbl.TextWrapped = true
-    debugLbl.Parent = sfDbg
-
-    local copyStatusLbl = Instance.new("TextLabel")
-    copyStatusLbl.Size = UDim2.new(0,180,0,16)
-    copyStatusLbl.Position = UDim2.new(0,8,0,4)
-    copyStatusLbl.BackgroundTransparency = 1
-    copyStatusLbl.Text = ""
-    copyStatusLbl.TextColor3 = Color3.fromRGB(40,200,160)
-    copyStatusLbl.Font = Enum.Font.Gotham
-    copyStatusLbl.TextSize = 10
-    copyStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
-    copyStatusLbl.TextYAlignment = Enum.TextYAlignment.Center
-    copyStatusLbl.Parent = fr
-    copyStatusLbl.Visible = false
-
-    copyDbg.MouseButton1Click:Connect(function()
-        local fullText = table.concat(_dbgLines or {}, "\n")
-        if #fullText == 0 then
-            copyStatusLbl.Text = "Log kosong"
-            copyStatusLbl.TextColor3 = Color3.fromRGB(220,160,80)
-            copyStatusLbl.Visible = true
-            task.delay(2, function() copyStatusLbl.Visible = false end)
-            return
-        end
-        local clipFn = setclipboard or set_clipboard or toclipboard
-        if not clipFn and Clipboard and Clipboard.set then clipFn = Clipboard.set end
-        local copied = false
-        if clipFn then
-            local ok = pcall(clipFn, fullText)
-            if ok then
-                copied = true
-                copyStatusLbl.Text = "Copied "..#_dbgLines.." lines ke clipboard!"
-                copyStatusLbl.TextColor3 = Color3.fromRGB(40,200,160)
-                copyStatusLbl.Visible = true
-                task.delay(3, function() copyStatusLbl.Visible = false end)
-            end
-        end
-        if not copied then
-            local modal = Instance.new("Frame")
-            modal.Size = UDim2.new(0, 540, 0, 380)
-            modal.Position = UDim2.new(0.5, -270, 0.5, -190)
-            modal.BackgroundColor3 = Color3.fromRGB(15,15,18)
-            modal.BorderSizePixel = 0
-            modal.Active = true
-            modal.Draggable = true
-            modal.ZIndex = 100
-            modal.Parent = debugSg
-            local mc = Instance.new("UICorner") mc.CornerRadius = UDim.new(0,8) mc.Parent = modal
-            local ms = Instance.new("UIStroke") ms.Color = Color3.fromRGB(40,200,160) ms.Thickness = 2 ms.Parent = modal
-            local mTitle = Instance.new("TextLabel")
-            mTitle.Size = UDim2.new(1,-50,0,28)
-            mTitle.Position = UDim2.new(0,12,0,4)
-            mTitle.BackgroundTransparency = 1
-            mTitle.Text = "Copy Log Manual ("..#_dbgLines.." lines)"
-            mTitle.TextColor3 = Color3.fromRGB(40,200,160)
-            mTitle.Font = Enum.Font.GothamBold
-            mTitle.TextSize = 12
-            mTitle.TextXAlignment = Enum.TextXAlignment.Left
-            mTitle.ZIndex = 101
-            mTitle.Parent = modal
-            local mClose = Instance.new("TextButton")
-            mClose.Size = UDim2.new(0,28,0,24)
-            mClose.Position = UDim2.new(1,-34,0,4)
-            mClose.BackgroundColor3 = Color3.fromRGB(60,20,20)
-            mClose.Text = "X"
-            mClose.TextColor3 = Color3.fromRGB(255,80,80)
-            mClose.Font = Enum.Font.GothamBold
-            mClose.TextSize = 12
-            mClose.AutoButtonColor = false
-            mClose.ZIndex = 101
-            mClose.Parent = modal
-            local mcc = Instance.new("UICorner") mcc.CornerRadius = UDim.new(0,4) mcc.Parent = mClose
-            mClose.MouseButton1Click:Connect(function() modal:Destroy() end)
-            local hint = Instance.new("TextLabel")
-            hint.Size = UDim2.new(1,-16,0,30)
-            hint.Position = UDim2.new(0,8,0,32)
-            hint.BackgroundTransparency = 1
-            hint.Text = "executor lo gak support setclipboard. Tap textbox di bawah, long-press -> Select All -> Copy."
-            hint.TextColor3 = Color3.fromRGB(220,160,80)
-            hint.Font = Enum.Font.Gotham
-            hint.TextSize = 10
-            hint.TextXAlignment = Enum.TextXAlignment.Left
-            hint.TextWrapped = true
-            hint.ZIndex = 101
-            hint.Parent = modal
-            local sfM = Instance.new("ScrollingFrame")
-            sfM.Size = UDim2.new(1,-16,1,-100)
-            sfM.Position = UDim2.new(0,8,0,68)
-            sfM.BackgroundColor3 = Color3.fromRGB(0,0,0)
-            sfM.BorderSizePixel = 0
-            sfM.ScrollBarThickness = 6
-            sfM.ScrollBarImageColor3 = Color3.fromRGB(40,200,160)
-            sfM.AutomaticCanvasSize = Enum.AutomaticSize.Y
-            sfM.CanvasSize = UDim2.new(0,0,0,0)
-            sfM.ZIndex = 101
-            sfM.Parent = modal
-            local sfc = Instance.new("UICorner") sfc.CornerRadius = UDim.new(0,4) sfc.Parent = sfM
-            local txt = Instance.new("TextBox")
-            txt.Size = UDim2.new(1,-12,0,0)
-            txt.Position = UDim2.new(0,6,0,4)
-            txt.AutomaticSize = Enum.AutomaticSize.Y
-            txt.BackgroundTransparency = 1
-            txt.Text = fullText
-            txt.TextColor3 = Color3.fromRGB(220,220,220)
-            txt.Font = Enum.Font.Code
-            txt.TextSize = 10
-            txt.TextXAlignment = Enum.TextXAlignment.Left
-            txt.TextYAlignment = Enum.TextYAlignment.Top
-            txt.TextWrapped = true
-            txt.MultiLine = true
-            txt.ClearTextOnFocus = false
-            txt.TextEditable = false
-            txt.ZIndex = 102
-            txt.Parent = sfM
-            local saveBtn = Instance.new("TextButton")
-            saveBtn.Size = UDim2.new(0,140,0,24)
-            saveBtn.Position = UDim2.new(0,8,1,-30)
-            saveBtn.BackgroundColor3 = Color3.fromRGB(40,80,140)
-            saveBtn.Text = "Save to .txt File"
-            saveBtn.TextColor3 = Color3.fromRGB(225,225,225)
-            saveBtn.Font = Enum.Font.GothamBold
-            saveBtn.TextSize = 10
-            saveBtn.AutoButtonColor = false
-            saveBtn.ZIndex = 101
-            saveBtn.Parent = modal
-            local sbc = Instance.new("UICorner") sbc.CornerRadius = UDim.new(0,4) sbc.Parent = saveBtn
-            local saveStatus = Instance.new("TextLabel")
-            saveStatus.Size = UDim2.new(1,-160,0,24)
-            saveStatus.Position = UDim2.new(0,156,1,-30)
-            saveStatus.BackgroundTransparency = 1
-            saveStatus.Text = ""
-            saveStatus.TextColor3 = Color3.fromRGB(180,180,180)
-            saveStatus.Font = Enum.Font.Gotham
-            saveStatus.TextSize = 10
-            saveStatus.TextXAlignment = Enum.TextXAlignment.Left
-            saveStatus.ZIndex = 101
-            saveStatus.Parent = modal
-            saveBtn.MouseButton1Click:Connect(function()
-                if not writefile then
-                    saveStatus.Text = "writefile gak ada di executor"
-                    saveStatus.TextColor3 = Color3.fromRGB(220,80,80)
-                    return
-                end
-                local fname = "ZenxLog_"..os.date("%Y%m%d_%H%M%S")..".txt"
-                local ok, err = pcall(writefile, fname, fullText)
-                if ok then
-                    saveStatus.Text = "Saved: "..fname
-                    saveStatus.TextColor3 = Color3.fromRGB(40,200,160)
-                else
-                    saveStatus.Text = "FAIL: "..tostring(err):sub(1,30)
-                    saveStatus.TextColor3 = Color3.fromRGB(220,80,80)
-                end
-            end)
-            copyStatusLbl.Text = "Modal terbuka - manual copy"
-            copyStatusLbl.TextColor3 = Color3.fromRGB(220,160,80)
-            copyStatusLbl.Visible = true
-            task.delay(3, function() copyStatusLbl.Visible = false end)
-        end
-    end)
-
-    clearDbg.MouseButton1Click:Connect(function()
-        _dbgLines = {}
-        if debugLbl then debugLbl.Text = "" end
-    end)
-end
+-- v9.9: debug GUI dihapus (print ke console aja)
 
 local function dbg(msg)
     print("[ZenxDbg] "..msg)
@@ -1027,7 +771,34 @@ local areas={} for i=1,5 do areas[i]=makeScroll(SCROLL_Y,SCROLL_H) end
 local botBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,SCROLL_Y+SCROLL_H+4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=content})
 corner(botBar,7) stroke(botBar,C.Dim,1.2)
 local statusLbl=lbl(botBar,"Status: Idle",9,C.Gray,Enum.TextXAlignment.Left)
-statusLbl.Size=UDim2.new(1,-10,1,0) statusLbl.Position=UDim2.new(0,8,0,0)
+statusLbl.Size=UDim2.new(0.65,-10,1,0) statusLbl.Position=UDim2.new(0,8,0,0)
+
+-- v9.7: counter pet yg udah jadi (age >= toAge) di backpack, update tiap 2 detik
+local donesLbl=lbl(botBar,"Jadi: -",9,C.Teal,Enum.TextXAlignment.Right)
+donesLbl.Size=UDim2.new(0.35,-12,1,0) donesLbl.Position=UDim2.new(0.65,0,0,0)
+donesLbl.Font=Enum.Font.GothamBold
+
+task.spawn(function()
+    while donesLbl and donesLbl.Parent do
+        local count = 0
+        local bp = player:FindFirstChild("Backpack")
+        if bp then
+            for _, item in pairs(bp:GetChildren()) do
+                if isPet(item) then
+                    local age = getAgeFromKG(item)
+                    if age and age >= toAge then
+                        count = count + 1
+                    end
+                end
+            end
+        end
+        if donesLbl and donesLbl.Parent then
+            donesLbl.Text = "Jadi: "..count.." ("..toAge.."+)"
+            donesLbl.TextColor3 = count > 0 and C.Teal or C.Gray
+        end
+        task.wait(2)
+    end
+end)
 
 local BOT_Y=SCROLL_Y+SCROLL_H+34
 local runBtn=btn(content,"RUNNING",10,C.Panel,C.Gray)
@@ -1051,13 +822,48 @@ for i,name in ipairs(tabNames) do
     local ii=i b.MouseButton1Click:Connect(function() switchTab(ii) end)
 end
 
+-- v9.8: Tekan "-" -> kotak kecil ijo neon dengan logo Z (bukan bar memanjang)
+local NEON_GREEN = Color3.fromRGB(57, 255, 100)
+local NEON_DARK = Color3.fromRGB(0, 120, 40)
+
+-- Mini Z button overlay (cuma visible pas minimized)
+local miniZBtn = Instance.new("TextButton")
+miniZBtn.Name = "MiniZBtn"
+miniZBtn.Size = UDim2.new(1, 0, 1, 0)
+miniZBtn.BackgroundTransparency = 1
+miniZBtn.Text = "Z"
+miniZBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+miniZBtn.Font = Enum.Font.GothamBold
+miniZBtn.TextSize = 38
+miniZBtn.Visible = false
+miniZBtn.AutoButtonColor = false
+miniZBtn.ZIndex = 10
+miniZBtn.Parent = main
+
 local minimized=false
-minBtn.MouseButton1Click:Connect(function()
-    minimized=not minimized
-    content.Visible=not minimized
-    main.Size=minimized and UDim2.new(0,GUI_W,0,34) or UDim2.new(0,GUI_W,0,GUI_H)
-    minBtn.Text=minimized and "+" or "-"
-end)
+local function setMinimized(state)
+    minimized = state
+    local mainStroke = main:FindFirstChildOfClass("UIStroke")
+    if state then
+        TB.Visible = false
+        content.Visible = false
+        main.Size = UDim2.new(0, 56, 0, 56)
+        main.BackgroundColor3 = NEON_GREEN
+        if mainStroke then mainStroke.Color = NEON_DARK end
+        miniZBtn.Visible = true
+    else
+        TB.Visible = true
+        content.Visible = true
+        main.Size = UDim2.new(0, GUI_W, 0, GUI_H)
+        main.BackgroundColor3 = C.BG
+        if mainStroke then mainStroke.Color = C.Teal end
+        miniZBtn.Visible = false
+    end
+    minBtn.Text = state and "+" or "-"
+end
+
+minBtn.MouseButton1Click:Connect(function() setMinimized(not minimized) end)
+miniZBtn.MouseButton1Click:Connect(function() setMinimized(false) end)
 
 local teamPetUUIDs=d.teamPetUUIDs or {}
 local teamPetInfoCache=d.teamPetInfoCache or {}
@@ -2924,4 +2730,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v9.6: Z logo floating button (klik = toggle, draggable)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v9.9: debug GUI dihapus, console (F9) tetep ada kalau perlu")
