@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.12"
+local SCRIPT_VERSION="v12.13"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -676,8 +676,14 @@ function getAgeFromKG(item)
     end
     local age=getAge(item) if age then return age end
     local kg=getKG(item) if not kg then return nil end
-    local maxKG=getMaxKGForPet(getPetName(item)) if not maxKG then return nil end
-    return math.max(1,math.min(100,math.floor(kg*110/maxKG - 10)))
+    local maxKG=getMaxKGForPet(getPetName(item))
+    if maxKG then
+        return math.max(1,math.min(100,math.floor(kg*110/maxKG - 10)))
+    end
+    -- v12.13: smart fallback untuk pet mutasi tanpa cache hit
+    -- KG gede (>=20) = pet udah maxed/age tinggi, KG kecil = pet baru
+    if kg >= 20 then return 100 end
+    return 1
 end
 
 local function getAgeByUUID(uuid)
@@ -2990,4 +2996,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.12: Start tetep jalan walau belum pilih pet target (wait mode)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.13: + smart age fallback buat pet mutasi (KG>=20 -> age 100, else 1)")
