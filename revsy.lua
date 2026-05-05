@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v10.9"
+local SCRIPT_VERSION="v11.0"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar UP LVL + Inventory Show)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar + minimize fix)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -959,6 +959,7 @@ local function setMinimized(state)
     if state then
         TB.Visible = false
         content.Visible = false
+        leftSidebar.Visible = false  -- v11.0: hide sidebar pas mini Z
         main.Size = UDim2.new(0, 56, 0, 56)
         main.BackgroundColor3 = NEON_GREEN
         if mainStroke then mainStroke.Color = NEON_DARK end
@@ -966,6 +967,7 @@ local function setMinimized(state)
     else
         TB.Visible = true
         content.Visible = true
+        leftSidebar.Visible = true  -- v11.0: restore sidebar
         main.Size = UDim2.new(0, GUI_W, 0, GUI_H)
         main.BackgroundColor3 = C.BG
         if mainStroke then mainStroke.Color = C.Teal end
@@ -2934,4 +2936,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.9: sidebar kiri (UP LVL = semua tab lama, Inventory Show = list pet)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.0: minimize Z fix - sidebar ikut hide pas mini")
