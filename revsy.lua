@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v10.3"
+local SCRIPT_VERSION="v10.5"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: parallel per-pet check + cooldown 0.5s + cycle 25ms)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: parallel + auto-equip + first load = mini Z)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1506,7 +1506,10 @@ buildSwapList=function()
             end
             save()
             if p.enabled then
+                -- v10.4: auto-equip pet ke garden biar cooldown ke-track (gak nunggu START)
+                pcall(function() equipPet(p.uuid) end)
                 if startGlobalPoller then startGlobalPoller() end
+                startSwapKeeper()
             end
         end)
     end
@@ -2339,6 +2342,37 @@ startTeamKeeper=function()
     end)
 end
 
+-- v10.4: swap keeper - re-equip swap pet yg ke-pickup manual (gak perlu START)
+local swapKeeperTask=nil
+local function swapKeeperShouldRun()
+    for _,cfg in pairs(swapPerPet) do
+        if cfg.enabled then return true end
+    end
+    return false
+end
+local function startSwapKeeper()
+    if swapKeeperTask then return end
+    if not swapKeeperShouldRun() then return end
+    swapKeeperTask=task.spawn(function()
+        dbg("[swapKeeper] START (re-equip swap pet yg ke-pickup)")
+        while swapKeeperShouldRun() do
+            for uuid,cfg in pairs(swapPerPet) do
+                if cfg.enabled and not currentLevelingUUIDs[uuid] then
+                    if not isPetEquippedInUI(uuid) then
+                        local uuidStr=tostring(uuid)
+                        dbg("[swapKeeper] swap "..uuidStr:sub(1,8).." gak di UI, re-equip")
+                        pcall(function() equipPet(uuid) end)
+                        task.wait(0.1)
+                    end
+                end
+            end
+            task.wait(0.5)
+        end
+        dbg("[swapKeeper] STOP")
+        swapKeeperTask=nil
+    end)
+end
+
 stopTeamKeeper=function()
     if teamKeeperTask then
         pcall(task.cancel,teamKeeperTask)
@@ -2786,13 +2820,21 @@ if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
 do
-    local anyEnabled=false
-    for _,cfg in pairs(swapPerPet) do
-        if cfg.enabled then anyEnabled=true break end
+    -- v10.4: auto-equip semua swap pet yg saved ON (sblm nunggu START)
+    local enabledList={}
+    for uuid,cfg in pairs(swapPerPet) do
+        if cfg.enabled then table.insert(enabledList, uuid) end
     end
-    if anyEnabled then
-        dbg("[init] auto-start poller (saved swap-ON)")
+    if #enabledList>0 then
+        dbg("[init] auto-equip "..#enabledList.." swap pet + start poller (saved swap-ON)")
+        task.spawn(function()
+            for _,uuid in ipairs(enabledList) do
+                pcall(function() equipPet(uuid) end)
+                task.wait(0.05)
+            end
+        end)
         startGlobalPoller()
+        startSwapKeeper()
     end
 end
 
@@ -2805,4 +2847,7 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.3: swap parallel check (5pet skrg cek bareng, dulu sequential)")
+-- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
+setMinimized(true)
+
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.5: first load = mini Z (klik buat buka)")
