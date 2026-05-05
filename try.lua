@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.11"
+local SCRIPT_VERSION="v12.12"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2730,14 +2730,15 @@ local function doStart()
     end
 
     local queue=getQueue()
-    if #queue==0 then
-        dbg("[doStart] FAIL: queue kosong")
-        statusLbl.Text="Tidak ada pet target!" statusLbl.TextColor3=C.Red
-        return
-    end
-
+    -- v12.12: jangan bail out kalo queue kosong, tetep mulai dgn "wait" mode
+    -- main loop akan handle empty queue (display "Tunggu pet target...")
     isRunning=true setRunning(true)
-    statusLbl.Text="Berjalan... Q:"..#queue statusLbl.TextColor3=C.Teal
+    if #queue==0 then
+        dbg("[doStart] queue kosong, mulai dgn wait mode")
+        statusLbl.Text="Mulai... tunggu pet target..." statusLbl.TextColor3=C.Gold
+    else
+        statusLbl.Text="Berjalan... Q:"..#queue statusLbl.TextColor3=C.Teal
+    end
 
     local teamCnt=0
     for _ in pairs(teamPetUUIDs) do teamCnt=teamCnt+1 end
@@ -2989,4 +2990,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.11: + auto-confirm trade via Activated firesignal spam 3s (CONFIRMED working)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.12: Start tetep jalan walau belum pilih pet target (wait mode)")
