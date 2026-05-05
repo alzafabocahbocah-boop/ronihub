@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.19"
+local SCRIPT_VERSION="v12.20"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -819,87 +819,7 @@ donesLbl.Size = UDim2.new(1, -10, 1, 0)
 donesLbl.Position = UDim2.new(0, 5, 0, 0)
 donesLbl.Font = Enum.Font.GothamBold
 
-task.spawn(function()
-    while donesLbl and donesLbl.Parent and not scriptShutdown do
-        -- v12.18: 3 stats - cek BACKPACK + GARDEN (pet equipped)
-        -- Tanpa filter team (pet team yg lagi level harus tetep ke-count)
-        -- Pakai dedupe by UUID biar gak double-count
-        local total = 0
-        local done = 0
-        local remaining = 0
-        local seenUUIDs = {}
 
-        -- Backpack pets
-        local bp = player:FindFirstChild("Backpack")
-        if bp then
-            for _, item in pairs(bp:GetChildren()) do
-                if isPet(item) then
-                    local name = getPetName(item)
-                    local uuid = getPetUUID(item)
-                    local uuidStr = uuid and tostring(uuid) or nil
-                    if isTargetPet(name) and not isFavorite(item) then
-                        if not (uuidStr and seenUUIDs[uuidStr]) then
-                            if uuidStr then seenUUIDs[uuidStr] = true end
-                            total = total + 1
-                            local age = getAgeFromKG(item)
-                            if age and age >= toAge then
-                                done = done + 1
-                            else
-                                remaining = remaining + 1
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        -- Garden/equipped pets (ActivePetUI - source of truth untuk pet equipped)
-        local pg = player:FindFirstChild("PlayerGui")
-        local activePetUI = pg and pg:FindFirstChild("ActivePetUI")
-        if activePetUI then
-            for _, d in ipairs(activePetUI:GetDescendants()) do
-                if d:IsA("Frame") or d:IsA("ImageLabel") then
-                    local n = d.Name:gsub("^{",""):gsub("}$","")
-                    if #n >= 20 and n:find("-") then  -- looks like UUID
-                        if not seenUUIDs[n] then
-                            -- check if has PET_AGE child (it's a pet frame)
-                            local ageLbl = d:FindFirstChild("PET_AGE", true)
-                            if ageLbl then
-                                seenUUIDs[n] = true
-                                -- Get name from UI
-                                local petTypeLbl = d:FindFirstChild("PET_NAME", true) or d:FindFirstChild("PET_TYPE", true)
-                                local petName = petTypeLbl and petTypeLbl.Text or ""
-                                if petName == "" or isTargetPet(petName) then
-                                    total = total + 1
-                                    local txt = ""
-                                    pcall(function() txt = ageLbl.Text end)
-                                    local age = tonumber((txt or ""):match("(%d+)"))
-                                    if age and age >= toAge then
-                                        done = done + 1
-                                    else
-                                        remaining = remaining + 1
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        if donesLbl and donesLbl.Parent then
-            donesLbl.Text = "Total:"..total.." Jadi:"..done.." Kurang:"..remaining
-            if total == 0 then
-                donesLbl.TextColor3 = C.Gray
-            elseif remaining == 0 then
-                donesLbl.TextColor3 = C.Green
-            else
-                donesLbl.TextColor3 = C.Teal
-            end
-        end
-        task.wait(2)
-    end
-end)
 
 local currentTab = 1
 local function switchTab(idx)
@@ -1192,6 +1112,89 @@ local function isTargetPet(name)
     end
     return false
 end
+
+-- v12.20: count task.spawn moved AFTER isTargetPet (fix scope issue)
+task.spawn(function()
+    while donesLbl and donesLbl.Parent and not scriptShutdown do
+        -- v12.18: 3 stats - cek BACKPACK + GARDEN (pet equipped)
+        -- Tanpa filter team (pet team yg lagi level harus tetep ke-count)
+        -- Pakai dedupe by UUID biar gak double-count
+        local total = 0
+        local done = 0
+        local remaining = 0
+        local seenUUIDs = {}
+
+        -- Backpack pets
+        local bp = player:FindFirstChild("Backpack")
+        if bp then
+            for _, item in pairs(bp:GetChildren()) do
+                if isPet(item) then
+                    local name = getPetName(item)
+                    local uuid = getPetUUID(item)
+                    local uuidStr = uuid and tostring(uuid) or nil
+                    if isTargetPet(name) and not isFavorite(item) then
+                        if not (uuidStr and seenUUIDs[uuidStr]) then
+                            if uuidStr then seenUUIDs[uuidStr] = true end
+                            total = total + 1
+                            local age = getAgeFromKG(item)
+                            if age and age >= toAge then
+                                done = done + 1
+                            else
+                                remaining = remaining + 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Garden/equipped pets (ActivePetUI - source of truth untuk pet equipped)
+        local pg = player:FindFirstChild("PlayerGui")
+        local activePetUI = pg and pg:FindFirstChild("ActivePetUI")
+        if activePetUI then
+            for _, d in ipairs(activePetUI:GetDescendants()) do
+                if d:IsA("Frame") or d:IsA("ImageLabel") then
+                    local n = d.Name:gsub("^{",""):gsub("}$","")
+                    if #n >= 20 and n:find("-") then  -- looks like UUID
+                        if not seenUUIDs[n] then
+                            -- check if has PET_AGE child (it's a pet frame)
+                            local ageLbl = d:FindFirstChild("PET_AGE", true)
+                            if ageLbl then
+                                seenUUIDs[n] = true
+                                -- Get name from UI
+                                local petTypeLbl = d:FindFirstChild("PET_NAME", true) or d:FindFirstChild("PET_TYPE", true)
+                                local petName = petTypeLbl and petTypeLbl.Text or ""
+                                if petName == "" or isTargetPet(petName) then
+                                    total = total + 1
+                                    local txt = ""
+                                    pcall(function() txt = ageLbl.Text end)
+                                    local age = tonumber((txt or ""):match("(%d+)"))
+                                    if age and age >= toAge then
+                                        done = done + 1
+                                    else
+                                        remaining = remaining + 1
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if donesLbl and donesLbl.Parent then
+            donesLbl.Text = "Total:"..total.." Jadi:"..done.." Kurang:"..remaining
+            if total == 0 then
+                donesLbl.TextColor3 = C.Gray
+            elseif remaining == 0 then
+                donesLbl.TextColor3 = C.Green
+            else
+                donesLbl.TextColor3 = C.Teal
+            end
+        end
+        task.wait(2)
+    end
+end)
 local function getTeamPetInfo(uuid)
     if teamPetInfoCache[uuid] then return teamPetInfoCache[uuid] end
     local item=findPetInBackpack(uuid)
@@ -3104,4 +3107,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.19: + 50 mutation prefix baru + isTargetPet substring fallback")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.20: fix scope issue - count task.spawn moved after isTargetPet (Total/Jadi/Kurang sekarang work)")
