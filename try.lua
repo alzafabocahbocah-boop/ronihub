@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.9"
+local SCRIPT_VERSION="v12.11"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + robust gift accept w/ debug)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2175,102 +2175,26 @@ end)
 
 -- ============================================
 -- AUTO ACCEPT HOOKS (FIXED v8.2)
--- Trade: SendRequest:OnClientEvent -> RespondRequest(player, true)
--- Gift: hook PetGiftingService:OnClientEvent
+-- Gift: GiftPet (uuid, name, sender) -> AcceptPetGift(true, uuid) (CONFIRMED v12.10)
+-- Trade: SendRequest (tradeID, sender, ts) -> RespondRequest(tradeID, true) (CONFIRMED v12.10)
 -- ============================================
 pcall(function()
-    -- v9.3: Hook SEMUA RemoteEvent di TradeEvents folder + log everything
+    -- v12.10: PRECISE gift accept (path: GameEvents.GiftPet, GameEvents.AcceptPetGift)
     local ge = RS:FindFirstChild("GameEvents")
-    local te = ge and ge:FindFirstChild("TradeEvents")
-    if te then
-        for _, remote in ipairs(te:GetChildren()) do
-            if remote:IsA("RemoteEvent") then
-                local tradeConn = remote.OnClientEvent:Connect(function(...)
-                    if not autoAccTrade then return end
-                    local args = {...}
-                    -- Log apa yg fire (debug)
-                    local argDesc = {}
-                    for i=1, math.min(3, #args) do
-                        local a = args[i]
-                        if typeof(a) == "Instance" then
-                            table.insert(argDesc, "<"..a.ClassName..":"..a.Name..">")
-                        elseif type(a) == "table" then
-                            table.insert(argDesc, "<table>")
-                        else
-                            table.insert(argDesc, tostring(a):sub(1,30))
-                        end
-                    end
-                    dbg("[autoAcc-trade] event '"..remote.Name.."' args=("..table.concat(argDesc,", ")..")")
+    if not ge then dbg("[autoAcc] FATAL no GameEvents") return end
 
-                    -- Coba accept dengan beberapa pattern (whatever works)
-                    if tradeRespondRE then
-                        local arg1 = args[1]
-                        -- Pattern 1: Player Instance + true
-                        if typeof(arg1) == "Instance" and arg1:IsA("Player") then
-                            pcall(function() tradeRespondRE:FireServer(arg1, true) end)
-                            dbg("[autoAcc-trade] tried RespondRequest("..arg1.Name..", true)")
-                            if accStatusLbl then
-                                accStatusLbl.Text = "Trade dari "..arg1.Name.." -> accept!"
-                                accStatusLbl.TextColor3 = C.Teal
-                                task.delay(2, function() if accStatusLbl then accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray end end)
-                            end
-                        -- Pattern 2: numeric/string ID + true
-                        elseif arg1 ~= nil then
-                            pcall(function() tradeRespondRE:FireServer(arg1, true) end)
-                            dbg("[autoAcc-trade] tried RespondRequest("..tostring(arg1)..", true)")
-                        -- Pattern 3: just true
-                        else
-                            pcall(function() tradeRespondRE:FireServer(true) end)
-                            dbg("[autoAcc-trade] tried RespondRequest(true)")
-                        end
-                    end
-                end)
-                table.insert(connections, tradeConn)
-            end
-        end
-        dbg("[autoAcc] trade hooks installed di SEMUA TradeEvents remote")
-    else
-        dbg("[autoAcc] WARN: TradeEvents folder gak ketemu")
-    end
+    local giftPetRE = ge:FindFirstChild("GiftPet")
+    local acceptPetGiftRE = ge:FindFirstChild("AcceptPetGift")
 
-    -- v12.9: PRECISE gift accept dengan ROBUST search + debug print
-    -- Pattern confirmed dari log: GiftPet (uuid, name, sender) -> AcceptPetGift (true, uuid)
-
-    -- Robust search: try multiple lokasi
-    local giftPetRE = RS:FindFirstChild("GiftPet", true)
-    local acceptPetGiftRE = RS:FindFirstChild("AcceptPetGift", true)
-
-    -- Print debug info ke F9
-    print("[ZenxLvl-AutoAcc] GiftPet remote: "..(giftPetRE and giftPetRE:GetFullName() or "NOT FOUND"))
-    print("[ZenxLvl-AutoAcc] AcceptPetGift remote: "..(acceptPetGiftRE and acceptPetGiftRE:GetFullName() or "NOT FOUND"))
-    if giftPetRE then print("[ZenxLvl-AutoAcc] GiftPet ClassName: "..giftPetRE.ClassName) end
-    if acceptPetGiftRE then print("[ZenxLvl-AutoAcc] AcceptPetGift ClassName: "..acceptPetGiftRE.ClassName) end
-
-    if giftPetRE and acceptPetGiftRE and giftPetRE:IsA("RemoteEvent") then
+    if giftPetRE and giftPetRE:IsA("RemoteEvent") and acceptPetGiftRE and acceptPetGiftRE:IsA("RemoteEvent") then
         local giftAccCount = 0
-        -- Hook OnClientEvent dengan handler yg log SEMUA arg
-        local conn = giftPetRE.OnClientEvent:Connect(function(...)
-            local args = {...}
-            print("[ZenxLvl-AutoAcc] GiftPet event fired! args count: "..#args.." autoAccGift="..tostring(autoAccGift))
-            for i, v in ipairs(args) do
-                print("  arg["..i.."] = "..tostring(v).." (type "..typeof(v)..")")
-            end
-            if not autoAccGift then
-                print("[ZenxLvl-AutoAcc] autoAccGift OFF, skip accept")
-                return
-            end
-            local petUUID = args[1]  -- arg ke-1 adalah pet UUID
-            local petName = args[2] or "?"
-            local senderUsername = args[3] or "?"
-
-            -- Fire AcceptPetGift(true, petUUID)
-            print("[ZenxLvl-AutoAcc] FIRING AcceptPetGift(true, "..tostring(petUUID)..")")
-            local ok, err = pcall(function()
-                acceptPetGiftRE:FireServer(true, petUUID)
-            end)
+        local conn = giftPetRE.OnClientEvent:Connect(function(petUUID, petName, senderUsername)
+            if not autoAccGift then return end
+            local short = tostring(petUUID):sub(1,8)
+            local ok = pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
             if ok then
                 giftAccCount = giftAccCount + 1
-                print("[ZenxLvl-AutoAcc] OK fired #"..giftAccCount)
+                dbg("[autoAcc-gift] OK #"..giftAccCount.." "..short.." from "..tostring(senderUsername))
                 if accStatusLbl then
                     accStatusLbl.Text = "Gift accept #"..giftAccCount.." ("..tostring(senderUsername)..")"
                     accStatusLbl.TextColor3 = C.Teal
@@ -2282,20 +2206,137 @@ pcall(function()
                     end)
                 end
             else
-                print("[ZenxLvl-AutoAcc] FAIL FireServer: "..tostring(err))
+                dbg("[autoAcc-gift] FAIL "..short)
             end
         end)
         table.insert(connections, conn)
-        print("[ZenxLvl-AutoAcc] HOOK INSTALLED on GiftPet")
+        dbg("[autoAcc] gift hook PRECISE installed (GiftPet -> AcceptPetGift)")
     else
-        warn("[ZenxLvl-AutoAcc] FAIL: remote gak ketemu (GiftPet="..tostring(giftPetRE)..", AcceptPetGift="..tostring(acceptPetGiftRE)..")")
-        -- Fallback: list semua remote di game biar lo tau path-nya
-        warn("[ZenxLvl-AutoAcc] Listing semua RemoteEvent di RS yg punya kata 'gift':")
-        for _, d in ipairs(RS:GetDescendants()) do
-            if d:IsA("RemoteEvent") and d.Name:lower():find("gift") then
-                warn("  - "..d:GetFullName())
+        dbg("[autoAcc] WARN: GiftPet/AcceptPetGift gak ketemu (path: GameEvents direct)")
+    end
+
+    -- v12.10: PRECISE trade accept (multi-stage with tradeID)
+    -- Stage 1: SendRequest(tradeID, sender, ts) -> RespondRequest(tradeID, true)
+    -- Stage 2/3: UpdateTradeState -> try Accept(tradeID), Confirm(tradeID)
+    local te = ge:FindFirstChild("TradeEvents")
+    if te then
+        local sendReqRE = te:FindFirstChild("SendRequest")
+        local respondReqRE = te:FindFirstChild("RespondRequest")
+        local acceptRE = te:FindFirstChild("Accept")
+        local confirmRE = te:FindFirstChild("Confirm")
+
+        local lastTradeID = nil
+        local tradeAccCount = 0
+        local spamRunning = false
+
+        -- v12.11: Auto-confirm spammer (jalan tiap 3 detik selama trade window visible)
+        -- Pakai firesignal Activated (signal yg game pakai - 2 connections) + brute force remote
+        local function findTradeAcceptBtn()
+            local pg = player:FindFirstChild("PlayerGui")
+            local tui = pg and pg:FindFirstChild("TradingUI")
+            local lt = tui and tui:FindFirstChild("LiveTrade")
+            if not lt or not lt.Visible then return nil, nil end
+            local opts = lt:FindFirstChild("Options")
+            local acc = opts and opts:FindFirstChild("Accept")
+            return acc, lt
+        end
+
+        local function spamConfirm()
+            local btn, lt = findTradeAcceptBtn()
+            if not btn then return false end
+
+            -- Fire Activated signal (yg game pakai)
+            if firesignal then
+                pcall(function() firesignal(btn.Activated) end)
+            end
+            if getconnections then
+                pcall(function()
+                    for _, c in ipairs(getconnections(btn.Activated)) do
+                        pcall(function() c:Fire() end)
+                    end
+                end)
+            end
+
+            -- Brute force fire remote (kalo Activated gak cukup, ini backup)
+            if lastTradeID then
+                if confirmRE then pcall(function() confirmRE:FireServer(lastTradeID) end) end
+                if acceptRE then pcall(function() acceptRE:FireServer(lastTradeID) end) end
+            end
+            return true
+        end
+
+        local function startSpammer()
+            if spamRunning then return end
+            spamRunning = true
+            task.spawn(function()
+                local iter = 0
+                while autoAccTrade and spamRunning do
+                    iter = iter + 1
+                    local stillTrade = spamConfirm()
+                    if not stillTrade then
+                        -- Trade window closed, stop spamming
+                        if iter > 1 then dbg("[autoAcc-trade] spammer stop (window closed)") end
+                        break
+                    end
+                    if iter == 1 then
+                        dbg("[autoAcc-trade] spammer started")
+                        if accStatusLbl then
+                            accStatusLbl.Text = "Trade auto-confirm spam"
+                            accStatusLbl.TextColor3 = C.Teal
+                        end
+                    end
+                    task.wait(3)
+                end
+                spamRunning = false
+            end)
+        end
+
+        for _, r in ipairs(te:GetChildren()) do
+            if r:IsA("RemoteEvent") then
+                local lname = r.Name:lower()
+                if not (lname:find("history") or lname:find("inventory")) then
+                    local conn = r.OnClientEvent:Connect(function(...)
+                        if not autoAccTrade then return end
+                        local args = {...}
+
+                        -- Extract tradeID dari arg[1]
+                        if type(args[1]) == "string" and #args[1] > 20 and args[1]:find("-") then
+                            lastTradeID = args[1]
+                        end
+
+                        if lname:find("cancel") or lname:find("reject") or lname:find("decline") then
+                            spamRunning = false  -- stop spam kalo trade dibatalin
+                            return
+                        end
+
+                        -- Stage 1: SendRequest -> RespondRequest(tradeID, true)
+                        if r == sendReqRE and respondReqRE and lastTradeID then
+                            local ok = pcall(function() respondReqRE:FireServer(lastTradeID, true) end)
+                            if ok then
+                                tradeAccCount = tradeAccCount + 1
+                                dbg("[autoAcc-trade] RespondRequest("..lastTradeID:sub(1,8)..", true)")
+                                if accStatusLbl then
+                                    accStatusLbl.Text = "Trade accept #"..tradeAccCount
+                                    accStatusLbl.TextColor3 = C.Teal
+                                end
+                                -- Start spammer (akan auto-stop kalo window close)
+                                task.delay(2, startSpammer)
+                            end
+                            return
+                        end
+
+                        -- Other trade events: trigger spammer kalo blm jalan
+                        if r.Name == "UpdateTradeState" then
+                            startSpammer()
+                        end
+                    end)
+                    table.insert(connections, conn)
+                end
             end
         end
+        dbg("[autoAcc] trade hook PRECISE installed (Activated firesignal + 3s spam)")
+    else
+        dbg("[autoAcc] WARN: TradeEvents folder gak ketemu")
     end
 end)
 
@@ -2948,4 +2989,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.9: gift accept robust search + F9 debug print")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.11: + auto-confirm trade via Activated firesignal spam 3s (CONFIRMED working)")
