@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.1 (baseKG category)"
+local SCRIPT_VERSION = "v3.2 (range visible)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -223,7 +223,7 @@ mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new
 local catLabels = {}
 for i, cat in ipairs(CATEGORIES) do
     local row = i <= 4 and catRow1 or catRow2
-    local pillW = i <= 4 and 110 or 148  -- row1: 4x110, row2: 3x148
+    local pillW = i <= 4 and 114 or 152  -- v3.2: 4x114 + 3x152 (range visible)
     local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=row})
     corner(pill, 5) stroke(pill, C.Dim, 1)
     local pl = lbl(pill, cat.name..": 0", 11, C.Gray, Enum.TextXAlignment.Center)
@@ -320,7 +320,14 @@ local function _doBuildInvShow()
     for i, lblWidget in ipairs(catLabels) do
         local cat = CATEGORIES[i]
         local count = catCounts[i]
-        lblWidget.Text = cat.name..": "..count
+        -- v3.2: tampilin range KG di pill
+        local rangeStr
+        if cat.max == math.huge then
+            rangeStr = cat.min.."+"
+        else
+            rangeStr = cat.min.."-"..cat.max
+        end
+        lblWidget.Text = cat.name.." ("..rangeStr.."): "..count
         lblWidget.TextColor3 = count > 0 and cat.color or C.Gray
     end
 
