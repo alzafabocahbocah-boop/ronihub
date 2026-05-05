@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.4"
+local SCRIPT_VERSION="v11.8"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + non-ASCII cleaned)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + invShow tanpa pet list)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -411,81 +411,52 @@ local function sendGiftToPlayer(targetName, petUUID)
         return false
     end
 
-    if not petUUID then
-        -- gak ada uuid, fire tanpa pet (rare case)
-        pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
-        return true
+    if petUUID then
+        -- Step 1: kalau pet di garden, unequip dulu biar balik ke backpack
+        local placed = findPlacedPetByUUID(petUUID)
+        if placed then
+            unequipPet(petUUID)
+            task.wait(0.2)
+        end
+
+        -- Step 2: hold pet as tool (di character, bukan garden)
+        local item = holdPetAsTool(petUUID)
+        if not item then
+            dbg("[gift] FAIL: gagal hold pet "..tostring(petUUID):sub(1,8).." (gak di backpack/no character)")
+            return false
+        end
+        task.wait(0.15) -- kasih server waktu register tool equip
     end
 
-    local u = fmtUUID(petUUID)
-    local short = tostring(petUUID):sub(1,8)
-
-    -- v12.3: TRY MULTI-PATTERN dulu tanpa hold-as-tool (avoid Steve proximity)
-    -- Banyak script lain pakai pattern dengan UUID langsung di FireServer
-    local patterns = {
-        {action="GivePet", args={targetPlayer, u}},
-        {action="GivePet", args={u, targetPlayer}},
-        {action="Gift",    args={targetPlayer, u}},
-        {action="Gift",    args={u, targetPlayer}},
-        {action="SendGift",args={targetPlayer, u}},
-    }
-
-    -- Pastiin pet di backpack (bukan garden)
-    local placed = findPlacedPetByUUID(petUUID)
-    if placed then
-        unequipPet(petUUID)
-        task.wait(0.15)
-    end
-
-    if not findPetInBackpack(petUUID) then
-        dbg("[gift] FAIL: pet "..short.." gak di backpack")
+    -- Step 3: fire GivePet dengan Player Instance
+    local ok, err = pcall(function()
+        giftRE:FireServer("GivePet", targetPlayer)
+    end)
+    if not ok then
+        dbg("[gift] FireServer error: "..tostring(err))
         return false
     end
 
-    -- Try tiap pattern, cek apakah pet hilang setelah fire
-    for i, p in ipairs(patterns) do
-        local ok = pcall(function()
-            giftRE:FireServer(p.action, table.unpack(p.args))
-        end)
-        if ok then
-            -- Wait sebentar, cek pet hilang dari backpack
-            task.wait(0.4)
+    -- Step 4: verify pet hilang dari Backpack DAN Character (max ~1.4s)
+    if petUUID then
+        for i = 1, 7 do
+            task.wait(0.2)
             if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
-                dbg("[gift] OK: "..short.." -> "..targetPlayer.Name.." (pattern "..i..": "..p.action..")")
+                dbg("[gift] OK: "..tostring(petUUID):sub(1,8).." -> "..targetPlayer.Name)
                 return true
             end
         end
-    end
-
-    -- Semua pattern gagal - pet masih di backpack. Fallback: hold-as-tool method (rawan Steve sell)
-    dbg("[gift] semua pattern direct fail, fallback ke hold-as-tool (HATI2 Steve)")
-    local item = holdPetAsTool(petUUID)
-    if not item then
-        dbg("[gift] FAIL: hold gagal "..short)
+        -- Cleanup: kalau gagal, unequip tool biar gak stuck di tangan
+        local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+        if hum then pcall(function() hum:UnequipTools() end) end
+        dbg("[gift] WARN: pet "..tostring(petUUID):sub(1,8).." masih ada (target reject?)")
         return false
     end
-    task.wait(0.12)
-    if not petInCharacter(petUUID) then
-        dbg("[gift] FAIL: hold gak register "..short)
-        return false
-    end
-    pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
-    for i = 1, 5 do
-        task.wait(0.15)
-        if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
-            dbg("[gift] OK (fallback): "..short.." -> "..targetPlayer.Name)
-            return true
-        end
-    end
-    -- Cleanup
-    local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-    if hum then pcall(function() hum:UnequipTools() end) end
-    dbg("[gift] FAIL: "..short.." gak ke-transfer")
-    return false
+    return true
 end
 
 -- ===== TRADE (PERSIS dari log: SendRequest -> AddItem looped) =====
-local function sendTradeToPlayer(targetName, petUUIDs, shouldContinue)
+local function sendTradeToPlayer(targetName, petUUIDs)
     if not tradeSendReqRE or not tradeAddItemRE then
         dbg("[trade] FAIL: TradeEvents remote gak ketemu")
         return false
@@ -512,34 +483,24 @@ local function sendTradeToPlayer(targetName, petUUIDs, shouldContinue)
     end
     dbg("[trade] SendRequest -> "..targetPlayer.Name)
 
-    task.wait(0.6) -- v12.0: 0.8 -> 0.6
+    task.wait(0.8)
 
     local added = 0
     for _, uuid in ipairs(uuidList) do
-        -- v12.0: early stop kalo callback return false
-        if shouldContinue and not shouldContinue() then
-            dbg("[trade] STOP requested ("..added.."/"..#uuidList..")")
-            break
-        end
         local u = fmtUUID(uuid)
-        -- v12.0: try multiple item type patterns (Pet utama, kalo gagal try Ticket/Item)
-        local types = {"Pet", "Ticket", "Item", "Tool"}
-        local fired = false
-        for _, itemType in ipairs(types) do
-            local ok2, err2 = pcall(function()
-                tradeAddItemRE:FireServer(itemType, u)
-            end)
-            if ok2 then
-                fired = true
-                dbg("[trade] AddItem("..itemType..") "..u:sub(1,9).."... ("..(added+1).."/"..#uuidList..")")
-                break
-            end
+        local ok2, err2 = pcall(function()
+            tradeAddItemRE:FireServer("Pet", u)
+        end)
+        if ok2 then
+            added = added + 1
+            dbg("[trade] AddItem "..u:sub(1,9).."... ("..added.."/"..#uuidList..")")
+        else
+            dbg("[trade] AddItem error: "..tostring(err2))
         end
-        if fired then added = added + 1 end
-        task.wait(0.25) -- v12.0: 0.4 -> 0.25
+        task.wait(0.4)
     end
 
-    dbg("[trade] DONE: "..added.."/"..#uuidList.." -> "..targetPlayer.Name)
+    dbg("[trade] DONE: "..added.."/"..#uuidList.." pet -> "..targetPlayer.Name)
     return added > 0
 end
 
@@ -2147,19 +2108,10 @@ autoSendTask = task.spawn(function()
         return list
     end
 
-    -- v12.1: tracking per slot biar cooldown setelah error
-    local slotErrorCount = {0,0,0}
-    local slotCooldownUntil = {0,0,0}
-
     while not scriptShutdown do
         for slotIdx=1,3 do
             if scriptShutdown then break end
             local slot=giftSlots[slotIdx]
-            -- Skip slot kalo lagi cooldown error
-            if slotCooldownUntil[slotIdx] > tick() then
-                if slotIdx == 3 then task.wait(1) end
-                goto continue_slot
-            end
             if slot and slot.target~="" and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
                 local matched=getPetsForSlot(slot)
                 if #matched>0 then
@@ -2167,11 +2119,10 @@ autoSendTask = task.spawn(function()
                         local unfavCount=0
                         for _,pet in ipairs(matched) do
                             if pet.fav then
-                                if not slot.autoUnfav or scriptShutdown then break end
                                 unfavoritePet(pet.uuid)
                                 print("[ZenxUnfav] slot "..slotIdx.." unfav "..pet.uuid)
                                 unfavCount=unfavCount+1
-                                task.wait(0.8) -- v12.1: 0.2 -> 0.8 buat hindari rate limit
+                                task.wait(0.2)
                             end
                         end
                         if unfavCount>0 and sendStatusLbl then
@@ -2192,57 +2143,23 @@ autoSendTask = task.spawn(function()
                         if slot.autoSendGift then
                             if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": gift "..#sendable.." -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
                             local okCount=0
-                            local sentCount=0
                             for _,uuid in ipairs(sendable) do
-                                if not slot.autoSendGift or scriptShutdown then
-                                    dbg("[autoGift] STOP - toggle OFF/shutdown ("..sentCount.."/"..#sendable..")")
-                                    break
-                                end
                                 if sendGiftToPlayer(slot.target,uuid) then okCount=okCount+1 end
-                                sentCount = sentCount + 1
-                                task.wait(0.1)
-                            end
-                            -- v12.1: kalo semua gagal di batch ini, kemungkinan target offline/error
-                            -- Cooldown 60 detik biar gak spam GivePet error
-                            if sentCount >= 3 and okCount == 0 then
-                                slotErrorCount[slotIdx] = slotErrorCount[slotIdx] + 1
-                                if slotErrorCount[slotIdx] >= 2 then
-                                    slotCooldownUntil[slotIdx] = tick() + 60
-                                    dbg("[autoGift] slot "..slotIdx.." cooldown 60s (gagal terus)")
-                                    if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx.." cooldown 60s (gift gagal)" sendStatusLbl.TextColor3=C.Red end
-                                    slotErrorCount[slotIdx] = 0
-                                end
-                            else
-                                slotErrorCount[slotIdx] = 0
+                                task.wait(0.25)
                             end
                             if sendStatusLbl then
-                                if not slot.autoSendGift then
-                                    sendStatusLbl.Text="Slot "..slotIdx.." gift STOP: "..okCount.."/"..sentCount.." OK"
-                                    sendStatusLbl.TextColor3=C.Gold
-                                else
-                                    sendStatusLbl.Text="Slot "..slotIdx.." gift: "..okCount.."/"..#sendable.." OK"
-                                    sendStatusLbl.TextColor3=okCount==#sendable and C.Teal or C.Gold
-                                end
+                                sendStatusLbl.Text="Slot "..slotIdx.." gift: "..okCount.."/"..#sendable.." OK"
+                                sendStatusLbl.TextColor3=okCount==#sendable and C.Teal or C.Gold
                             end
                         end
-                        if slot.autoSendTrade and not scriptShutdown then
-                            if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": trade "..#sendable.." -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
-                            local tradeOk = sendTradeToPlayer(slot.target, sendable, function() return slot.autoSendTrade and not scriptShutdown end)
-                            if not tradeOk then
-                                slotErrorCount[slotIdx] = slotErrorCount[slotIdx] + 1
-                                if slotErrorCount[slotIdx] >= 2 then
-                                    slotCooldownUntil[slotIdx] = tick() + 60
-                                    dbg("[autoTrade] slot "..slotIdx.." cooldown 60s")
-                                    if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx.." cooldown 60s (trade gagal)" sendStatusLbl.TextColor3=C.Red end
-                                    slotErrorCount[slotIdx] = 0
-                                end
-                            end
+                        if slot.autoSendTrade then
+                            if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": trade "..#sendable.." pet -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
+                            sendTradeToPlayer(slot.target, sendable)
                         end
                     end
                 end
                 task.wait(1)
             end
-            ::continue_slot::
         end
         task.wait(math.max(5,sendInterval))
     end
@@ -2254,192 +2171,172 @@ end)
 -- Gift: hook PetGiftingService:OnClientEvent
 -- ============================================
 pcall(function()
-    -- v11.9: aggressive trade hook - handle ALL stages (request, accept, confirm, finalize)
+    -- v9.3: Hook SEMUA RemoteEvent di TradeEvents folder + log everything
     local ge = RS:FindFirstChild("GameEvents")
     local te = ge and ge:FindFirstChild("TradeEvents")
     if te then
-        -- Collect semua trade remote
-        local allTradeRemotes = {}
-        local acceptableRemotes = {} -- yg bisa di-fire buat accept (filter out dangerous)
         for _, remote in ipairs(te:GetChildren()) do
             if remote:IsA("RemoteEvent") then
-                table.insert(allTradeRemotes, remote)
-                -- Whitelist: nama yg "accept-y", blacklist nama yg "send/cancel/reject"
-                local n = remote.Name:lower()
-                local isDangerous = n:find("cancel") or n:find("reject") or n:find("decline") or n:find("deny")
-                if not isDangerous then
-                    table.insert(acceptableRemotes, remote)
-                end
-            end
-        end
-        dbg("[autoAcc-trade] found "..#allTradeRemotes.." remotes ("..#acceptableRemotes.." acceptable)")
-
-        -- Per-remote cooldown biar gak spam loop
-        local lastFire = {}
-        local function tryAcceptAll(senderPlayer)
-            for _, r in ipairs(acceptableRemotes) do
-                local now = tick()
-                if (lastFire[r] or 0) + 0.3 < now then
-                    lastFire[r] = now
-                    -- Try multiple patterns biar nge-cover semua stage
-                    if senderPlayer then
-                        pcall(function() r:FireServer(senderPlayer, true) end)
-                        task.wait(0.02)
-                        pcall(function() r:FireServer(senderPlayer) end)
-                        task.wait(0.02)
+                local tradeConn = remote.OnClientEvent:Connect(function(...)
+                    if not autoAccTrade then return end
+                    local args = {...}
+                    -- Log apa yg fire (debug)
+                    local argDesc = {}
+                    for i=1, math.min(3, #args) do
+                        local a = args[i]
+                        if typeof(a) == "Instance" then
+                            table.insert(argDesc, "<"..a.ClassName..":"..a.Name..">")
+                        elseif type(a) == "table" then
+                            table.insert(argDesc, "<table>")
+                        else
+                            table.insert(argDesc, tostring(a):sub(1,30))
+                        end
                     end
-                    pcall(function() r:FireServer(true) end)
-                    task.wait(0.02)
-                    pcall(function() r:FireServer() end)
-                    task.wait(0.02)
-                end
-            end
-        end
+                    dbg("[autoAcc-trade] event '"..remote.Name.."' args=("..table.concat(argDesc,", ")..")")
 
-        -- Hook tiap remote: kapanpun event datang, fire accept ke semua acceptable remote
-        for _, remote in ipairs(allTradeRemotes) do
-            local tradeConn = remote.OnClientEvent:Connect(function(...)
-                if not autoAccTrade then return end
-                local args = {...}
-
-                -- Log
-                local argDesc = {}
-                for i=1, math.min(3, #args) do
-                    local a = args[i]
-                    if typeof(a) == "Instance" then table.insert(argDesc, "<"..a.ClassName..":"..a.Name..">")
-                    elseif type(a) == "table" then table.insert(argDesc, "<table>")
-                    else table.insert(argDesc, tostring(a):sub(1,30)) end
-                end
-                dbg("[autoAcc-trade] event '"..remote.Name.."' args=("..table.concat(argDesc,", ")..")")
-
-                -- Detect sender Player from args
-                local sender = nil
-                for _, a in ipairs(args) do
-                    if typeof(a) == "Instance" and a:IsA("Player") then sender = a break end
-                end
-
-                -- Spawn aggressive accept attempts (non-blocking)
-                task.spawn(function()
-                    tryAcceptAll(sender)
-                    if accStatusLbl then
-                        accStatusLbl.Text = sender and ("Trade "..sender.Name.." accept!") or "Trade event accept!"
-                        accStatusLbl.TextColor3 = C.Teal
-                        task.delay(2, function() if accStatusLbl then accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray end end)
+                    -- Coba accept dengan beberapa pattern (whatever works)
+                    if tradeRespondRE then
+                        local arg1 = args[1]
+                        -- Pattern 1: Player Instance + true
+                        if typeof(arg1) == "Instance" and arg1:IsA("Player") then
+                            pcall(function() tradeRespondRE:FireServer(arg1, true) end)
+                            dbg("[autoAcc-trade] tried RespondRequest("..arg1.Name..", true)")
+                            if accStatusLbl then
+                                accStatusLbl.Text = "Trade dari "..arg1.Name.." -> accept!"
+                                accStatusLbl.TextColor3 = C.Teal
+                                task.delay(2, function() if accStatusLbl then accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray end end)
+                            end
+                        -- Pattern 2: numeric/string ID + true
+                        elseif arg1 ~= nil then
+                            pcall(function() tradeRespondRE:FireServer(arg1, true) end)
+                            dbg("[autoAcc-trade] tried RespondRequest("..tostring(arg1)..", true)")
+                        -- Pattern 3: just true
+                        else
+                            pcall(function() tradeRespondRE:FireServer(true) end)
+                            dbg("[autoAcc-trade] tried RespondRequest(true)")
+                        end
                     end
                 end)
-            end)
-            table.insert(connections, tradeConn)
+                table.insert(connections, tradeConn)
+            end
         end
-        dbg("[autoAcc] aggressive trade hook installed (multi-stage support)")
+        dbg("[autoAcc] trade hooks installed di SEMUA TradeEvents remote")
     else
         dbg("[autoAcc] WARN: TradeEvents folder gak ketemu")
     end
 
-    -- v11.9: aggressive gift accept hook
+    -- v10.2: gift accept hook — non-blocking + multi-pattern accept + log everything
+    -- Hook SEMUA RemoteEvent yg related ke gifting
     local giftRemotes = {}
     if giftRE and giftRE:IsA("RemoteEvent") then table.insert(giftRemotes, giftRE) end
-    -- Cari folder PetGiftingService biar dapet semua remote
-    local pgsParent = giftRE and giftRE.Parent
-    if pgsParent then
-        for _, r in ipairs(pgsParent:GetChildren()) do
+    -- Cari semua remote di PetGiftingService folder (kalo ada multiple)
+    local pgs = RS:FindFirstChild("PetGiftingService", true)
+    if pgs and pgs:IsA("Folder") then
+        for _, r in ipairs(pgs:GetChildren()) do
+            if r:IsA("RemoteEvent") and r ~= giftRE then table.insert(giftRemotes, r) end
+        end
+    elseif pgs and pgs.Parent and pgs.Parent:IsA("Folder") then
+        for _, r in ipairs(pgs.Parent:GetChildren()) do
             if r:IsA("RemoteEvent") and r ~= giftRE then table.insert(giftRemotes, r) end
         end
     end
-    -- Cari GameEvents.GiftingEvents / GiftEvents
+    -- Cari folder GameEvents.GiftingEvents kalo ada
     local ge = RS:FindFirstChild("GameEvents")
-    for _, fname in ipairs({"GiftingEvents", "GiftEvents"}) do
-        local f = ge and ge:FindFirstChild(fname)
-        if f then
-            for _, r in ipairs(f:GetChildren()) do
-                if r:IsA("RemoteEvent") then
-                    local already = false
-                    for _, gr in ipairs(giftRemotes) do if gr == r then already = true break end end
-                    if not already then table.insert(giftRemotes, r) end
-                end
-            end
+    local giftFolder = ge and (ge:FindFirstChild("GiftingEvents") or ge:FindFirstChild("GiftEvents"))
+    if giftFolder then
+        for _, r in ipairs(giftFolder:GetChildren()) do
+            if r:IsA("RemoteEvent") and r ~= giftRE then table.insert(giftRemotes, r) end
         end
     end
 
-    -- Filter: skip remote yg dangerous (cancel/reject/decline)
-    local acceptGiftRemotes = {}
-    for _, r in ipairs(giftRemotes) do
-        local n = r.Name:lower()
-        if not (n:find("cancel") or n:find("reject") or n:find("decline") or n:find("deny")) then
-            table.insert(acceptGiftRemotes, r)
-        end
-    end
-    dbg("[autoAcc-gift] found "..#giftRemotes.." remotes ("..#acceptGiftRemotes.." acceptable)")
-
-    local lastFireG = {}
+    -- Counter biar status update gak overlap
     local giftAccCount = 0
-    local function tryAcceptAllGift(senderPlayer, args)
-        for _, r in ipairs(acceptGiftRemotes) do
-            local now = tick()
-            if (lastFireG[r] or 0) + 0.3 < now then
-                lastFireG[r] = now
-                -- Pattern: AcceptGift action + sender
-                pcall(function() r:FireServer("AcceptGift", senderPlayer) end)
-                task.wait(0.02)
-                pcall(function() r:FireServer("Accept", senderPlayer) end)
-                task.wait(0.02)
-                pcall(function() r:FireServer("AcceptIncoming", senderPlayer) end)
-                task.wait(0.02)
-                -- Pattern: just sender + true
-                if senderPlayer then
-                    pcall(function() r:FireServer(senderPlayer, true) end)
-                    task.wait(0.02)
-                end
-                -- Pattern: echo back args
-                if args and #args > 0 then
-                    pcall(function() r:FireServer(unpack(args)) end)
-                    task.wait(0.02)
-                end
-                -- Pattern: just true
-                pcall(function() r:FireServer(true) end)
-                task.wait(0.02)
-            end
-        end
-    end
 
     for _, remote in ipairs(giftRemotes) do
         local conn = remote.OnClientEvent:Connect(function(...)
             if not autoAccGift then return end
             local args = {...}
 
+            -- LOG semua arg (debug F9)
             local argDesc = {}
             for i = 1, math.min(4, #args) do
                 local a = args[i]
-                if typeof(a) == "Instance" then table.insert(argDesc, "<"..a.ClassName..":"..a.Name..">")
-                elseif type(a) == "table" then table.insert(argDesc, "<table>")
-                else table.insert(argDesc, tostring(a):sub(1, 40)) end
+                if typeof(a) == "Instance" then
+                    table.insert(argDesc, "<"..a.ClassName..":"..a.Name..">")
+                elseif type(a) == "table" then
+                    table.insert(argDesc, "<table>")
+                else
+                    table.insert(argDesc, tostring(a):sub(1, 40))
+                end
             end
             dbg("[autoAcc-gift] event '"..remote.Name.."' args=("..table.concat(argDesc, ", ")..")")
 
-            -- Detect sender Player
-            local sender = nil
-            for _, a in ipairs(args) do
-                if typeof(a) == "Instance" and a:IsA("Player") then sender = a break end
-            end
-
+            -- Coba accept dengan banyak pattern (whatever yg sukses)
+            -- Non-blocking: spawn task biar handler langsung return
             task.spawn(function()
-                tryAcceptAllGift(sender, args)
-                giftAccCount = giftAccCount + 1
-                local myCount = giftAccCount
-                if accStatusLbl then
-                    accStatusLbl.Text = "Gift accept #"..myCount..(sender and (" ("..sender.Name..")") or "")
-                    accStatusLbl.TextColor3 = C.Teal
-                end
-                task.delay(2.5, function()
-                    if accStatusLbl and giftAccCount == myCount then
-                        accStatusLbl.Text = "Accept: idle"
-                        accStatusLbl.TextColor3 = C.Gray
+                local action = args[1]
+                local actStr = action and tostring(action):lower() or ""
+                local rest = {}
+                for i = 2, #args do rest[i-1] = args[i] end
+
+                -- Heuristik: terima kalau action string punya kata-kata gift-ish
+                local isIncoming = actStr:find("prompt") or actStr:find("incoming") or actStr:find("offer")
+                                or actStr:find("request") or actStr:find("send") or actStr:find("gift")
+                                or actStr == "" -- fallback: gak ada action string, coba aja
+                                or typeof(action) == "Instance" -- arg pertama Player Instance
+
+                if isIncoming then
+                    -- Try multiple accept patterns (urut dari paling spesifik)
+                    local tried = {}
+                    pcall(function()
+                        remote:FireServer("AcceptGift", unpack(rest))
+                        table.insert(tried, "AcceptGift")
+                    end)
+                    task.wait(0.05)
+                    pcall(function()
+                        remote:FireServer("Accept", unpack(rest))
+                        table.insert(tried, "Accept")
+                    end)
+                    task.wait(0.05)
+                    pcall(function()
+                        remote:FireServer("AcceptIncoming", unpack(rest))
+                        table.insert(tried, "AcceptIncoming")
+                    end)
+                    task.wait(0.05)
+                    -- Pattern: fire dengan args yg sama (echo back)
+                    pcall(function()
+                        remote:FireServer(unpack(args))
+                        table.insert(tried, "echo")
+                    end)
+                    -- Pattern: kalau arg pertama Player, fire balik dengan Player + true
+                    if typeof(action) == "Instance" and action:IsA("Player") then
+                        pcall(function()
+                            remote:FireServer(action, true)
+                            table.insert(tried, "Player+true")
+                        end)
                     end
-                end)
+
+                    dbg("[autoAcc-gift] tried patterns: "..table.concat(tried, ", "))
+
+                    -- Update UI status (non-blocking lewat counter)
+                    giftAccCount = giftAccCount + 1
+                    local myCount = giftAccCount
+                    if accStatusLbl then
+                        accStatusLbl.Text = "Gift coba accept (#"..myCount..")"
+                        accStatusLbl.TextColor3 = C.Teal
+                    end
+                    task.delay(2.5, function()
+                        if accStatusLbl and giftAccCount == myCount then
+                            accStatusLbl.Text = "Accept: idle"
+                            accStatusLbl.TextColor3 = C.Gray
+                        end
+                    end)
+                end
             end)
         end)
         table.insert(connections, conn)
     end
-    dbg("[autoAcc] aggressive gift hooks installed di "..#giftRemotes.." remote(s)")
+    dbg("[autoAcc] gift hooks installed di "..#giftRemotes.." remote(s)")
 end)
 
 -- ============================================
@@ -3091,4 +2988,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.4: em-dash cleaned, harusnya bisa execute")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.8: invShow cuma total + pills KG range, gak ada pet list")
