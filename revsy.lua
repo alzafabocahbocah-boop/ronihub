@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.17"
+local SCRIPT_VERSION="v12.18"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -808,35 +808,78 @@ donesLbl.Font = Enum.Font.GothamBold
 
 task.spawn(function()
     while donesLbl and donesLbl.Parent and not scriptShutdown do
-        -- v12.16: 3 stats - Total target pet, Jadi (age >= toAge), Kurang (sisa)
+        -- v12.18: 3 stats - cek BACKPACK + GARDEN (pet equipped)
+        -- Tanpa filter team (pet team yg lagi level harus tetep ke-count)
+        -- Pakai dedupe by UUID biar gak double-count
         local total = 0
         local done = 0
         local remaining = 0
+        local seenUUIDs = {}
+
+        -- Backpack pets
         local bp = player:FindFirstChild("Backpack")
         if bp then
             for _, item in pairs(bp:GetChildren()) do
                 if isPet(item) then
                     local name = getPetName(item)
                     local uuid = getPetUUID(item)
-                    -- Count pet yg match target dan bukan tim/favorite
-                    if isTargetPet(name) and not isFavorite(item) and not (uuid and teamPetUUIDs[tostring(uuid)]) then
-                        total = total + 1
-                        local age = getAgeFromKG(item)
-                        if age and age >= toAge then
-                            done = done + 1
-                        else
-                            remaining = remaining + 1
+                    local uuidStr = uuid and tostring(uuid) or nil
+                    if isTargetPet(name) and not isFavorite(item) then
+                        if not (uuidStr and seenUUIDs[uuidStr]) then
+                            if uuidStr then seenUUIDs[uuidStr] = true end
+                            total = total + 1
+                            local age = getAgeFromKG(item)
+                            if age and age >= toAge then
+                                done = done + 1
+                            else
+                                remaining = remaining + 1
+                            end
                         end
                     end
                 end
             end
         end
+
+        -- Garden/equipped pets (ActivePetUI - source of truth untuk pet equipped)
+        local pg = player:FindFirstChild("PlayerGui")
+        local activePetUI = pg and pg:FindFirstChild("ActivePetUI")
+        if activePetUI then
+            for _, d in ipairs(activePetUI:GetDescendants()) do
+                if d:IsA("Frame") or d:IsA("ImageLabel") then
+                    local n = d.Name:gsub("^{",""):gsub("}$","")
+                    if #n >= 20 and n:find("-") then  -- looks like UUID
+                        if not seenUUIDs[n] then
+                            -- check if has PET_AGE child (it's a pet frame)
+                            local ageLbl = d:FindFirstChild("PET_AGE", true)
+                            if ageLbl then
+                                seenUUIDs[n] = true
+                                -- Get name from UI
+                                local petTypeLbl = d:FindFirstChild("PET_NAME", true) or d:FindFirstChild("PET_TYPE", true)
+                                local petName = petTypeLbl and petTypeLbl.Text or ""
+                                if petName == "" or isTargetPet(petName) then
+                                    total = total + 1
+                                    local txt = ""
+                                    pcall(function() txt = ageLbl.Text end)
+                                    local age = tonumber((txt or ""):match("(%d+)"))
+                                    if age and age >= toAge then
+                                        done = done + 1
+                                    else
+                                        remaining = remaining + 1
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
         if donesLbl and donesLbl.Parent then
             donesLbl.Text = "Total:"..total.." Jadi:"..done.." Kurang:"..remaining
             if total == 0 then
                 donesLbl.TextColor3 = C.Gray
             elseif remaining == 0 then
-                donesLbl.TextColor3 = C.Green  -- semua selesai
+                donesLbl.TextColor3 = C.Green
             else
                 donesLbl.TextColor3 = C.Teal
             end
@@ -3038,4 +3081,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.17: status display cek placed pet juga (pet equipped di garden)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.18: Total/Jadi/Kurang cek backpack + ActivePetUI (pet equipped + dedupe)")
