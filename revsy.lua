@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.20"
+local SCRIPT_VERSION="v12.21"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -307,11 +307,16 @@ local function getPlacedPetAge(placedModel)
 end
 
 local function findPetInBackpack(uuid)
-    local bp=player:FindFirstChild("Backpack") if not bp then return nil end
-    for _,item in pairs(bp:GetChildren()) do
-        if isPet(item) then
-            local u=getPetUUID(item)
-            if u and tostring(u)==tostring(uuid) then return item end
+    -- v12.21: cek Backpack DAN Character (pet equipped pindah ke Character)
+    local locations = {player:FindFirstChild("Backpack"), player.Character}
+    for _, loc in ipairs(locations) do
+        if loc then
+            for _,item in pairs(loc:GetChildren()) do
+                if isPet(item) then
+                    local u=getPetUUID(item)
+                    if u and tostring(u)==tostring(uuid) then return item end
+                end
+            end
         end
     end
     return nil
@@ -2993,15 +2998,32 @@ local function doStart()
                     if item then age=getAgeFromKG(item) end
                 end
                 if not age then
-                    -- v12.17: cek placed pet di garden (pet ke-equip)
                     local placed=findPlacedPetByUUID(uuid)
                     if placed then age=getPlacedPetAge(placed) end
                 end
                 if not age then
-                    -- v12.17: ultimate fallback - estimate dari item KG kalo ada di backpack
+                    -- v12.21: KG estimate dari item di Backpack ATAU Character
                     local item=findPetInBackpack(uuid)
                     if item then
                         local kg=getKG(item)
+                        if kg then
+                            -- Pakai cache maxKG kalo ada
+                            local maxKG = getMaxKGForPet(getPetName(item))
+                            if maxKG and maxKG > 0 then
+                                age = math.max(1, math.min(100, math.floor(kg * 11 / maxKG - 10)))
+                            elseif kg >= 20 then
+                                age = 100
+                            else
+                                age = 1
+                            end
+                        end
+                    end
+                end
+                if not age then
+                    -- v12.21: last resort - get KG from placed model name (kalo nama-nya bukan UUID)
+                    local placed=findPlacedPetByUUID(uuid)
+                    if placed and placed.Name and not placed.Name:find("-") then
+                        local kg = tonumber(placed.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]"))
                         if kg and kg >= 20 then age = 100
                         elseif kg then age = 1 end
                     end
@@ -3107,4 +3129,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.20: fix scope issue - count task.spawn moved after isTargetPet (Total/Jadi/Kurang sekarang work)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.21: + findPetInBackpack cek Character (pet equipped) + age fallback lebih aggresif (Everchanted)")
