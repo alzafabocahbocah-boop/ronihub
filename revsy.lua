@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v11.6"
+local SCRIPT_VERSION="v11.7"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + toAge scope fix DONE)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + invShow simplified header)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -934,14 +934,8 @@ local function _doBuildInvShow()
         end
     end
 
-    -- Header dengan info diagnostik
-    if baseCount > 0 then
-        local avgBase = sumBase / baseCount
-        invHeaderLbl.Text = string.format("Total:%d Jadi:%d(%d+) | base min=%.1f max=%.1f avg=%.1f | nil:%d outRange:%d",
-            #petsList, doneCount, toAge, minBase, maxBase, avgBase, nilBaseCount, outOfRangeCount)
-    else
-        invHeaderLbl.Text = "Total:"..#petsList.." pet | base GAK ke-compute (semua pet age=nil/kg=nil)"
-    end
+    -- v11.7: cuma total pet, gak perlu diagnostic
+    invHeaderLbl.Text = "Total: "..#petsList.." pet"
 
     for i, lblWidget in ipairs(kgPills) do
         local r = kgRanges[i]
@@ -3022,4 +3016,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.6: toAge declared at line ~125, FIX scope error untuk real")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.7: invShow header simplified ke `Total: X pet`")
