@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v10.5"
+local SCRIPT_VERSION="v10.8"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: parallel + auto-equip + first load = mini Z)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + complete shutdown on close)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -209,7 +209,7 @@ end
 local function swapPet(uuid)
     local u=fmtUUID(uuid)
     pcall(function() equipRE:FireServer("UnequipPet",u) end)
-    task.wait(0.03)
+    task.wait(0.02)
     pcall(function() equipRE:FireServer("EquipPet",u,nil) end)
 end
 
@@ -762,7 +762,7 @@ donesLbl.Position = UDim2.new(0, 5, 0, 0)
 donesLbl.Font = Enum.Font.GothamBold
 
 task.spawn(function()
-    while donesLbl and donesLbl.Parent do
+    while donesLbl and donesLbl.Parent and not scriptShutdown do
         local count = 0
         local bp = player:FindFirstChild("Backpack")
         if bp then
@@ -961,100 +961,6 @@ buildTimList=function()
         saTog.TextColor3=showAllPets and C.Teal or C.Gray
         saTogStroke.Color=showAllPets and C.Teal or C.Dim
         buildTimList()
-    end)
-
-    local scanBtn=btn(areas[1],"Scan Attr Pet (debug)",8,C.Card,C.Gray)
-    scanBtn.Size=UDim2.new(1,0,0,20) scanBtn.LayoutOrder=2 stroke(scanBtn,C.Dim,1)
-    scanBtn.MouseButton1Click:Connect(function()
-        local bp=player:FindFirstChild("Backpack")
-        if not bp then dbg("Backpack tidak ada") return end
-        dbg("=== SCAN PET ATTRIBUTES ===")
-        local cnt=0
-        for _,item in pairs(bp:GetChildren()) do
-            if isPet(item) and cnt<5 then
-                cnt=cnt+1
-                dbg("Pet "..cnt..": "..item.Name)
-                local attrs=item:GetAttributes()
-                local hasAttrs=false
-                for k,v in pairs(attrs) do
-                    hasAttrs=true
-                    dbg("  ["..k.."] = "..tostring(v).." ("..type(v)..")")
-                end
-                if not hasAttrs then dbg("  (no attributes)") end
-            end
-        end
-        dbg("=== END SCAN. Kasih ke Claude. ===")
-    end)
-
-    local scanGardenBtn=btn(areas[1],"Scan Garden (debug)",8,C.Card,C.Gray)
-    scanGardenBtn.Size=UDim2.new(1,0,0,20) scanGardenBtn.LayoutOrder=3 stroke(scanGardenBtn,C.Dim,1)
-    scanGardenBtn.MouseButton1Click:Connect(function()
-        dbg("=== SCAN GARDEN STRUCTURE ===")
-        local petsPhys=workspace:FindFirstChild("PetsPhysical")
-        if not petsPhys then dbg("PetsPhysical GAK ADA di workspace") return end
-        dbg("PetsPhysical children:")
-        for _,c in ipairs(petsPhys:GetChildren()) do
-            dbg("  ["..c.ClassName.."] "..c.Name)
-        end
-        local petMover=petsPhys:FindFirstChild("PetMover")
-        if petMover then
-            dbg("PetMover children ("..#petMover:GetChildren().." items):")
-            local n=0
-            for _,c in ipairs(petMover:GetChildren()) do
-                n=n+1
-                if n<=10 then
-                    local attrUuid="-"
-                    pcall(function() local a=c:GetAttribute("PET_UUID") if a then attrUuid=tostring(a) end end)
-                    dbg("  "..n..". ["..c.ClassName.."] "..c.Name.." attr.PET_UUID="..attrUuid)
-                end
-            end
-            if n>10 then dbg("  ... ("..(n-10).." pet lain)") end
-        else
-            dbg("PetMover GAK ADA di PetsPhysical")
-        end
-        dbg("=== END SCAN. Kasih ke Claude kalo pickup gagal. ===")
-    end)
-
-    local scanUIBtn=btn(areas[1],"Scan UI Age (debug)",8,C.Card,C.Gray)
-    scanUIBtn.Size=UDim2.new(1,0,0,20) scanUIBtn.LayoutOrder=4 stroke(scanUIBtn,C.Dim,1)
-    scanUIBtn.MouseButton1Click:Connect(function()
-        dbg("=== SCAN UI AGE DEBUG ===")
-        local pg=player:FindFirstChild("PlayerGui")
-        if not pg then dbg("PlayerGui GAK ADA") return end
-        local activePetUI=pg:FindFirstChild("ActivePetUI")
-        if not activePetUI then dbg("ActivePetUI GAK ADA") return end
-        local ageLabels={}
-        for _,d in ipairs(activePetUI:GetDescendants()) do
-            if d.Name=="PET_AGE" and d:IsA("TextLabel") then
-                table.insert(ageLabels,d)
-            end
-        end
-        dbg("Found "..#ageLabels.." PET_AGE TextLabel(s)")
-        for i,lbl in ipairs(ageLabels) do
-            if i<=10 then
-                local txt=""
-                pcall(function() txt=lbl.Text end)
-                dbg("--- PET_AGE ["..i.."] text='"..txt.."' path="..lbl:GetFullName():sub(-100))
-                local p=lbl.Parent
-                local depth=0
-                while p and p~=activePetUI and depth<8 do
-                    dbg("  parent ["..depth.."]: ["..p.ClassName.."] '"..p.Name.."'")
-                    p=p.Parent
-                    depth=depth+1
-                end
-            end
-        end
-        dbg("--- Test currentLevelingUUIDs ---")
-        local cnt=0
-        for uuid,_ in pairs(currentLevelingUUIDs) do
-            cnt=cnt+1
-            local age=getAgeFromUI(uuid)
-            local nm=getPetNameFromUI(uuid) or "(no nick)"
-            local tp=getPetTypeFromUI(uuid) or "(no type)"
-            dbg("  uuid="..tostring(uuid):sub(1,16).."... age="..tostring(age).." name='"..nm.."' type='"..tp.."'")
-        end
-        if cnt==0 then dbg("  (currentLevelingUUIDs kosong, pencet START dulu)") end
-        dbg("=== END SCAN UI ===")
     end)
 
     div(areas[1],1)
@@ -1982,7 +1888,10 @@ end
 -- ============================================
 -- AUTO SEND LOOP (FIXED v8.2: trade pakai array, bukan single uuid)
 -- ============================================
-task.spawn(function()
+local scriptShutdown = false
+local autoSendTask = nil
+local connections = {}  -- track event connections biar bisa disconnect pas close
+autoSendTask = task.spawn(function()
     local function getPetsForSlot(slot)
         local list={}
         local bp=player:FindFirstChild("Backpack")
@@ -2008,8 +1917,9 @@ task.spawn(function()
         return list
     end
 
-    while true do
+    while not scriptShutdown do
         for slotIdx=1,3 do
+            if scriptShutdown then break end
             local slot=giftSlots[slotIdx]
             if slot and slot.target~="" and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
                 local matched=getPetsForSlot(slot)
@@ -2076,7 +1986,7 @@ pcall(function()
     if te then
         for _, remote in ipairs(te:GetChildren()) do
             if remote:IsA("RemoteEvent") then
-                remote.OnClientEvent:Connect(function(...)
+                local tradeConn = remote.OnClientEvent:Connect(function(...)
                     if not autoAccTrade then return end
                     local args = {...}
                     -- Log apa yg fire (debug)
@@ -2116,6 +2026,7 @@ pcall(function()
                         end
                     end
                 end)
+                table.insert(connections, tradeConn)
             end
         end
         dbg("[autoAcc] trade hooks installed di SEMUA TradeEvents remote")
@@ -2151,7 +2062,7 @@ pcall(function()
     local giftAccCount = 0
 
     for _, remote in ipairs(giftRemotes) do
-        remote.OnClientEvent:Connect(function(...)
+        local conn = remote.OnClientEvent:Connect(function(...)
             if not autoAccGift then return end
             local args = {...}
 
@@ -2232,6 +2143,7 @@ pcall(function()
                 end
             end)
         end)
+        table.insert(connections, conn)
     end
     dbg("[autoAcc] gift hooks installed di "..#giftRemotes.." remote(s)")
 end)
@@ -2394,45 +2306,62 @@ local function pollerShouldRun()
     return false
 end
 
--- v10.3: parallel check per-pet biar invoke server ke semua pet jalan bareng (gak sequential)
+-- v10.6: adaptive parallel - sleep proportional ke cooldown remaining
+-- Jadi pet yg cooldown masih lama (5s) gak invoke server tiap 25ms; cuma rapid polling pas mendekati 0
 local checkingPet = {}
+local nextCheckAt = {}  -- per-uuid: tick() kapan boleh check lagi
 
 startGlobalPoller=function()
     if pollerTask then return end
     if not pollerShouldRun() then return end
     pollerTask=task.spawn(function()
-        dbg("[poller] global poller START (parallel mode)")
+        dbg("[poller] global poller START (adaptive parallel)")
         local cycles=0
         while pollerShouldRun() do
             cycles=cycles+1
+            local now = tick()
             for uuid,cfg in pairs(swapPerPet) do
                 if cfg.enabled and not currentLevelingUUIDs[uuid] and not checkingPet[uuid] then
-                    -- Spawn parallel check: gak block iterasi pet lain
-                    checkingPet[uuid] = true
-                    task.spawn(function()
-                        local t = getPetTime(uuid)
-                        if t ~= nil and t <= 0 then
-                            local last = lastSwap[uuid] or 0
-                            if tick() - last >= 0.5 then
-                                local info = swapPetInfoCache[uuid] or teamPetInfoCache[uuid]
-                                local nm = (info and info.name) or "?"
-                                if cycles <= 20 then
-                                    dbg(string.format("[swap] %s Time=%.1f -> SWAP", nm:sub(1,12), t))
+                    -- Skip kalo belum waktunya check (adaptive)
+                    if not nextCheckAt[uuid] or now >= nextCheckAt[uuid] then
+                        checkingPet[uuid] = true
+                        task.spawn(function()
+                            local t = getPetTime(uuid)
+                            if t == nil then
+                                -- Pet belum di-track (mungkin baru di-equip); cek lagi 0.3s
+                                nextCheckAt[uuid] = tick() + 0.3
+                            elseif t <= 0 then
+                                local last = lastSwap[uuid] or 0
+                                if tick() - last >= 0.25 then
+                                    local info = swapPetInfoCache[uuid] or teamPetInfoCache[uuid]
+                                    local nm = (info and info.name) or "?"
+                                    if cycles <= 20 then
+                                        dbg(string.format("[swap] %s Time=%.1f -> SWAP", nm:sub(1,12), t))
+                                    end
+                                    swapPet(uuid)
+                                    lastSwap[uuid] = tick()
                                 end
-                                swapPet(uuid)
-                                lastSwap[uuid] = tick()
+                                nextCheckAt[uuid] = tick() + 0.05
+                            elseif t > 2 then
+                                -- Cooldown masih jauh - sleep lama, save server invokes
+                                nextCheckAt[uuid] = tick() + math.min(t * 0.6, 4)
+                            elseif t > 0.5 then
+                                -- Mendekati - polling 100ms
+                                nextCheckAt[uuid] = tick() + 0.1
+                            else
+                                -- Hampir 0 - rapid polling 30ms biar miss ke-deteksi cepet
+                                nextCheckAt[uuid] = tick() + 0.03
                             end
-                        end
-                        checkingPet[uuid] = nil
-                    end)
+                            checkingPet[uuid] = nil
+                        end)
+                    end
                 end
             end
-            if cycles%200==0 then
+            if cycles%500==0 then
                 local active,ready,idle,skipped=0,0,0,0
                 for uuid,cfg in pairs(swapPerPet) do
                     if cfg.enabled then
-                        if currentLevelingUUIDs[uuid] then
-                            skipped=skipped+1
+                        if currentLevelingUUIDs[uuid] then skipped=skipped+1
                         else
                             local t=getPetTime(uuid)
                             if t==nil then idle=idle+1
@@ -2443,10 +2372,11 @@ startGlobalPoller=function()
                 end
                 dbg(string.format("[alive] cycle=%d active=%d ready=%d idle=%d skip=%d",cycles,active,ready,idle,skipped))
             end
-            task.wait(0.025) -- v10.3: 50ms -> 25ms
+            task.wait(0.015) -- main loop 15ms (cuma dispatch, kerjaan berat di task.spawn)
         end
         pollerTask=nil
-        checkingPet={} -- cleanup
+        checkingPet={}
+        nextCheckAt={}
         dbg("[poller] global poller STOP")
     end)
 end
@@ -2458,6 +2388,7 @@ local function stopAllSwaps()
     end
     lastSwap={}
     checkingPet={}
+    nextCheckAt={}
 end
 
 local function startSwapForPet(uuid)
@@ -2797,6 +2728,10 @@ closeBtn.MouseButton1Click:Connect(function()
     noBtn.Size=UDim2.new(0,120,0,28) noBtn.Position=UDim2.new(0.5,10,1,-40) noBtn.ZIndex=11 stroke(noBtn,C.Dim,1.5)
     noBtn.MouseButton1Click:Connect(function() overlay:Destroy() end)
     yaBtn.MouseButton1Click:Connect(function()
+        -- v10.8: COMPLETE shutdown - kill semua task & connection
+        scriptShutdown = true
+
+        -- 1. Reset semua toggle state
         for _,slot in ipairs(giftSlots) do
             slot.autoSendGift=false slot.autoSendTrade=false slot.autoUnfav=false
         end
@@ -2804,14 +2739,26 @@ closeBtn.MouseButton1Click:Connect(function()
         for _,cfg in pairs(swapPerPet) do
             cfg.enabled=false
         end
+
+        -- 2. Cancel semua background task
         stopAllSwaps()
+        if teamKeeperTask then pcall(task.cancel, teamKeeperTask) teamKeeperTask=nil end
+        if swapKeeperTask then pcall(task.cancel, swapKeeperTask) swapKeeperTask=nil end
+        if autoSendTask then pcall(task.cancel, autoSendTask) autoSendTask=nil end
         if isAR then stopAR() end
         if isRunning then doStop("Closed") end
+
+        -- 3. Disconnect semua event connection
+        for _, conn in ipairs(connections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        connections = {}
+
         save()
-        task.wait(0.3)
+        task.wait(0.2)
         sg:Destroy()
         if playerGui:FindFirstChild("ZenxShowBtn") then playerGui.ZenxShowBtn:Destroy() end
-        print("[ZenxLvl] Closed - all activity stopped")
+        print("[ZenxLvl] Closed - SEMUA fitur dimatikan (task cancelled, connections disconnected)")
     end)
 end)
 
@@ -2850,4 +2797,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.5: first load = mini Z (klik buat buka)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.8: close = full shutdown (cancel semua task + disconnect connection)")
