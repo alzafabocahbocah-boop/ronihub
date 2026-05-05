@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v11.3"
+local SCRIPT_VERSION="v11.4"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar + baseKG diagnostic)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + invShow with pcall error display)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -867,15 +867,17 @@ corner(invScroll, 7) stroke(invScroll, C.Dim, 1.2)
 mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0, 2), Parent=invScroll})
 mk("UIPadding", {PaddingTop=UDim.new(0,4), PaddingBottom=UDim.new(0,4), PaddingLeft=UDim.new(0,4), PaddingRight=UDim.new(0,4), Parent=invScroll})
 
-local function buildInvShow()
+local function _doBuildInvShow()
     for _,c in ipairs(invScroll:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
     end
+    print("[invShow] start")
     local bp = player:FindFirstChild("Backpack")
     if not bp then
         invHeaderLbl.Text = "Backpack gak ada"
         return
     end
+    print("[invShow] bp ok, kids="..#bp:GetChildren())
 
     -- v11.3: rebuild maxKG cache dulu (untuk pet yg gak punya [Age N] di nama)
     pcall(buildMaxKGCache)
@@ -952,6 +954,18 @@ local function buildInvShow()
         nl.Size = UDim2.new(1, -10, 1, 0)
         nl.Position = UDim2.new(0, 6, 0, 0)
     end
+    print("[invShow] done, rendered "..#petsList.." rows")
+end
+
+-- Wrapper dengan pcall biar error visible di header
+local function buildInvShow()
+    local ok, err = pcall(_doBuildInvShow)
+    if not ok then
+        local errStr = tostring(err)
+        print("[invShow] ERROR: "..errStr)
+        invHeaderLbl.Text = "ERR: "..errStr:sub(1,90)
+        invHeaderLbl.TextColor3 = C.Red
+    end
 end
 
 invRefreshBtn.MouseButton1Click:Connect(buildInvShow)
@@ -983,6 +997,7 @@ local function switchSection(idx)
         stopBtn.Visible = false
         donesPanel.Visible = false
         invShowGroup.Visible = true
+        invHeaderLbl.TextColor3 = C.Teal -- reset color in case prev error
         buildInvShow()
     end
 end
@@ -3001,4 +3016,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.3: header tampilin min/max/avg baseKG + nil/outRange count")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.4: invShow pcall - error tampil di header + console log")
