@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.3 (Small added)"
+local SCRIPT_VERSION = "v3.5 (+Semi Titanic)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -43,14 +43,11 @@ local C = {
 -- v3.0: WEIGHT CATEGORIES dari game.guide
 -- Pakai CURRENT KG (bukan baseKG) buat kategorisasi
 local CATEGORIES = {
-    {name="Small",     short="Sm",  min=0,    max=2,    color=C.Blue},
-    {name="Large",     short="Lg",  min=2,    max=3,    color=C.Cyan},
-    {name="Semi Huge", short="SH",  min=3,    max=5,    color=C.Pink},
-    {name="Huge",      short="Hg",  min=5,    max=7,    color=C.Purple},
-    {name="Semi Tit",  short="ST",  min=7,    max=7.5,  color=C.Orange},
-    {name="Titanic",   short="Ti",  min=7.5,  max=9,    color=C.Red},
-    {name="Godly",     short="Gd",  min=9,    max=10.5, color=C.Gold},
-    {name="Colossal",  short="Col", min=10.5, max=math.huge, color=C.Green},
+    {name="Small",     short="Sm",  min=0, max=2, color=C.Blue},
+    {name="Large",     short="Lg",  min=2, max=3, color=C.Cyan},
+    {name="Semi Huge", short="SH",  min=3, max=5, color=C.Pink},
+    {name="Huge",      short="Hg",  min=5, max=6, color=C.Purple},
+    {name="Semi Tit",  short="ST",  min=6, max=math.huge, color=C.Orange},
 }
 
 local function categorize(kg)
@@ -215,18 +212,14 @@ stroke(invRefreshBtn, C.Teal, 1.2)
 
 -- v3.0: WEIGHT CATEGORY PILLS (7 categories)
 -- 2 rows: Row 1 (4 pills) + Row 2 (3 pills) biar muat
-local catRow1 = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
+local catRow1 = mk("Frame",{Size=UDim2.new(1,0,0,32), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,4), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow1})
-
-local catRow2 = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=3, Parent=content})
-mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,4), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow2})
 
 local catLabels = {}
 for i, cat in ipairs(CATEGORIES) do
-    -- v3.3: 4 + 4 layout (8 categories total)
-    local row = i <= 4 and catRow1 or catRow2
-    local pillW = 113  -- 4 pills per row, ~113px each
-    local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=row})
+    -- v3.4: 4 pills 1 row (Small/Large/Semi Huge/Huge), pill lebih lebar
+    local pillW = 90  -- v3.5: 5 pills fit
+    local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow1})
     corner(pill, 5) stroke(pill, C.Dim, 1)
     local pl = lbl(pill, cat.name..": 0", 10, C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
@@ -235,7 +228,7 @@ for i, cat in ipairs(CATEGORIES) do
 end
 
 -- DETAIL PANEL
-local detailPanel = mk("Frame",{Size=UDim2.new(1,0,0,110), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=4, Parent=content})
+local detailPanel = mk("Frame",{Size=UDim2.new(1,0,0,110), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=3, Parent=content})
 corner(detailPanel, 7) stroke(detailPanel, C.Dim, 1.2)
 mk("UIPadding",{PaddingTop=UDim.new(0,8), PaddingLeft=UDim.new(0,10), PaddingRight=UDim.new(0,10), Parent=detailPanel})
 mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,4), Parent=detailPanel})
@@ -247,23 +240,23 @@ local detailKG = lbl(detailPanel, "Weight range: -", 10, C.Blue) detailKG.Size=U
 local detailUnread = lbl(detailPanel, "Unread: -", 10, C.Gray) detailUnread.Size=UDim2.new(1,0,0,14) detailUnread.LayoutOrder=5
 
 -- DIVIDER
-div(content, 5)
+div(content, 4)
 
 -- REJOIN
-local rejoinHeader = lbl(content, "REJOIN", 9, C.Teal) rejoinHeader.Size=UDim2.new(1,0,0,14) rejoinHeader.LayoutOrder=6
+local rejoinHeader = lbl(content, "REJOIN", 9, C.Teal) rejoinHeader.Size=UDim2.new(1,0,0,14) rejoinHeader.LayoutOrder=5
 
 local rnBtn = btn(content, "Rejoin Now", 10, C.TDim, C.Teal)
-rnBtn.Size = UDim2.new(1,0,0,24) rnBtn.LayoutOrder=7 stroke(rnBtn, C.Teal, 1.5)
+rnBtn.Size = UDim2.new(1,0,0,24) rnBtn.LayoutOrder=6 stroke(rnBtn, C.Teal, 1.5)
 
 local rejoinMinutes = savedState.rejoinMinutes or 30
-cfgRow(content, "Interval (menit)", 8, rejoinMinutes, function(v)
+cfgRow(content, "Interval (menit)", 7, rejoinMinutes, function(v)
     rejoinMinutes = math.max(1, math.min(120, v))
     saveState({autoRejoin=savedState.autoRejoin, rejoinMinutes=rejoinMinutes})
 end)
 
-local _, arTog, arTogStroke, arStroke = togRow(content, "Auto Rejoin", "Rejoin otomatis sesuai interval", 9)
+local _, arTog, arTogStroke, arStroke = togRow(content, "Auto Rejoin", "Rejoin otomatis sesuai interval", 8)
 local cdLbl = lbl(content, "Auto Rejoin: OFF", 9, C.Gray, Enum.TextXAlignment.Center)
-cdLbl.Size = UDim2.new(1,0,0,20) cdLbl.LayoutOrder=10 cdLbl.BackgroundColor3=C.Panel cdLbl.BackgroundTransparency=0
+cdLbl.Size = UDim2.new(1,0,0,20) cdLbl.LayoutOrder=9 cdLbl.BackgroundColor3=C.Panel cdLbl.BackgroundTransparency=0
 corner(cdLbl, 6) stroke(cdLbl, C.Dim, 1.1)
 
 -- ============================================
