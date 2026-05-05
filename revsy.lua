@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.1"
+local SCRIPT_VERSION="v12.3"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + smart cooldown error)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + multi-pattern gift no teleport)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -411,55 +411,77 @@ local function sendGiftToPlayer(targetName, petUUID)
         return false
     end
 
-    if petUUID then
-        -- Step 1: kalau pet di garden, unequip dulu biar balik ke backpack
-        local placed = findPlacedPetByUUID(petUUID)
-        if placed then
-            unequipPet(petUUID)
-            task.wait(0.1) -- v12.0: 0.2 -> 0.1
-        end
-
-        -- Step 2: hold pet as tool (di character, bukan garden)
-        local item = holdPetAsTool(petUUID)
-        if not item then
-            dbg("[gift] FAIL: gagal hold pet "..tostring(petUUID):sub(1,8).." (gak di backpack/no character)")
-            return false
-        end
-        task.wait(0.12) -- v12.1: 0.08 -> 0.12 kasih server cukup waktu register tool
-
-        -- v12.1: VERIFY pet beneran di Character sebelum fire GivePet
-        -- Kalo nggak, server bakal kasih "You do not have a Pet in your hand!"
-        if not petInCharacter(petUUID) then
-            dbg("[gift] FAIL: pet "..tostring(petUUID):sub(1,8).." gak ke-equip di character (skip GivePet)")
-            return false
-        end
+    if not petUUID then
+        -- gak ada uuid, fire tanpa pet (rare case)
+        pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
+        return true
     end
 
-    -- Step 3: fire GivePet dengan Player Instance
-    local ok, err = pcall(function()
-        giftRE:FireServer("GivePet", targetPlayer)
-    end)
-    if not ok then
-        dbg("[gift] FireServer error: "..tostring(err))
+    local u = fmtUUID(petUUID)
+    local short = tostring(petUUID):sub(1,8)
+
+    -- v12.3: TRY MULTI-PATTERN dulu tanpa hold-as-tool (avoid Steve proximity)
+    -- Banyak script lain pakai pattern dengan UUID langsung di FireServer
+    local patterns = {
+        {action="GivePet", args={targetPlayer, u}},
+        {action="GivePet", args={u, targetPlayer}},
+        {action="Gift",    args={targetPlayer, u}},
+        {action="Gift",    args={u, targetPlayer}},
+        {action="SendGift",args={targetPlayer, u}},
+    }
+
+    -- Pastiin pet di backpack (bukan garden)
+    local placed = findPlacedPetByUUID(petUUID)
+    if placed then
+        unequipPet(petUUID)
+        task.wait(0.15)
+    end
+
+    if not findPetInBackpack(petUUID) then
+        dbg("[gift] FAIL: pet "..short.." gak di backpack")
         return false
     end
 
-    -- Step 4: verify pet hilang dari Backpack DAN Character (max ~0.75s)
-    if petUUID then
-        for i = 1, 5 do
-            task.wait(0.15)
+    -- Try tiap pattern, cek apakah pet hilang setelah fire
+    for i, p in ipairs(patterns) do
+        local ok = pcall(function()
+            giftRE:FireServer(p.action, table.unpack(p.args))
+        end)
+        if ok then
+            -- Wait sebentar, cek pet hilang dari backpack
+            task.wait(0.4)
             if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
-                dbg("[gift] OK: "..tostring(petUUID):sub(1,8).." -> "..targetPlayer.Name)
+                dbg("[gift] OK: "..short.." -> "..targetPlayer.Name.." (pattern "..i..": "..p.action..")")
                 return true
             end
         end
-        -- Cleanup: kalau gagal, unequip tool biar gak stuck di tangan
-        local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-        if hum then pcall(function() hum:UnequipTools() end) end
-        dbg("[gift] WARN: pet "..tostring(petUUID):sub(1,8).." masih ada (target reject?)")
+    end
+
+    -- Semua pattern gagal — pet masih di backpack. Fallback: hold-as-tool method (rawan Steve sell)
+    dbg("[gift] semua pattern direct fail, fallback ke hold-as-tool (HATI2 Steve)")
+    local item = holdPetAsTool(petUUID)
+    if not item then
+        dbg("[gift] FAIL: hold gagal "..short)
         return false
     end
-    return true
+    task.wait(0.12)
+    if not petInCharacter(petUUID) then
+        dbg("[gift] FAIL: hold gak register "..short)
+        return false
+    end
+    pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
+    for i = 1, 5 do
+        task.wait(0.15)
+        if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
+            dbg("[gift] OK (fallback): "..short.." -> "..targetPlayer.Name)
+            return true
+        end
+    end
+    -- Cleanup
+    local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+    if hum then pcall(function() hum:UnequipTools() end) end
+    dbg("[gift] FAIL: "..short.." gak ke-transfer")
+    return false
 end
 
 -- ===== TRADE (PERSIS dari log: SendRequest -> AddItem looped) =====
@@ -3069,4 +3091,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.1: verify pet di character + unfav 0.8s + cooldown 60s setelah 2 gagal")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.3: gift try 5 pattern UUID-direct (no teleport, no hold) - fallback ke hold kalo gagal")
