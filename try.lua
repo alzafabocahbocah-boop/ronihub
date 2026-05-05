@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.8"
+local SCRIPT_VERSION="v12.9"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE gift accept pattern)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + robust gift accept w/ debug)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2233,27 +2233,46 @@ pcall(function()
         dbg("[autoAcc] WARN: TradeEvents folder gak ketemu")
     end
 
-    -- v12.8: PRECISE gift accept (confirmed pattern dari debug log)
-    -- Pattern: GiftPet RECV (uuid, name, sender) -> AcceptPetGift FIRE (true, uuid)
-    local pgs = RS:FindFirstChild("PetGiftingService", true)
-    local giftParent = pgs and pgs.Parent
-    local giftPetRE = giftParent and giftParent:FindFirstChild("GiftPet")
-    local acceptPetGiftRE = giftParent and giftParent:FindFirstChild("AcceptPetGift")
+    -- v12.9: PRECISE gift accept dengan ROBUST search + debug print
+    -- Pattern confirmed dari log: GiftPet (uuid, name, sender) -> AcceptPetGift (true, uuid)
 
-    if giftPetRE and acceptPetGiftRE and giftPetRE:IsA("RemoteEvent") and acceptPetGiftRE:IsA("RemoteEvent") then
+    -- Robust search: try multiple lokasi
+    local giftPetRE = RS:FindFirstChild("GiftPet", true)
+    local acceptPetGiftRE = RS:FindFirstChild("AcceptPetGift", true)
+
+    -- Print debug info ke F9
+    print("[ZenxLvl-AutoAcc] GiftPet remote: "..(giftPetRE and giftPetRE:GetFullName() or "NOT FOUND"))
+    print("[ZenxLvl-AutoAcc] AcceptPetGift remote: "..(acceptPetGiftRE and acceptPetGiftRE:GetFullName() or "NOT FOUND"))
+    if giftPetRE then print("[ZenxLvl-AutoAcc] GiftPet ClassName: "..giftPetRE.ClassName) end
+    if acceptPetGiftRE then print("[ZenxLvl-AutoAcc] AcceptPetGift ClassName: "..acceptPetGiftRE.ClassName) end
+
+    if giftPetRE and acceptPetGiftRE and giftPetRE:IsA("RemoteEvent") then
         local giftAccCount = 0
-        local conn = giftPetRE.OnClientEvent:Connect(function(petUUID, petName, senderUsername)
-            if not autoAccGift then return end
-            dbg("[autoAcc-gift] GiftPet RECV: "..tostring(petUUID):sub(1,8).." '"..tostring(petName).."' from '"..tostring(senderUsername).."'")
-            -- EXACT pattern: AcceptPetGift(true, petUUID)
+        -- Hook OnClientEvent dengan handler yg log SEMUA arg
+        local conn = giftPetRE.OnClientEvent:Connect(function(...)
+            local args = {...}
+            print("[ZenxLvl-AutoAcc] GiftPet event fired! args count: "..#args.." autoAccGift="..tostring(autoAccGift))
+            for i, v in ipairs(args) do
+                print("  arg["..i.."] = "..tostring(v).." (type "..typeof(v)..")")
+            end
+            if not autoAccGift then
+                print("[ZenxLvl-AutoAcc] autoAccGift OFF, skip accept")
+                return
+            end
+            local petUUID = args[1]  -- arg ke-1 adalah pet UUID
+            local petName = args[2] or "?"
+            local senderUsername = args[3] or "?"
+
+            -- Fire AcceptPetGift(true, petUUID)
+            print("[ZenxLvl-AutoAcc] FIRING AcceptPetGift(true, "..tostring(petUUID)..")")
             local ok, err = pcall(function()
                 acceptPetGiftRE:FireServer(true, petUUID)
             end)
             if ok then
                 giftAccCount = giftAccCount + 1
-                dbg("[autoAcc-gift] AcceptPetGift FIRED for "..tostring(petUUID):sub(1,8).." (#"..giftAccCount..")")
+                print("[ZenxLvl-AutoAcc] OK fired #"..giftAccCount)
                 if accStatusLbl then
-                    accStatusLbl.Text = "Gift accept #"..giftAccCount.." dari "..tostring(senderUsername)
+                    accStatusLbl.Text = "Gift accept #"..giftAccCount.." ("..tostring(senderUsername)..")"
                     accStatusLbl.TextColor3 = C.Teal
                     local myCount = giftAccCount
                     task.delay(2.5, function()
@@ -2263,13 +2282,20 @@ pcall(function()
                     end)
                 end
             else
-                dbg("[autoAcc-gift] FAIL fire AcceptPetGift: "..tostring(err))
+                print("[ZenxLvl-AutoAcc] FAIL FireServer: "..tostring(err))
             end
         end)
         table.insert(connections, conn)
-        dbg("[autoAcc] gift hook PRECISE installed (GiftPet -> AcceptPetGift)")
+        print("[ZenxLvl-AutoAcc] HOOK INSTALLED on GiftPet")
     else
-        dbg("[autoAcc] WARN: GiftPet/AcceptPetGift remote gak ketemu di "..tostring(giftParent and giftParent:GetFullName() or "nil"))
+        warn("[ZenxLvl-AutoAcc] FAIL: remote gak ketemu (GiftPet="..tostring(giftPetRE)..", AcceptPetGift="..tostring(acceptPetGiftRE)..")")
+        -- Fallback: list semua remote di game biar lo tau path-nya
+        warn("[ZenxLvl-AutoAcc] Listing semua RemoteEvent di RS yg punya kata 'gift':")
+        for _, d in ipairs(RS:GetDescendants()) do
+            if d:IsA("RemoteEvent") and d.Name:lower():find("gift") then
+                warn("  - "..d:GetFullName())
+            end
+        end
     end
 end)
 
@@ -2922,4 +2948,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.8: gift accept PRECISE - GiftPet -> AcceptPetGift(true, uuid) confirmed via debug")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.9: gift accept robust search + F9 debug print")
