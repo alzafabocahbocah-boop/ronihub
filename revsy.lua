@@ -2,7 +2,7 @@
 local SCRIPT_VERSION="v12.3"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + multi-pattern gift no teleport)")
- 
+
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HS = game:GetService("HttpService")
