@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v11.1"
+local SCRIPT_VERSION="v11.2"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar + KG range stats)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar + baseKG range stats)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -884,7 +884,12 @@ local function buildInvShow()
             local age = getAgeFromKG(item)
             local kg = getKG(item)
             local fav = isFavorite(item)
-            table.insert(petsList, {name=fullName, age=age or 0, kg=kg or 0, fav=fav})
+            -- v11.2: baseKG = KG di age 1 (formula: kg * 11 / (age+10))
+            local baseKG = nil
+            if kg and age and age >= 1 then
+                baseKG = kg * 11 / (age + 10)
+            end
+            table.insert(petsList, {name=fullName, age=age or 0, kg=kg or 0, baseKG=baseKG, fav=fav})
         end
     end
     table.sort(petsList, function(a,b)
@@ -896,10 +901,12 @@ local function buildInvShow()
     local rangeCounts = {0,0,0,0,0,0}
     for _,p in ipairs(petsList) do
         if p.age >= toAge then doneCount = doneCount + 1 end
-        for ri, r in ipairs(kgRanges) do
-            if p.kg >= r[1] and p.kg < r[2] then
-                rangeCounts[ri] = rangeCounts[ri] + 1
-                break
+        if p.baseKG then
+            for ri, r in ipairs(kgRanges) do
+                if p.baseKG >= r[1] and p.baseKG < r[2] then
+                    rangeCounts[ri] = rangeCounts[ri] + 1
+                    break
+                end
             end
         end
     end
@@ -915,7 +922,8 @@ local function buildInvShow()
         corner(row, 5)
         if p.age >= toAge then stroke(row, C.Teal, 1) end
         local prefix = p.fav and "[LOVE] " or ""
-        local txt = prefix..p.name.." | Age "..tostring(p.age).." | "..string.format("%.2f", p.kg).."kg"
+        local baseStr = p.baseKG and (" | base "..string.format("%.1f", p.baseKG)) or ""
+        local txt = prefix..p.name.." | Age "..tostring(p.age).." | "..string.format("%.2f", p.kg).."kg"..baseStr
         local color = p.age >= toAge and C.Teal or (p.fav and C.Gold or C.White)
         local nl = lbl(row, txt, 9, color)
         nl.Size = UDim2.new(1, -10, 1, 0)
@@ -2970,4 +2978,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.1: Inventory Show + KG range stats (1-2,2-3,...,6-7)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.2: KG range pakai baseKG (kg di age 1), bukan kg sekarang")
