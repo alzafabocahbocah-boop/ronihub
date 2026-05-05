@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.2 (range visible)"
+local SCRIPT_VERSION = "v3.3 (Small added)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -43,8 +43,9 @@ local C = {
 -- v3.0: WEIGHT CATEGORIES dari game.guide
 -- Pakai CURRENT KG (bukan baseKG) buat kategorisasi
 local CATEGORIES = {
-    {name="Large",     short="Lg",  min=0,    max=3.5,  color=C.Cyan},
-    {name="Semi Huge", short="SH",  min=3.5,  max=5,    color=C.Pink},
+    {name="Small",     short="Sm",  min=0,    max=2,    color=C.Blue},
+    {name="Large",     short="Lg",  min=2,    max=3,    color=C.Cyan},
+    {name="Semi Huge", short="SH",  min=3,    max=5,    color=C.Pink},
     {name="Huge",      short="Hg",  min=5,    max=7,    color=C.Purple},
     {name="Semi Tit",  short="ST",  min=7,    max=7.5,  color=C.Orange},
     {name="Titanic",   short="Ti",  min=7.5,  max=9,    color=C.Red},
@@ -222,11 +223,12 @@ mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new
 
 local catLabels = {}
 for i, cat in ipairs(CATEGORIES) do
+    -- v3.3: 4 + 4 layout (8 categories total)
     local row = i <= 4 and catRow1 or catRow2
-    local pillW = i <= 4 and 114 or 152  -- v3.2: 4x114 + 3x152 (range visible)
+    local pillW = 113  -- 4 pills per row, ~113px each
     local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=row})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, cat.name..": 0", 11, C.Gray, Enum.TextXAlignment.Center)
+    local pl = lbl(pill, cat.name..": 0", 10, C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
     pl.Font = Enum.Font.GothamBold
     catLabels[i] = pl
