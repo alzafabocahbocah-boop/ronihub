@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v11.8"
+local SCRIPT_VERSION="v12.6"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + invShow tanpa pet list)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + v11.8 base + minimal patches)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -407,52 +407,56 @@ local function sendGiftToPlayer(targetName, petUUID)
     end
     local targetPlayer = findPlayerByName(targetName)
     if not targetPlayer then
-        dbg("[gift] FAIL: player '"..tostring(targetName).."' gak ada di server")
+        dbg("[gift] FAIL: player gak ada di server")
         return false
     end
-
-    if petUUID then
-        -- Step 1: kalau pet di garden, unequip dulu biar balik ke backpack
-        local placed = findPlacedPetByUUID(petUUID)
-        if placed then
-            unequipPet(petUUID)
-            task.wait(0.2)
-        end
-
-        -- Step 2: hold pet as tool (di character, bukan garden)
-        local item = holdPetAsTool(petUUID)
-        if not item then
-            dbg("[gift] FAIL: gagal hold pet "..tostring(petUUID):sub(1,8).." (gak di backpack/no character)")
-            return false
-        end
-        task.wait(0.15) -- kasih server waktu register tool equip
+    if not petUUID then
+        pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
+        return true
     end
-
-    -- Step 3: fire GivePet dengan Player Instance
-    local ok, err = pcall(function()
-        giftRE:FireServer("GivePet", targetPlayer)
-    end)
-    if not ok then
-        dbg("[gift] FireServer error: "..tostring(err))
+    local u = fmtUUID(petUUID)
+    local short = tostring(petUUID):sub(1,8)
+    local placed = findPlacedPetByUUID(petUUID)
+    if placed then
+        unequipPet(petUUID)
+        task.wait(0.15)
+    end
+    if not findPetInBackpack(petUUID) then
+        dbg("[gift] FAIL: pet "..short.." gak di backpack")
         return false
     end
-
-    -- Step 4: verify pet hilang dari Backpack DAN Character (max ~1.4s)
-    if petUUID then
-        for i = 1, 7 do
-            task.wait(0.2)
-            if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
-                dbg("[gift] OK: "..tostring(petUUID):sub(1,8).." -> "..targetPlayer.Name)
-                return true
+    -- Try direct pattern dulu (no hold, avoid Steve)
+    pcall(function() giftRE:FireServer("GivePet", targetPlayer, u) end)
+    task.wait(0.4)
+    if not petStillInBackpack(petUUID) then
+        dbg("[gift] OK direct: "..short.." -> "..targetPlayer.Name)
+        return true
+    end
+    pcall(function() giftRE:FireServer("GivePet", u, targetPlayer) end)
+    task.wait(0.4)
+    if not petStillInBackpack(petUUID) then
+        dbg("[gift] OK reverse: "..short.." -> "..targetPlayer.Name)
+        return true
+    end
+    -- Fallback: hold-as-tool method
+    local item = holdPetAsTool(petUUID)
+    if item then
+        task.wait(0.15)
+        if petInCharacter(petUUID) then
+            pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
+            for i = 1, 5 do
+                task.wait(0.15)
+                if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
+                    dbg("[gift] OK fallback: "..short.." -> "..targetPlayer.Name)
+                    return true
+                end
             end
+            local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+            if hum then pcall(function() hum:UnequipTools() end) end
         end
-        -- Cleanup: kalau gagal, unequip tool biar gak stuck di tangan
-        local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-        if hum then pcall(function() hum:UnequipTools() end) end
-        dbg("[gift] WARN: pet "..tostring(petUUID):sub(1,8).." masih ada (target reject?)")
-        return false
     end
-    return true
+    dbg("[gift] FAIL: "..short)
+    return false
 end
 
 -- ===== TRADE (PERSIS dari log: SendRequest -> AddItem looped) =====
@@ -488,14 +492,15 @@ local function sendTradeToPlayer(targetName, petUUIDs)
     local added = 0
     for _, uuid in ipairs(uuidList) do
         local u = fmtUUID(uuid)
-        local ok2, err2 = pcall(function()
-            tradeAddItemRE:FireServer("Pet", u)
-        end)
-        if ok2 then
+        -- Multi-type: try Pet, Ticket, Item
+        local fired = false
+        for _, t in ipairs({"Pet","Ticket","Item"}) do
+            local ok2 = pcall(function() tradeAddItemRE:FireServer(t, u) end)
+            if ok2 then fired = true break end
+        end
+        if fired then
             added = added + 1
             dbg("[trade] AddItem "..u:sub(1,9).."... ("..added.."/"..#uuidList..")")
-        else
-            dbg("[trade] AddItem error: "..tostring(err2))
         end
         task.wait(0.4)
     end
@@ -2143,13 +2148,16 @@ autoSendTask = task.spawn(function()
                         if slot.autoSendGift then
                             if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": gift "..#sendable.." -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
                             local okCount=0
+                            local sentCount=0
                             for _,uuid in ipairs(sendable) do
+                                if not slot.autoSendGift then break end
                                 if sendGiftToPlayer(slot.target,uuid) then okCount=okCount+1 end
-                                task.wait(0.25)
+                                sentCount = sentCount + 1
+                                task.wait(0.2)
                             end
                             if sendStatusLbl then
-                                sendStatusLbl.Text="Slot "..slotIdx.." gift: "..okCount.."/"..#sendable.." OK"
-                                sendStatusLbl.TextColor3=okCount==#sendable and C.Teal or C.Gold
+                                sendStatusLbl.Text="Slot "..slotIdx.." gift: "..okCount.."/"..sentCount.." OK"
+                                sendStatusLbl.TextColor3=okCount==sentCount and C.Teal or C.Gold
                             end
                         end
                         if slot.autoSendTrade then
@@ -2988,4 +2996,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.8: invShow cuma total + pills KG range, gak ada pet list")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.6: base v11.8 + multi-pattern gift + ticket trade + early stop (no goto, no aggressive)")
