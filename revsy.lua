@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v10.8"
+local SCRIPT_VERSION="v10.9"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + complete shutdown on close)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar UP LVL + Inventory Show)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -688,7 +688,7 @@ local function getPetInfo(item)
 end
 
 -- GUI 600x420
-local GUI_W=480 local GUI_H=380
+local GUI_W=540 local GUI_H=400
 local sg=Instance.new("ScreenGui")
 sg.Name="ZenxLvlGui" sg.DisplayOrder=999 sg.ResetOnSpawn=false
 local mainParentResult=safeParent(sg)
@@ -709,7 +709,34 @@ minBtn.Size=UDim2.new(0,22,0,22) minBtn.Position=UDim2.new(1,-50,0.5,-11) stroke
 local closeBtn=btn(TB,"X",10,C.RDim,C.Red)
 closeBtn.Size=UDim2.new(0,22,0,22) closeBtn.Position=UDim2.new(1,-24,0.5,-11) stroke(closeBtn,C.Red,1.2)
 
-local content=mk("Frame",{Size=UDim2.new(1,0,1,-34),Position=UDim2.new(0,0,0,34),BackgroundTransparency=1,Parent=main})
+-- v10.9: left sidebar + content area
+local SIDEBAR_W = 80
+local leftSidebar = mk("Frame", {
+    Size = UDim2.new(0, SIDEBAR_W, 1, -44),
+    Position = UDim2.new(0, 5, 0, 39),
+    BackgroundColor3 = C.Panel,
+    BorderSizePixel = 0,
+    Parent = main
+})
+corner(leftSidebar, 7)
+stroke(leftSidebar, C.Dim, 1.2)
+mk("UIPadding", {PaddingTop=UDim.new(0,6), PaddingBottom=UDim.new(0,6), PaddingLeft=UDim.new(0,4), PaddingRight=UDim.new(0,4), Parent=leftSidebar})
+mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0, 4), Parent=leftSidebar})
+
+local sectionBtns = {}
+local function makeSidebarBtn(name, idx)
+    local b = btn(leftSidebar, name, 9, C.Card, C.Gray)
+    b.Size = UDim2.new(1, 0, 0, 44)
+    b.LayoutOrder = idx
+    b.TextWrapped = true
+    stroke(b, C.Dim, 1.1)
+    sectionBtns[idx] = b
+    return b
+end
+local upLvlBtn = makeSidebarBtn("UP LVL", 1)
+local invShowBtn = makeSidebarBtn("Inventory Show", 2)
+
+local content=mk("Frame",{Size=UDim2.new(1,-(SIDEBAR_W+15),1,-34),Position=UDim2.new(0,SIDEBAR_W+10,0,34),BackgroundTransparency=1,Parent=main})
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,2),Parent=tabBar})
 
@@ -783,7 +810,9 @@ task.spawn(function()
     end
 end)
 
+local currentTab = 1
 local function switchTab(idx)
+    currentTab = idx
     for i,b in ipairs(tabBtns) do
         local s=b:FindFirstChildWhichIsA("UIStroke")
         if i==idx then b.TextColor3=C.Teal b.BackgroundColor3=C.TDim if s then s.Color=C.Teal end areas[i].Visible=true
@@ -791,11 +820,119 @@ local function switchTab(idx)
     end
 end
 
+-- v10.9: Inventory Show section - listing semua pet di backpack
+local invShowGroup = mk("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Visible=false,Parent=content})
+
+local invHeader = mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=invShowGroup})
+corner(invHeader, 7) stroke(invHeader, C.Dim, 1.2)
+local invHeaderLbl = lbl(invHeader, "Inventory Pet (loading...)", 10, C.Teal, Enum.TextXAlignment.Left)
+invHeaderLbl.Size = UDim2.new(1, -100, 1, 0) invHeaderLbl.Position = UDim2.new(0, 8, 0, 0) invHeaderLbl.Font = Enum.Font.GothamBold
+
+local invRefreshBtn = btn(invHeader, "Refresh", 9, C.TDim, C.Teal)
+invRefreshBtn.Size = UDim2.new(0, 80, 0, 20) invRefreshBtn.Position = UDim2.new(1, -86, 0.5, -10)
+stroke(invRefreshBtn, C.Teal, 1.2)
+
+local invScroll = mk("ScrollingFrame", {
+    Size = UDim2.new(1, -10, 1, -40),
+    Position = UDim2.new(0, 5, 0, 34),
+    BackgroundColor3 = C.Panel,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 4,
+    ScrollBarImageColor3 = C.Teal,
+    CanvasSize = UDim2.new(0, 0, 0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    Parent = invShowGroup
+})
+corner(invScroll, 7) stroke(invScroll, C.Dim, 1.2)
+mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0, 2), Parent=invScroll})
+mk("UIPadding", {PaddingTop=UDim.new(0,4), PaddingBottom=UDim.new(0,4), PaddingLeft=UDim.new(0,4), PaddingRight=UDim.new(0,4), Parent=invScroll})
+
+local function buildInvShow()
+    for _,c in ipairs(invScroll:GetChildren()) do
+        if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
+    end
+    local bp = player:FindFirstChild("Backpack")
+    if not bp then
+        invHeaderLbl.Text = "Backpack gak ada"
+        return
+    end
+
+    local petsList = {}
+    for _, item in pairs(bp:GetChildren()) do
+        if isPet(item) then
+            local fullName = getPetName(item)
+            local age = getAgeFromKG(item)
+            local kg = getKG(item)
+            local fav = isFavorite(item)
+            table.insert(petsList, {name=fullName, age=age or 0, kg=kg or 0, fav=fav})
+        end
+    end
+    table.sort(petsList, function(a,b)
+        if a.age ~= b.age then return a.age > b.age end
+        return a.kg > b.kg
+    end)
+
+    local doneCount = 0
+    for _,p in ipairs(petsList) do if p.age >= toAge then doneCount = doneCount + 1 end end
+    invHeaderLbl.Text = "Total: "..#petsList.." pet | Jadi: "..doneCount.." ("..toAge.."+)"
+
+    for i, p in ipairs(petsList) do
+        local row = mk("Frame", {Size=UDim2.new(1, 0, 0, 22), BackgroundColor3=p.age>=toAge and C.TDim or C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=invScroll})
+        corner(row, 5)
+        if p.age >= toAge then stroke(row, C.Teal, 1) end
+        local prefix = p.fav and "[LOVE] " or ""
+        local txt = prefix..p.name.." | Age "..tostring(p.age).." | "..string.format("%.2f", p.kg).."kg"
+        local color = p.age >= toAge and C.Teal or (p.fav and C.Gold or C.White)
+        local nl = lbl(row, txt, 9, color)
+        nl.Size = UDim2.new(1, -10, 1, 0)
+        nl.Position = UDim2.new(0, 6, 0, 0)
+    end
+end
+
+invRefreshBtn.MouseButton1Click:Connect(buildInvShow)
+
+-- Section switching (UP LVL vs Inventory Show)
+local currentSection = 1
+local function switchSection(idx)
+    currentSection = idx
+    for i, b in ipairs(sectionBtns) do
+        local s = b:FindFirstChildWhichIsA("UIStroke")
+        if i == idx then b.TextColor3=C.Teal b.BackgroundColor3=C.TDim if s then s.Color=C.Teal end
+        else b.TextColor3=C.Gray b.BackgroundColor3=C.Card if s then s.Color=C.Dim end end
+    end
+    if idx == 1 then
+        -- UP LVL section: show tab bar + areas + bot bar + RUN/STOP/dones
+        tabBar.Visible = true
+        botBar.Visible = true
+        runBtn.Visible = true
+        stopBtn.Visible = true
+        donesPanel.Visible = true
+        invShowGroup.Visible = false
+        switchTab(currentTab)
+    else
+        -- Inventory Show section
+        tabBar.Visible = false
+        for _, a in ipairs(areas) do a.Visible = false end
+        botBar.Visible = false
+        runBtn.Visible = false
+        stopBtn.Visible = false
+        donesPanel.Visible = false
+        invShowGroup.Visible = true
+        buildInvShow()
+    end
+end
+
+upLvlBtn.MouseButton1Click:Connect(function() switchSection(1) end)
+invShowBtn.MouseButton1Click:Connect(function() switchSection(2) end)
+
 for i,name in ipairs(tabNames) do
     local b=btn(tabBar,name,8,C.Card,C.Gray)
-    b.Size=UDim2.new(0,94,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
+    b.Size=UDim2.new(0,88,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
     local ii=i b.MouseButton1Click:Connect(function() switchTab(ii) end)
 end
+
+-- v10.9: default sidebar = UP LVL
+switchSection(1)
 
 -- v9.8: Tekan "-" -> kotak kecil ijo neon dengan logo Z (bukan bar memanjang)
 local NEON_GREEN = Color3.fromRGB(57, 255, 100)
@@ -2797,4 +2934,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.8: close = full shutdown (cancel semua task + disconnect connection)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.9: sidebar kiri (UP LVL = semua tab lama, Inventory Show = list pet)")
