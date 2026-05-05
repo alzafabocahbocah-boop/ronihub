@@ -1,11 +1,25 @@
 -- ============= ZENX INVENTORY VIEWER + REJOIN =============
 -- Standalone: Inventory Show + Rejoin (style sama dgn ZenxLvl main script)
-local SCRIPT_VERSION = "v2.2 (mutasi range fix)"
+local SCRIPT_VERSION = "v2.4 (font lebih gede)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
 local TS = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
+
+-- v2.3: persistent state - simpan setting di executor file biar Auto Rejoin tetep ON setelah rejoin
+local STATE_FILE = "ZenxInv_state.json"
+local function saveState(state)
+    if not writefile then return end
+    pcall(function() writefile(STATE_FILE, HttpService:JSONEncode(state)) end)
+end
+local function loadState()
+    if not (isfile and readfile and isfile(STATE_FILE)) then return nil end
+    local ok, data = pcall(function() return HttpService:JSONDecode(readfile(STATE_FILE)) end)
+    return ok and data or nil
+end
+local savedState = loadState() or {}
 
 pcall(function()
     if player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("ZenxInvGui") then
@@ -206,15 +220,15 @@ invRefreshBtn.Size = UDim2.new(0,80,0,20) invRefreshBtn.Position = UDim2.new(1,-
 stroke(invRefreshBtn, C.Teal, 1.2)
 
 -- ===== KG PILLS =====
-local statsBar = mk("Frame",{Size=UDim2.new(1,0,0,24), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
+local statsBar = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,3), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=statsBar})
 
 local kgRanges = {{1,2},{2,3},{3,4},{4,5},{5,6},{6,7}}
 local kgPills = {}
 for i, r in ipairs(kgRanges) do
-    local pill = mk("Frame",{Size=UDim2.new(0,68,1,0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=statsBar})
+    local pill = mk("Frame",{Size=UDim2.new(0,72,1,0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=statsBar})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, r[1].."-"..r[2].."kg: 0", 9, C.Gray, Enum.TextXAlignment.Center)
+    local pl = lbl(pill, r[1].."-"..r[2].."kg: 0", 11, C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
     kgPills[i] = pl
 end
@@ -243,8 +257,9 @@ local rnBtn = btn(content, "Rejoin Now", 10, C.TDim, C.Teal)
 rnBtn.Size = UDim2.new(1,0,0,24) rnBtn.LayoutOrder=6 stroke(rnBtn, C.Teal, 1.5)
 
 local rejoinMinutes = 30  -- default
-cfgRow(content, "Interval (menit)", 7, rejoinMinutes, function(v)
+local intervalRow, intervalBox = cfgRow(content, "Interval (menit)", 7, rejoinMinutes, function(v)
     rejoinMinutes = math.max(1, math.min(120, v))
+    saveState({autoRejoin=autoRejoin, rejoinMinutes=rejoinMinutes})
 end)
 
 local _, arTog, arTogStroke, arStroke = togRow(content, "Auto Rejoin", "Rejoin otomatis sesuai interval", 8)
@@ -374,7 +389,11 @@ task.spawn(function() task.wait(0.5) buildInvShow() end)
 -- ============================================
 local isAR = false
 local arTask = nil
-local autoRejoin = false
+local autoRejoin = savedState.autoRejoin or false
+-- Override default rejoinMinutes kalo udah pernah di-save
+if savedState.rejoinMinutes then
+    rejoinMinutes = savedState.rejoinMinutes
+end
 
 rnBtn.MouseButton1Click:Connect(function()
     rnBtn.Text = "Rejoining..."
@@ -398,11 +417,13 @@ local function stopAR()
     setArTog(false)
     cdLbl.Text = "Auto Rejoin: OFF"
     cdLbl.TextColor3 = C.Gray
+    saveState({autoRejoin=false, rejoinMinutes=rejoinMinutes})  -- v2.3: save state OFF
 end
 
 local function startAR()
     isAR = true autoRejoin = true
     setArTog(true)
+    saveState({autoRejoin=true, rejoinMinutes=rejoinMinutes})  -- v2.3: save state ON
     arTask = task.spawn(function()
         while isAR do
             local mins = rejoinMinutes
@@ -424,5 +445,14 @@ end
 arTog.MouseButton1Click:Connect(function()
     if isAR then stopAR() else startAR() end
 end)
+
+-- v2.3: auto-resume Auto Rejoin kalo state-nya ON sebelum rejoin
+if savedState.autoRejoin == true then
+    print("[ZenxInv] resume Auto Rejoin ON (dari state file)")
+    task.spawn(function()
+        task.wait(2)  -- kasih waktu GUI ready
+        startAR()
+    end)
+end
 
 print("==== ZenxInv "..SCRIPT_VERSION.." READY ====")
