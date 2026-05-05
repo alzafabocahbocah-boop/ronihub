@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v11.4"
+local SCRIPT_VERSION="v11.5"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + invShow with pcall error display)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + toAge scope fix)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -120,6 +120,9 @@ elseif loaded then
 end
 local d=getgenv().ZenxData
 dbg("Step 3 OK: data loaded")
+
+-- v11.5: declare toAge SEBELUM function definitions yg pakai (donesLbl, _doBuildInvShow)
+-- biar ke-capture sebagai upvalue/local, bukan global nil
 
 if not d.swapPerPetVersion or d.swapPerPetVersion < 9 then
     d.swapPerPet = d.swapPerPet or {}
@@ -3016,4 +3019,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.4: invShow pcall - error tampil di header + console log")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.5: toAge scope fix - declared early, ngga lagi nil di invShow")
