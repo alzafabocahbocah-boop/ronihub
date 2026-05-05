@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v11.0"
+local SCRIPT_VERSION="v11.1"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar + minimize fix)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar + KG range stats)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -832,9 +832,29 @@ local invRefreshBtn = btn(invHeader, "Refresh", 9, C.TDim, C.Teal)
 invRefreshBtn.Size = UDim2.new(0, 80, 0, 20) invRefreshBtn.Position = UDim2.new(1, -86, 0.5, -10)
 stroke(invRefreshBtn, C.Teal, 1.2)
 
-local invScroll = mk("ScrollingFrame", {
-    Size = UDim2.new(1, -10, 1, -40),
+-- v11.1: stats bar showing pet count per KG range
+local statsBar = mk("Frame", {
+    Size = UDim2.new(1, -10, 0, 24),
     Position = UDim2.new(0, 5, 0, 34),
+    BackgroundTransparency = 1,
+    Parent = invShowGroup
+})
+mk("UIListLayout", {FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0, 3), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=statsBar})
+
+local kgRanges = {{1,2},{2,3},{3,4},{4,5},{5,6},{6,7}}
+local kgPills = {}
+for i, r in ipairs(kgRanges) do
+    local pill = mk("Frame", {Size=UDim2.new(0, 68, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=statsBar})
+    corner(pill, 5) stroke(pill, C.Dim, 1)
+    local pl = lbl(pill, r[1].."-"..r[2].."kg: 0", 9, C.Gray, Enum.TextXAlignment.Center)
+    pl.Size = UDim2.new(1, 0, 1, 0)
+    pl.Font = Enum.Font.GothamBold
+    kgPills[i] = pl
+end
+
+local invScroll = mk("ScrollingFrame", {
+    Size = UDim2.new(1, -10, 1, -68),
+    Position = UDim2.new(0, 5, 0, 62),
     BackgroundColor3 = C.Panel,
     BorderSizePixel = 0,
     ScrollBarThickness = 4,
@@ -873,8 +893,22 @@ local function buildInvShow()
     end)
 
     local doneCount = 0
-    for _,p in ipairs(petsList) do if p.age >= toAge then doneCount = doneCount + 1 end end
+    local rangeCounts = {0,0,0,0,0,0}
+    for _,p in ipairs(petsList) do
+        if p.age >= toAge then doneCount = doneCount + 1 end
+        for ri, r in ipairs(kgRanges) do
+            if p.kg >= r[1] and p.kg < r[2] then
+                rangeCounts[ri] = rangeCounts[ri] + 1
+                break
+            end
+        end
+    end
     invHeaderLbl.Text = "Total: "..#petsList.." pet | Jadi: "..doneCount.." ("..toAge.."+)"
+    for i, lblWidget in ipairs(kgPills) do
+        local r = kgRanges[i]
+        lblWidget.Text = r[1].."-"..r[2].."kg: "..rangeCounts[i]
+        lblWidget.TextColor3 = rangeCounts[i] > 0 and C.Teal or C.Gray
+    end
 
     for i, p in ipairs(petsList) do
         local row = mk("Frame", {Size=UDim2.new(1, 0, 0, 22), BackgroundColor3=p.age>=toAge and C.TDim or C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=invScroll})
@@ -2936,4 +2970,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.0: minimize Z fix - sidebar ikut hide pas mini")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.1: Inventory Show + KG range stats (1-2,2-3,...,6-7)")
