@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v11.2"
+local SCRIPT_VERSION="v11.3"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar + baseKG range stats)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + sidebar + baseKG diagnostic)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -825,7 +825,7 @@ local invShowGroup = mk("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=
 
 local invHeader = mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=invShowGroup})
 corner(invHeader, 7) stroke(invHeader, C.Dim, 1.2)
-local invHeaderLbl = lbl(invHeader, "Inventory Pet (loading...)", 10, C.Teal, Enum.TextXAlignment.Left)
+local invHeaderLbl = lbl(invHeader, "Inventory Pet (loading...)", 9, C.Teal, Enum.TextXAlignment.Left)
 invHeaderLbl.Size = UDim2.new(1, -100, 1, 0) invHeaderLbl.Position = UDim2.new(0, 8, 0, 0) invHeaderLbl.Font = Enum.Font.GothamBold
 
 local invRefreshBtn = btn(invHeader, "Refresh", 9, C.TDim, C.Teal)
@@ -877,17 +877,27 @@ local function buildInvShow()
         return
     end
 
+    -- v11.3: rebuild maxKG cache dulu (untuk pet yg gak punya [Age N] di nama)
+    pcall(buildMaxKGCache)
+
     local petsList = {}
+    local minBase, maxBase, sumBase, baseCount = math.huge, 0, 0, 0
+    local nilBaseCount = 0
     for _, item in pairs(bp:GetChildren()) do
         if isPet(item) then
             local fullName = getPetName(item)
             local age = getAgeFromKG(item)
             local kg = getKG(item)
             local fav = isFavorite(item)
-            -- v11.2: baseKG = KG di age 1 (formula: kg * 11 / (age+10))
             local baseKG = nil
             if kg and age and age >= 1 then
                 baseKG = kg * 11 / (age + 10)
+                if baseKG < minBase then minBase = baseKG end
+                if baseKG > maxBase then maxBase = baseKG end
+                sumBase = sumBase + baseKG
+                baseCount = baseCount + 1
+            else
+                nilBaseCount = nilBaseCount + 1
             end
             table.insert(petsList, {name=fullName, age=age or 0, kg=kg or 0, baseKG=baseKG, fav=fav})
         end
@@ -899,18 +909,31 @@ local function buildInvShow()
 
     local doneCount = 0
     local rangeCounts = {0,0,0,0,0,0}
+    local outOfRangeCount = 0
     for _,p in ipairs(petsList) do
         if p.age >= toAge then doneCount = doneCount + 1 end
         if p.baseKG then
+            local matched = false
             for ri, r in ipairs(kgRanges) do
                 if p.baseKG >= r[1] and p.baseKG < r[2] then
                     rangeCounts[ri] = rangeCounts[ri] + 1
+                    matched = true
                     break
                 end
             end
+            if not matched then outOfRangeCount = outOfRangeCount + 1 end
         end
     end
-    invHeaderLbl.Text = "Total: "..#petsList.." pet | Jadi: "..doneCount.." ("..toAge.."+)"
+
+    -- Header dengan info diagnostik
+    if baseCount > 0 then
+        local avgBase = sumBase / baseCount
+        invHeaderLbl.Text = string.format("Total:%d Jadi:%d(%d+) | base min=%.1f max=%.1f avg=%.1f | nil:%d outRange:%d",
+            #petsList, doneCount, toAge, minBase, maxBase, avgBase, nilBaseCount, outOfRangeCount)
+    else
+        invHeaderLbl.Text = "Total:"..#petsList.." pet | base GAK ke-compute (semua pet age=nil/kg=nil)"
+    end
+
     for i, lblWidget in ipairs(kgPills) do
         local r = kgRanges[i]
         lblWidget.Text = r[1].."-"..r[2].."kg: "..rangeCounts[i]
@@ -2978,4 +3001,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.2: KG range pakai baseKG (kg di age 1), bukan kg sekarang")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.3: header tampilin min/max/avg baseKG + nil/outRange count")
