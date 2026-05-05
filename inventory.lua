@@ -1,6 +1,8 @@
--- ============= ZENX INVENTORY VIEWER + REJOIN =============
--- Standalone: Inventory Show + Rejoin (style sama dgn ZenxLvl main script)
-local SCRIPT_VERSION = "v2.5 (range 6-9kg)"
+-- ============= ZENX INVENTORY VIEWER v3.0 =============
+-- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
+-- Formula: weight = baseKG * (age + 10) / 11
+
+local SCRIPT_VERSION = "v3.0 (weight category)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -8,7 +10,7 @@ local TS = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 
--- v2.3: persistent state - simpan setting di executor file biar Auto Rejoin tetep ON setelah rejoin
+-- persistence
 local STATE_FILE = "ZenxInv_state.json"
 local function saveState(state)
     if not writefile then return end
@@ -27,14 +29,36 @@ pcall(function()
     end
 end)
 
--- COLOR (sama dgn ZenxLvl)
+-- COLOR
 local C = {
     BG=Color3.fromRGB(15,15,15), Panel=Color3.fromRGB(21,21,21), Card=Color3.fromRGB(25,25,25),
     White=Color3.fromRGB(225,225,225), Gray=Color3.fromRGB(120,120,120), Dim=Color3.fromRGB(55,55,55),
     Green=Color3.fromRGB(70,190,90), Red=Color3.fromRGB(200,60,60), RDim=Color3.fromRGB(35,10,10),
     Gold=Color3.fromRGB(220,160,0), Blue=Color3.fromRGB(80,150,255),
     Teal=Color3.fromRGB(40,200,160), TDim=Color3.fromRGB(8,30,24),
+    Cyan=Color3.fromRGB(80,200,230), Purple=Color3.fromRGB(180,90,210),
+    Pink=Color3.fromRGB(220,100,160), Orange=Color3.fromRGB(230,140,60),
 }
+
+-- v3.0: WEIGHT CATEGORIES dari game.guide
+-- Pakai CURRENT KG (bukan baseKG) buat kategorisasi
+local CATEGORIES = {
+    {name="Large",     short="Lg",  min=0,    max=3.5,  color=C.Cyan},
+    {name="Semi Huge", short="SH",  min=3.5,  max=5,    color=C.Pink},
+    {name="Huge",      short="Hg",  min=5,    max=7,    color=C.Purple},
+    {name="Semi Tit",  short="ST",  min=7,    max=7.5,  color=C.Orange},
+    {name="Titanic",   short="Ti",  min=7.5,  max=9,    color=C.Red},
+    {name="Godly",     short="Gd",  min=9,    max=10.5, color=C.Gold},
+    {name="Colossal",  short="Col", min=10.5, max=math.huge, color=C.Green},
+}
+
+local function categorize(kg)
+    if not kg then return nil end
+    for _, cat in ipairs(CATEGORIES) do
+        if kg >= cat.min and kg < cat.max then return cat end
+    end
+    return CATEGORIES[#CATEGORIES]
+end
 
 -- HELPERS
 local function mk(cls, props)
@@ -63,7 +87,6 @@ local function div(parent, lo)
     return mk("Frame",{Size=UDim2.new(1,0,0,1), BackgroundColor3=C.Dim, BorderSizePixel=0, LayoutOrder=lo, Parent=parent})
 end
 
--- togRow style sama dgn ZenxLvl
 local function togRow(parent, labelTxt, descTxt, lo)
     local row = mk("Frame",{Size=UDim2.new(1,0,0,32), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=parent})
     corner(row, 6) local rowStroke = stroke(row, C.Dim, 1.1)
@@ -76,7 +99,6 @@ local function togRow(parent, labelTxt, descTxt, lo)
     return row, tog, togStroke, rowStroke
 end
 
--- cfgRow style sama dgn ZenxLvl
 local function cfgRow(parent, labelTxt, lo, default, onChange)
     local r = mk("Frame",{Size=UDim2.new(1,0,0,26), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=parent})
     corner(r, 6) stroke(r, C.Dim, 1.1)
@@ -98,72 +120,48 @@ end
 -- PET HELPERS
 local function isPet(item) return item:FindFirstChild("PetToolLocal") or item:FindFirstChild("PetToolServer") end
 local function isFavorite(item)
-    for _, attr in ipairs({"Loved","IsLoved","Heart","Hearted","Liked","IsLiked","IsHeart","Love","HeartIcon","Favorited","Favourited","Favorite","Favourite","IsFavorited","IsFavourited"}) do
-        local v = item:GetAttribute(attr)
-        if v == true then return true end
+    for _, attr in ipairs({"Loved","IsLoved","Heart","Hearted","Liked","IsLiked","IsHeart","Love","HeartIcon","Favorited","Favourited","Favorite","Favourite","IsFavorited","IsFavourited","d"}) do
+        local v = item:GetAttribute(attr) if v == true then return true end
     end
-    local d = item:GetAttribute("d")
-    if d == true then return true end
     return false
 end
-local function getPetName(item)
-    return item.Name:match("^(.-)%s*%[") or item.Name
-end
-
--- v2.1: more flexible KG patterns (handle case insensitive, no space, various brackets)
+local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Name end
 local function getKG(item)
     local n = item.Name
-    -- Pattern 1: [12.5 KG], [12.5kg], [12 KG]
     local kg = n:match("%[%s*([%d%.]+)%s*[Kk][Gg]%s*%]")
     if kg then return tonumber(kg) end
-    -- Pattern 2: anywhere "[12.5 kg]" with whitespace variations
     kg = n:match("([%d%.]+)%s*[Kk][Gg]")
     if kg then return tonumber(kg) end
     return nil
 end
-
--- v2.1: more flexible Age patterns
 local function getAge(item)
     local n = item.Name
-    -- Pattern 1: [Age 5], [Age5]
     for _, pat in ipairs({"%[Age%s+(%d+)%]", "%[Age(%d+)%]", "%[AGE%s+(%d+)%]", "%[age%s+(%d+)%]"}) do
         local f = n:match(pat) if f then return tonumber(f) end
     end
-    -- Pattern 2: anywhere "Age 5" without brackets
     local f = n:match("[Aa][Gg][Ee]%s+(%d+)")
     if f then return tonumber(f) end
     return nil
 end
 
-local maxKGCache = {}
-local function buildMaxKGCache()
-    local bp = player:FindFirstChild("Backpack") if not bp then return end
-    for _, item in pairs(bp:GetChildren()) do
-        if isPet(item) then
-            local name = getPetName(item)
-            local age = getAge(item)
-            local kg = getKG(item)
-            if name and age and kg and age >= 1 then
-                local maxKG = kg * 11 / (age + 10)
-                local existing = maxKGCache[name]
-                if not existing or maxKG > existing then maxKGCache[name] = maxKG end
-            end
-        end
-    end
-end
-local function getMaxKGForPet(name) return maxKGCache[name] end
-local function getAgeFromKG(item)
+-- v3.0: smart age fallback (kalo gak ada Age di nama)
+local function getEstimatedAge(item)
     local age = getAge(item) if age then return age end
     local kg = getKG(item) if not kg then return nil end
-    local maxKG = getMaxKGForPet(getPetName(item)) if not maxKG then return nil end
-    if maxKG <= 0 then return nil end
-    return math.floor((kg * 11 / maxKG) - 10 + 0.5)
+    if kg >= 20 then return 100 end
+    return 1
+end
+
+-- v3.0: hitung baseKG dari current KG + age
+local function calcBaseKG(kg, age)
+    if not kg or not age or age < 1 then return nil end
+    return kg * 11 / (age + 10)
 end
 
 -- ============================================
--- BUILD GUI (lebih tinggi buat fit rejoin section)
+-- BUILD GUI
 -- ============================================
-local GUI_W = 460 local GUI_H = 440
+local GUI_W = 480 local GUI_H = 460
 local sg = mk("ScreenGui",{Name="ZenxInvGui", DisplayOrder=999, ResetOnSpawn=false, Parent=player:WaitForChild("PlayerGui")})
 
 local main = mk("Frame",{
@@ -173,7 +171,7 @@ local main = mk("Frame",{
 })
 corner(main, 10) stroke(main, C.Teal, 2)
 
--- TITLE BAR (sama dgn ZenxLvl)
+-- TITLE BAR
 local TB = mk("Frame",{Size=UDim2.new(1,0,0,34), BackgroundColor3=C.Panel, BorderSizePixel=0, Parent=main})
 corner(TB, 10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5), Position=UDim2.new(0,0,1,-1.5), BackgroundColor3=C.Teal, BorderSizePixel=0, Parent=TB})
@@ -184,10 +182,8 @@ local minBtn = btn(TB, "-", 13, C.Panel, C.Gray)
 minBtn.Size = UDim2.new(0,22,0,22) minBtn.Position = UDim2.new(1,-50,0.5,-11) stroke(minBtn, C.Dim, 1.2)
 local closeBtn = btn(TB, "X", 10, C.RDim, C.Red)
 closeBtn.Size = UDim2.new(0,22,0,22) closeBtn.Position = UDim2.new(1,-24,0.5,-11) stroke(closeBtn, C.Red, 1.2)
-
 closeBtn.MouseButton1Click:Connect(function() sg:Destroy() end)
 
--- Mini Z icon (sama style ZenxLvl)
 local miniIcon = mk("TextButton",{
     Size=UDim2.new(0,38,0,38), Position=UDim2.new(0.5,-19,0.5,-19),
     BackgroundColor3=C.BG, Text="Z", TextColor3=C.Teal,
@@ -198,43 +194,46 @@ corner(miniIcon, 8) stroke(miniIcon, C.Teal, 2)
 minBtn.MouseButton1Click:Connect(function() main.Visible=false miniIcon.Visible=true end)
 miniIcon.MouseButton1Click:Connect(function() main.Visible=true miniIcon.Visible=false end)
 
--- ============================================
--- CONTENT (with UIListLayout for clean stacking)
--- ============================================
+-- CONTENT
 local content = mk("ScrollingFrame",{
     Size=UDim2.new(1,-10,1,-44), Position=UDim2.new(0,5,0,39),
     BackgroundTransparency=1, BorderSizePixel=0,
-    ScrollBarThickness=4, CanvasSize=UDim2.new(0,0,0,0),
-    AutomaticCanvasSize=Enum.AutomaticSize.Y, Parent=main
+    ScrollBarThickness=4, AutomaticCanvasSize=Enum.AutomaticSize.Y, Parent=main
 })
 mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,5), Parent=content})
 mk("UIPadding",{PaddingLeft=UDim.new(0,2), PaddingRight=UDim.new(0,2), Parent=content})
 
--- ===== INVENTORY HEADER =====
+-- INVENTORY HEADER
 local invHeader = mk("Frame",{Size=UDim2.new(1,0,0,26), BackgroundColor3=C.Panel, BorderSizePixel=0, LayoutOrder=1, Parent=content})
 corner(invHeader, 7) stroke(invHeader, C.Dim, 1.2)
-local invHeaderLbl = lbl(invHeader, "Inventory Pet (loading...)", 9, C.Teal)
+local invHeaderLbl = lbl(invHeader, "Pet Inventory (loading...)", 10, C.Teal)
 invHeaderLbl.Size = UDim2.new(1,-100,1,0) invHeaderLbl.Position = UDim2.new(0,8,0,0)
 local invRefreshBtn = btn(invHeader, "Refresh", 9, C.TDim, C.Teal)
 invRefreshBtn.Size = UDim2.new(0,80,0,20) invRefreshBtn.Position = UDim2.new(1,-86,0.5,-10)
 stroke(invRefreshBtn, C.Teal, 1.2)
 
--- ===== KG PILLS =====
-local statsBar = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
-mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,3), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=statsBar})
+-- v3.0: WEIGHT CATEGORY PILLS (7 categories)
+-- 2 rows: Row 1 (4 pills) + Row 2 (3 pills) biar muat
+local catRow1 = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
+mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,4), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow1})
 
-local kgRanges = {{1,2},{2,3},{3,4},{4,5},{5,6},{6,9}}
-local kgPills = {}
-for i, r in ipairs(kgRanges) do
-    local pill = mk("Frame",{Size=UDim2.new(0,72,1,0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=statsBar})
+local catRow2 = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=3, Parent=content})
+mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,4), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow2})
+
+local catLabels = {}
+for i, cat in ipairs(CATEGORIES) do
+    local row = i <= 4 and catRow1 or catRow2
+    local pillW = i <= 4 and 110 or 148  -- row1: 4x110, row2: 3x148
+    local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=row})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, r[1].."-"..r[2].."kg: 0", 11, C.Gray, Enum.TextXAlignment.Center)
+    local pl = lbl(pill, cat.name..": 0", 11, C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
-    kgPills[i] = pl
+    pl.Font = Enum.Font.GothamBold
+    catLabels[i] = pl
 end
 
--- ===== DETAIL PANEL =====
-local detailPanel = mk("Frame",{Size=UDim2.new(1,0,0,110), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=3, Parent=content})
+-- DETAIL PANEL
+local detailPanel = mk("Frame",{Size=UDim2.new(1,0,0,110), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=4, Parent=content})
 corner(detailPanel, 7) stroke(detailPanel, C.Dim, 1.2)
 mk("UIPadding",{PaddingTop=UDim.new(0,8), PaddingLeft=UDim.new(0,10), PaddingRight=UDim.new(0,10), Parent=detailPanel})
 mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,4), Parent=detailPanel})
@@ -242,134 +241,96 @@ mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,4), 
 local detailTotal = lbl(detailPanel, "Total: -", 11, C.Teal) detailTotal.Size=UDim2.new(1,0,0,16) detailTotal.LayoutOrder=1
 local detailFav = lbl(detailPanel, "Favorite: -", 10, C.Gold) detailFav.Size=UDim2.new(1,0,0,14) detailFav.LayoutOrder=2
 local detailHigh = lbl(detailPanel, "Pet age 100+: -", 10, C.Green) detailHigh.Size=UDim2.new(1,0,0,14) detailHigh.LayoutOrder=3
-local detailRange = lbl(detailPanel, "BaseKG range: -", 10, C.Blue) detailRange.Size=UDim2.new(1,0,0,14) detailRange.LayoutOrder=4
-local detailUnread = lbl(detailPanel, "Unread (no KG/Age): -", 10, C.Red) detailUnread.Size=UDim2.new(1,0,0,14) detailUnread.LayoutOrder=5
+local detailKG = lbl(detailPanel, "Weight range: -", 10, C.Blue) detailKG.Size=UDim2.new(1,0,0,14) detailKG.LayoutOrder=4
+local detailUnread = lbl(detailPanel, "Unread: -", 10, C.Gray) detailUnread.Size=UDim2.new(1,0,0,14) detailUnread.LayoutOrder=5
 
--- ===== DIVIDER =====
-div(content, 4)
+-- DIVIDER
+div(content, 5)
 
--- ============================================
--- REJOIN SECTION (style PERSIS sama dgn ZenxLvl main)
--- ============================================
-local rejoinHeader = lbl(content, "REJOIN", 9, C.Teal) rejoinHeader.Size=UDim2.new(1,0,0,14) rejoinHeader.LayoutOrder=5
+-- REJOIN
+local rejoinHeader = lbl(content, "REJOIN", 9, C.Teal) rejoinHeader.Size=UDim2.new(1,0,0,14) rejoinHeader.LayoutOrder=6
 
 local rnBtn = btn(content, "Rejoin Now", 10, C.TDim, C.Teal)
-rnBtn.Size = UDim2.new(1,0,0,24) rnBtn.LayoutOrder=6 stroke(rnBtn, C.Teal, 1.5)
+rnBtn.Size = UDim2.new(1,0,0,24) rnBtn.LayoutOrder=7 stroke(rnBtn, C.Teal, 1.5)
 
-local rejoinMinutes = 30  -- default
-local intervalRow, intervalBox = cfgRow(content, "Interval (menit)", 7, rejoinMinutes, function(v)
+local rejoinMinutes = savedState.rejoinMinutes or 30
+cfgRow(content, "Interval (menit)", 8, rejoinMinutes, function(v)
     rejoinMinutes = math.max(1, math.min(120, v))
-    saveState({autoRejoin=autoRejoin, rejoinMinutes=rejoinMinutes})
+    saveState({autoRejoin=savedState.autoRejoin, rejoinMinutes=rejoinMinutes})
 end)
 
-local _, arTog, arTogStroke, arStroke = togRow(content, "Auto Rejoin", "Rejoin otomatis sesuai interval", 8)
+local _, arTog, arTogStroke, arStroke = togRow(content, "Auto Rejoin", "Rejoin otomatis sesuai interval", 9)
 local cdLbl = lbl(content, "Auto Rejoin: OFF", 9, C.Gray, Enum.TextXAlignment.Center)
-cdLbl.Size = UDim2.new(1,0,0,20) cdLbl.LayoutOrder=9 cdLbl.BackgroundColor3=C.Panel cdLbl.BackgroundTransparency=0
+cdLbl.Size = UDim2.new(1,0,0,20) cdLbl.LayoutOrder=10 cdLbl.BackgroundColor3=C.Panel cdLbl.BackgroundTransparency=0
 corner(cdLbl, 6) stroke(cdLbl, C.Dim, 1.1)
 
 -- ============================================
--- INVENTORY BUILD LOGIC
+-- INVENTORY BUILD
 -- ============================================
 local function _doBuildInvShow()
     local bp = player:FindFirstChild("Backpack")
     if not bp then invHeaderLbl.Text = "Backpack gak ada" return end
 
-    pcall(buildMaxKGCache)
     local petsList = {}
-    local minBase, maxBase, sumBase, baseCount = math.huge, 0, 0, 0
-    local favCount = 0 local highAgeCount = 0
-    local unreadCount = 0
-    local unreadNames = {}
+    local minKG, maxKG, sumKG, kgCount = math.huge, 0, 0, 0
+    local favCount = 0 local highAgeCount = 0 local unreadCount = 0
+    local catCounts = {}  -- per category
+    for i = 1, #CATEGORIES do catCounts[i] = 0 end
 
     for _, item in pairs(bp:GetChildren()) do
         if isPet(item) then
-            local age = getAgeFromKG(item)
             local kg = getKG(item)
+            local age = getEstimatedAge(item)
             local fav = isFavorite(item)
-            local baseKG = nil
 
-            -- v2.2: smart fallback - pet mutasi tanpa Age di nama biasanya udah age 100
-            -- Pakai cache dulu kalo ada, kalo gak ada pakai heuristik:
-            -- KG >= 20 -> age 100 (pet udah maxed out)
-            -- KG < 20 -> age 1 (pet masih muda)
-            if not age and kg then
-                if kg >= 20 then
-                    age = 100  -- pet gede, kemungkinan max age
-                else
-                    age = 1   -- pet kecil, kemungkinan baru hatched
+            if kg then
+                if kg < minKG then minKG = kg end
+                if kg > maxKG then maxKG = kg end
+                sumKG = sumKG + kg
+                kgCount = kgCount + 1
+
+                -- Categorize by current KG
+                local cat = categorize(kg)
+                if cat then
+                    for i, c in ipairs(CATEGORIES) do
+                        if c == cat then catCounts[i] = catCounts[i] + 1 break end
+                    end
                 end
-            end
-
-            if kg and age and age >= 1 then
-                baseKG = kg * 11 / (age + 10)
-                if baseKG < minBase then minBase = baseKG end
-                if baseKG > maxBase then maxBase = baseKG end
-                sumBase = sumBase + baseKG
-                baseCount = baseCount + 1
             else
-                -- pet bener-bener gak bisa di-parse (no kg)
                 unreadCount = unreadCount + 1
-                if #unreadNames < 5 then
-                    table.insert(unreadNames, item.Name:sub(1, 35))
-                end
                 print("[ZenxInv] UNREAD pet: '"..item.Name.."'")
             end
 
             if fav then favCount = favCount + 1 end
             if age and age >= 100 then highAgeCount = highAgeCount + 1 end
-            table.insert(petsList, {age=age or 0, kg=kg or 0, baseKG=baseKG, fav=fav, name=item.Name})
-        end
-    end
-
-    local rangeCounts = {0,0,0,0,0,0}
-    local outOfRange = 0
-    local highBaseKG = 0  -- pet baseKG > 7
-    local lowBaseKG = 0   -- pet baseKG < 1
-    for _, p in ipairs(petsList) do
-        if p.baseKG then
-            local matched = false
-            for ri, r in ipairs(kgRanges) do
-                if p.baseKG >= r[1] and p.baseKG < r[2] then
-                    rangeCounts[ri] = rangeCounts[ri] + 1
-                    matched = true
-                    break
-                end
-            end
-            if not matched then
-                outOfRange = outOfRange + 1
-                if p.baseKG >= 9 then highBaseKG = highBaseKG + 1
-                elseif p.baseKG < 1 then lowBaseKG = lowBaseKG + 1 end
-            end
+            table.insert(petsList, {kg=kg, age=age, fav=fav, name=item.Name})
         end
     end
 
     invHeaderLbl.Text = "Total: "..#petsList.." pet"
     invHeaderLbl.TextColor3 = C.Teal
-    for i, lblWidget in ipairs(kgPills) do
-        local r = kgRanges[i]
-        lblWidget.Text = r[1].."-"..r[2].."kg: "..rangeCounts[i]
-        lblWidget.TextColor3 = rangeCounts[i] > 0 and C.Teal or C.Gray
-    end
-    detailTotal.Text = "Total: "..#petsList.." pet ("..baseCount.." dgn baseKG)"
-    detailFav.Text = "Favorite: "..favCount.." pet"
-    detailHigh.Text = "Pet age 100+: "..highAgeCount.." pet"
-    if baseCount > 0 then
-        detailRange.Text = string.format("BaseKG: min=%.2f max=%.2f avg=%.2f", minBase, maxBase, sumBase/baseCount)
-    else
-        detailRange.Text = "BaseKG: gak ada data"
+
+    for i, lblWidget in ipairs(catLabels) do
+        local cat = CATEGORIES[i]
+        local count = catCounts[i]
+        lblWidget.Text = cat.name..": "..count
+        lblWidget.TextColor3 = count > 0 and cat.color or C.Gray
     end
 
+    detailTotal.Text = "Total: "..#petsList.." pet ("..kgCount.." dgn KG)"
+    detailFav.Text = "Favorite: "..favCount.." pet"
+    detailHigh.Text = "Pet age 100+: "..highAgeCount.." pet"
+    if kgCount > 0 then
+        detailKG.Text = string.format("Weight: min=%.2fkg max=%.2fkg avg=%.2fkg", minKG, maxKG, sumKG/kgCount)
+    else
+        detailKG.Text = "Weight: gak ada data"
+    end
     if unreadCount > 0 then
-        detailUnread.Text = "Unread (no KG): "..unreadCount.." pet | Out-range: "..outOfRange.." (>9kg:"..highBaseKG..")"
+        detailUnread.Text = "Unread: "..unreadCount.." pet (cek console)"
         detailUnread.TextColor3 = C.Red
     else
-        if outOfRange > 0 then
-            detailUnread.Text = "Out-range >9kg: "..highBaseKG.." | <1kg: "..lowBaseKG.." pet"
-            detailUnread.TextColor3 = C.Gold
-        else
-            detailUnread.Text = "Semua pet ke-baca + masuk range"
-            detailUnread.TextColor3 = C.Green
-        end
+        detailUnread.Text = "Semua pet ke-baca"
+        detailUnread.TextColor3 = C.Green
     end
 end
 
@@ -385,15 +346,10 @@ invRefreshBtn.MouseButton1Click:Connect(buildInvShow)
 task.spawn(function() task.wait(0.5) buildInvShow() end)
 
 -- ============================================
--- REJOIN logic (PERSIS sama dgn ZenxLvl main script)
+-- REJOIN
 -- ============================================
 local isAR = false
 local arTask = nil
-local autoRejoin = savedState.autoRejoin or false
--- Override default rejoinMinutes kalo udah pernah di-save
-if savedState.rejoinMinutes then
-    rejoinMinutes = savedState.rejoinMinutes
-end
 
 rnBtn.MouseButton1Click:Connect(function()
     rnBtn.Text = "Rejoining..."
@@ -413,17 +369,16 @@ setArTog(false)
 local function stopAR()
     isAR = false
     if arTask then task.cancel(arTask) arTask = nil end
-    autoRejoin = false
     setArTog(false)
     cdLbl.Text = "Auto Rejoin: OFF"
     cdLbl.TextColor3 = C.Gray
-    saveState({autoRejoin=false, rejoinMinutes=rejoinMinutes})  -- v2.3: save state OFF
+    saveState({autoRejoin=false, rejoinMinutes=rejoinMinutes})
 end
 
 local function startAR()
-    isAR = true autoRejoin = true
+    isAR = true
     setArTog(true)
-    saveState({autoRejoin=true, rejoinMinutes=rejoinMinutes})  -- v2.3: save state ON
+    saveState({autoRejoin=true, rejoinMinutes=rejoinMinutes})
     arTask = task.spawn(function()
         while isAR do
             local mins = rejoinMinutes
@@ -446,13 +401,10 @@ arTog.MouseButton1Click:Connect(function()
     if isAR then stopAR() else startAR() end
 end)
 
--- v2.3: auto-resume Auto Rejoin kalo state-nya ON sebelum rejoin
+-- Auto resume Auto Rejoin
 if savedState.autoRejoin == true then
-    print("[ZenxInv] resume Auto Rejoin ON (dari state file)")
-    task.spawn(function()
-        task.wait(2)  -- kasih waktu GUI ready
-        startAR()
-    end)
+    print("[ZenxInv] resume Auto Rejoin ON")
+    task.spawn(function() task.wait(2) startAR() end)
 end
 
 print("==== ZenxInv "..SCRIPT_VERSION.." READY ====")
