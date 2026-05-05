@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.18"
+local SCRIPT_VERSION="v12.19"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -547,6 +547,19 @@ local MUTATION_PREFIXES={
     "Toxic ","Radiant ","Mystic ","Phantom ","Spectral ",
     "Eldritch ","Primal ","Ethereal ","Astral ","Chromatic ",
     "Prismatic ","Volcanic ","Glacial ","Tempest ","Solar ",
+    -- v12.19: tambahan mutation baru
+    "Nightmare ","Dreadbound ","Ghostly ","Diamond ","Bearded ",
+    "Glimmering ","Sparkling ","Inverted ","Bloodlust ","Dawn ",
+    "Twilight ","Eclipse ","Aurora ","Frostbite ","Inferno ",
+    "Emerald ","Ruby ","Sapphire ","Amethyst ","Obsidian ",
+    "Crimson ","Azure ","Emerald ","Topaz ","Onyx ",
+    "Demonic ","Holy ","Cursed ","Blessed ","Chaotic ",
+    "Pristine ","Pure ","Tainted ","Corrupted ","Hallowed ",
+    "Hellfire ","Starlight ","Moonlight ","Sunlight ","Voidborn ",
+    "Skybound ","Earthbound ","Seabound ","Cloudborn ","Nightborn ",
+    "GIANT ","Mega ","Mini ","Tiny ","Huge ",
+    "Royal ","Imperial ","Noble ","Common ","Rare ",
+    "Epic ","Legendary ","Mythical ","Exotic ","Festive ",
 }
 function getBaseName(name)
     local result=name
@@ -1166,7 +1179,17 @@ local function selCount() local n=0 for _ in pairs(targetPetTypes) do n=n+1 end 
 local function isTargetPet(name)
     if selCount()==0 then return true end
     if targetPetTypes[name] then return true end
-    if targetPetTypes[getBaseName(name)] then return true end
+    -- v12.19: cek getBaseName (strip mutation prefix)
+    local baseName = getBaseName(name)
+    if targetPetTypes[baseName] then return true end
+    -- v12.19: substring fallback - kalo nama target ada di pet name
+    -- (handle mutation prefix yg blm ke-list)
+    local nameLower = name:lower()
+    for targetName, _ in pairs(targetPetTypes) do
+        local targetLower = targetName:lower()
+        -- exact word match (biar gak too lenient - cuma match kalo target name muncul as substring)
+        if nameLower:find(targetLower, 1, true) then return true end
+    end
     return false
 end
 local function getTeamPetInfo(uuid)
@@ -3081,4 +3104,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.18: Total/Jadi/Kurang cek backpack + ActivePetUI (pet equipped + dedupe)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.19: + 50 mutation prefix baru + isTargetPet substring fallback")
