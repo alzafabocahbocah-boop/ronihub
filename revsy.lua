@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.13"
+local SCRIPT_VERSION="v12.17"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -801,28 +801,45 @@ local donesPanel = mk("Frame", {
 corner(donesPanel, 7)
 stroke(donesPanel, C.Teal, 1.3)
 
-local donesLbl = lbl(donesPanel, "Pet jadi: 0 (100+)", 11, C.Teal, Enum.TextXAlignment.Center)
+local donesLbl = lbl(donesPanel, "Total:0 Jadi:0 Kurang:0", 10, C.Teal, Enum.TextXAlignment.Center)
 donesLbl.Size = UDim2.new(1, -10, 1, 0)
 donesLbl.Position = UDim2.new(0, 5, 0, 0)
 donesLbl.Font = Enum.Font.GothamBold
 
 task.spawn(function()
     while donesLbl and donesLbl.Parent and not scriptShutdown do
-        local count = 0
+        -- v12.16: 3 stats - Total target pet, Jadi (age >= toAge), Kurang (sisa)
+        local total = 0
+        local done = 0
+        local remaining = 0
         local bp = player:FindFirstChild("Backpack")
         if bp then
             for _, item in pairs(bp:GetChildren()) do
                 if isPet(item) then
-                    local age = getAgeFromKG(item)
-                    if age and age >= toAge then
-                        count = count + 1
+                    local name = getPetName(item)
+                    local uuid = getPetUUID(item)
+                    -- Count pet yg match target dan bukan tim/favorite
+                    if isTargetPet(name) and not isFavorite(item) and not (uuid and teamPetUUIDs[tostring(uuid)]) then
+                        total = total + 1
+                        local age = getAgeFromKG(item)
+                        if age and age >= toAge then
+                            done = done + 1
+                        else
+                            remaining = remaining + 1
+                        end
                     end
                 end
             end
         end
         if donesLbl and donesLbl.Parent then
-            donesLbl.Text = "Pet jadi: "..count.." ("..toAge.."+)"
-            donesLbl.TextColor3 = count > 0 and C.Teal or C.Gray
+            donesLbl.Text = "Total:"..total.." Jadi:"..done.." Kurang:"..remaining
+            if total == 0 then
+                donesLbl.TextColor3 = C.Gray
+            elseif remaining == 0 then
+                donesLbl.TextColor3 = C.Green  -- semua selesai
+            else
+                donesLbl.TextColor3 = C.Teal
+            end
         end
         task.wait(2)
     end
@@ -2197,26 +2214,34 @@ pcall(function()
         local conn = giftPetRE.OnClientEvent:Connect(function(petUUID, petName, senderUsername)
             if not autoAccGift then return end
             local short = tostring(petUUID):sub(1,8)
-            local ok = pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
-            if ok then
+
+            -- v12.14: FAST gift accept - INSTANT fire (sebelum proses lainnya)
+            -- Plus task.spawn biar handler langsung return, gak block event berikutnya
+            -- Plus retry 2x dengan jarak kecil buat handle packet drop
+            pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)  -- fire #1 INSTANT
+            task.spawn(function()
+                task.wait(0.05)
+                pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)  -- fire #2 backup
+            end)
+
+            -- Update counter + status (non-blocking)
+            task.spawn(function()
                 giftAccCount = giftAccCount + 1
-                dbg("[autoAcc-gift] OK #"..giftAccCount.." "..short.." from "..tostring(senderUsername))
+                dbg("[autoAcc-gift] FAST #"..giftAccCount.." "..short.." from "..tostring(senderUsername))
                 if accStatusLbl then
                     accStatusLbl.Text = "Gift accept #"..giftAccCount.." ("..tostring(senderUsername)..")"
                     accStatusLbl.TextColor3 = C.Teal
                     local myCount = giftAccCount
-                    task.delay(2.5, function()
+                    task.delay(1.5, function()  -- v12.14: 2.5s -> 1.5s (lebih snappy)
                         if accStatusLbl and giftAccCount == myCount then
                             accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray
                         end
                     end)
                 end
-            else
-                dbg("[autoAcc-gift] FAIL "..short)
-            end
+            end)
         end)
         table.insert(connections, conn)
-        dbg("[autoAcc] gift hook PRECISE installed (GiftPet -> AcceptPetGift)")
+        dbg("[autoAcc] gift hook FAST installed (instant fire + 50ms retry)")
     else
         dbg("[autoAcc] WARN: GiftPet/AcceptPetGift gak ketemu (path: GameEvents direct)")
     end
@@ -2541,8 +2566,8 @@ startGlobalPoller=function()
                                 end
                                 nextCheckAt[uuid] = tick() + 0.05
                             elseif t > 2 then
-                                -- Cooldown masih jauh - sleep lama, save server invokes
-                                nextCheckAt[uuid] = tick() + math.min(t * 0.6, 4)
+                                -- v12.15: max sleep 4 -> 2 detik (lebih responsive)
+                                nextCheckAt[uuid] = tick() + math.min(t * 0.6, 2)
                             elseif t > 0.5 then
                                 -- Mendekati - polling 100ms
                                 nextCheckAt[uuid] = tick() + 0.1
@@ -2856,9 +2881,12 @@ local function doStart()
                 end
             end
 
+            -- v12.15: jangan auto-stop, tetep waiting mode (gak doStop lagi)
+            -- biar user trade pet baru, queue refresh otomatis level lagi
             if slotsUsed==0 and #available==0 then
-                doStop("Semua pet selesai Age "..toAge.."!")
-                statusLbl.TextColor3=C.Green buildTargetList() break
+                statusLbl.Text="Semua pet selesai Age "..toAge.."! (waiting...)"
+                statusLbl.TextColor3=C.Green
+                -- gak break, lanjut loop terus
             end
 
             if slotsFree>0 and #available>0 then
@@ -2895,6 +2923,20 @@ local function doStart()
                     local item=findPetInBackpack(uuid)
                     if item then age=getAgeFromKG(item) end
                 end
+                if not age then
+                    -- v12.17: cek placed pet di garden (pet ke-equip)
+                    local placed=findPlacedPetByUUID(uuid)
+                    if placed then age=getPlacedPetAge(placed) end
+                end
+                if not age then
+                    -- v12.17: ultimate fallback - estimate dari item KG kalo ada di backpack
+                    local item=findPetInBackpack(uuid)
+                    if item then
+                        local kg=getKG(item)
+                        if kg and kg >= 20 then age = 100
+                        elseif kg then age = 1 end
+                    end
+                end
                 local ageStr=age and (age.."/"..toAge) or ("?/"..toAge)
                 table.insert(activeNames,nameStr.." "..ageStr)
             end
@@ -2905,7 +2947,7 @@ local function doStart()
             end
             statusLbl.TextColor3=C.Teal
 
-            task.wait(0.25)
+            task.wait(0.15)  -- v12.15: 0.25 -> 0.15 (lebih snappy)
         end
     end)
 end
@@ -2996,4 +3038,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.13: + smart age fallback buat pet mutasi (KG>=20 -> age 100, else 1)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.17: status display cek placed pet juga (pet equipped di garden)")
