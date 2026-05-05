@@ -1,6 +1,6 @@
 -- ============= ZENX INVENTORY VIEWER + REJOIN =============
 -- Standalone: Inventory Show + Rejoin (style sama dgn ZenxLvl main script)
-local SCRIPT_VERSION = "v2.4 (font lebih gede)"
+local SCRIPT_VERSION = "v2.5 (range 6-9kg)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -223,7 +223,7 @@ stroke(invRefreshBtn, C.Teal, 1.2)
 local statsBar = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,3), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=statsBar})
 
-local kgRanges = {{1,2},{2,3},{3,4},{4,5},{5,6},{6,7}}
+local kgRanges = {{1,2},{2,3},{3,4},{4,5},{5,6},{6,9}}
 local kgPills = {}
 for i, r in ipairs(kgRanges) do
     local pill = mk("Frame",{Size=UDim2.new(0,72,1,0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=statsBar})
@@ -337,7 +337,7 @@ local function _doBuildInvShow()
             end
             if not matched then
                 outOfRange = outOfRange + 1
-                if p.baseKG >= 7 then highBaseKG = highBaseKG + 1
+                if p.baseKG >= 9 then highBaseKG = highBaseKG + 1
                 elseif p.baseKG < 1 then lowBaseKG = lowBaseKG + 1 end
             end
         end
@@ -360,11 +360,11 @@ local function _doBuildInvShow()
     end
 
     if unreadCount > 0 then
-        detailUnread.Text = "Unread (no KG): "..unreadCount.." pet | Out-range: "..outOfRange.." (>7kg:"..highBaseKG..")"
+        detailUnread.Text = "Unread (no KG): "..unreadCount.." pet | Out-range: "..outOfRange.." (>9kg:"..highBaseKG..")"
         detailUnread.TextColor3 = C.Red
     else
         if outOfRange > 0 then
-            detailUnread.Text = "Out-range >7kg: "..highBaseKG.." | <1kg: "..lowBaseKG.." pet"
+            detailUnread.Text = "Out-range >9kg: "..highBaseKG.." | <1kg: "..lowBaseKG.." pet"
             detailUnread.TextColor3 = C.Gold
         else
             detailUnread.Text = "Semua pet ke-baca + masuk range"
