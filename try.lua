@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.3"
+local SCRIPT_VERSION="v12.4"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + multi-pattern gift no teleport)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + non-ASCII cleaned)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -457,7 +457,7 @@ local function sendGiftToPlayer(targetName, petUUID)
         end
     end
 
-    -- Semua pattern gagal — pet masih di backpack. Fallback: hold-as-tool method (rawan Steve sell)
+    -- Semua pattern gagal - pet masih di backpack. Fallback: hold-as-tool method (rawan Steve sell)
     dbg("[gift] semua pattern direct fail, fallback ke hold-as-tool (HATI2 Steve)")
     local item = holdPetAsTool(petUUID)
     if not item then
@@ -3091,4 +3091,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.3: gift try 5 pattern UUID-direct (no teleport, no hold) - fallback ke hold kalo gagal")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.4: em-dash cleaned, harusnya bisa execute")
