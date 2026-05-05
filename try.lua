@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.7"
+local SCRIPT_VERSION="v12.8"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + multi-stage accept inline)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE gift accept pattern)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2179,150 +2179,98 @@ end)
 -- Gift: hook PetGiftingService:OnClientEvent
 -- ============================================
 pcall(function()
-    -- v12.7: Hook semua TradeEvents, multi-stage accept (inline, no helper)
+    -- v9.3: Hook SEMUA RemoteEvent di TradeEvents folder + log everything
     local ge = RS:FindFirstChild("GameEvents")
     local te = ge and ge:FindFirstChild("TradeEvents")
     if te then
-        local tradeFireCD = {}  -- cooldown per remote name biar gak loop self-fire
         for _, remote in ipairs(te:GetChildren()) do
             if remote:IsA("RemoteEvent") then
                 local tradeConn = remote.OnClientEvent:Connect(function(...)
                     if not autoAccTrade then return end
                     local args = {...}
-                    local rname = remote.Name
-                    -- Skip dangerous remotes: cancel/reject/decline
-                    local lname = rname:lower()
-                    if lname:find("cancel") or lname:find("reject") or lname:find("decline") then return end
-                    -- Cooldown check biar gak loop
-                    if (tradeFireCD[rname] or 0) > tick() then return end
-                    tradeFireCD[rname] = tick() + 0.3
-                    -- Log
-                    local arg1 = args[1]
-                    local argInfo = "?"
-                    if typeof(arg1) == "Instance" then argInfo = arg1.ClassName..":"..arg1.Name
-                    elseif arg1 ~= nil then argInfo = tostring(arg1):sub(1,20) end
-                    dbg("[autoAcc-trade] event '"..rname.."' arg1="..argInfo)
+                    -- Log apa yg fire (debug)
+                    local argDesc = {}
+                    for i=1, math.min(3, #args) do
+                        local a = args[i]
+                        if typeof(a) == "Instance" then
+                            table.insert(argDesc, "<"..a.ClassName..":"..a.Name..">")
+                        elseif type(a) == "table" then
+                            table.insert(argDesc, "<table>")
+                        else
+                            table.insert(argDesc, tostring(a):sub(1,30))
+                        end
+                    end
+                    dbg("[autoAcc-trade] event '"..remote.Name.."' args=("..table.concat(argDesc,", ")..")")
 
-                    -- Fire RespondRequest (stage 1: accept request)
+                    -- Coba accept dengan beberapa pattern (whatever works)
                     if tradeRespondRE then
+                        local arg1 = args[1]
+                        -- Pattern 1: Player Instance + true
                         if typeof(arg1) == "Instance" and arg1:IsA("Player") then
                             pcall(function() tradeRespondRE:FireServer(arg1, true) end)
+                            dbg("[autoAcc-trade] tried RespondRequest("..arg1.Name..", true)")
+                            if accStatusLbl then
+                                accStatusLbl.Text = "Trade dari "..arg1.Name.." -> accept!"
+                                accStatusLbl.TextColor3 = C.Teal
+                                task.delay(2, function() if accStatusLbl then accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray end end)
+                            end
+                        -- Pattern 2: numeric/string ID + true
                         elseif arg1 ~= nil then
                             pcall(function() tradeRespondRE:FireServer(arg1, true) end)
+                            dbg("[autoAcc-trade] tried RespondRequest("..tostring(arg1)..", true)")
+                        -- Pattern 3: just true
                         else
                             pcall(function() tradeRespondRE:FireServer(true) end)
+                            dbg("[autoAcc-trade] tried RespondRequest(true)")
                         end
-                    end
-                    -- Fire SAME remote back (stage 2/3: confirm/accept update)
-                    -- Only if not RespondRequest (already fired above)
-                    if remote ~= tradeRespondRE then
-                        if typeof(arg1) == "Instance" and arg1:IsA("Player") then
-                            pcall(function() remote:FireServer(arg1, true) end)
-                        elseif arg1 ~= nil then
-                            pcall(function() remote:FireServer(arg1, true) end)
-                        else
-                            pcall(function() remote:FireServer(true) end)
-                        end
-                    end
-                    -- UI status
-                    if accStatusLbl then
-                        local who = (typeof(arg1)=="Instance" and arg1:IsA("Player")) and arg1.Name or "?"
-                        accStatusLbl.Text = "Trade '"..rname.."' "..who
-                        accStatusLbl.TextColor3 = C.Teal
-                        task.delay(2, function() if accStatusLbl then accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray end end)
                     end
                 end)
                 table.insert(connections, tradeConn)
             end
         end
-        dbg("[autoAcc] trade hooks installed (multi-stage)")
+        dbg("[autoAcc] trade hooks installed di SEMUA TradeEvents remote")
     else
         dbg("[autoAcc] WARN: TradeEvents folder gak ketemu")
     end
 
-    -- v10.2: gift accept hook — non-blocking + multi-pattern accept + log everything
-    -- Hook SEMUA RemoteEvent yg related ke gifting
-    local giftRemotes = {}
-    if giftRE and giftRE:IsA("RemoteEvent") then table.insert(giftRemotes, giftRE) end
-    -- Cari semua remote di PetGiftingService folder (kalo ada multiple)
+    -- v12.8: PRECISE gift accept (confirmed pattern dari debug log)
+    -- Pattern: GiftPet RECV (uuid, name, sender) -> AcceptPetGift FIRE (true, uuid)
     local pgs = RS:FindFirstChild("PetGiftingService", true)
-    if pgs and pgs:IsA("Folder") then
-        for _, r in ipairs(pgs:GetChildren()) do
-            if r:IsA("RemoteEvent") and r ~= giftRE then table.insert(giftRemotes, r) end
-        end
-    elseif pgs and pgs.Parent and pgs.Parent:IsA("Folder") then
-        for _, r in ipairs(pgs.Parent:GetChildren()) do
-            if r:IsA("RemoteEvent") and r ~= giftRE then table.insert(giftRemotes, r) end
-        end
-    end
-    -- Cari folder GameEvents.GiftingEvents kalo ada
-    local ge = RS:FindFirstChild("GameEvents")
-    local giftFolder = ge and (ge:FindFirstChild("GiftingEvents") or ge:FindFirstChild("GiftEvents"))
-    if giftFolder then
-        for _, r in ipairs(giftFolder:GetChildren()) do
-            if r:IsA("RemoteEvent") and r ~= giftRE then table.insert(giftRemotes, r) end
-        end
-    end
+    local giftParent = pgs and pgs.Parent
+    local giftPetRE = giftParent and giftParent:FindFirstChild("GiftPet")
+    local acceptPetGiftRE = giftParent and giftParent:FindFirstChild("AcceptPetGift")
 
-    -- Counter biar status update gak overlap
-    local giftAccCount = 0
-
-    -- v12.7: gift accept inline (no helper, no unpack)
-    local giftFireCD = {}
-    for _, remote in ipairs(giftRemotes) do
-        local conn = remote.OnClientEvent:Connect(function(...)
+    if giftPetRE and acceptPetGiftRE and giftPetRE:IsA("RemoteEvent") and acceptPetGiftRE:IsA("RemoteEvent") then
+        local giftAccCount = 0
+        local conn = giftPetRE.OnClientEvent:Connect(function(petUUID, petName, senderUsername)
             if not autoAccGift then return end
-            local args = {...}
-            local rname = remote.Name
-            local lname = rname:lower()
-            if lname:find("cancel") or lname:find("reject") or lname:find("decline") then return end
-            -- Cooldown
-            if (giftFireCD[rname] or 0) > tick() then return end
-            giftFireCD[rname] = tick() + 0.3
-
-            -- Detect Player Instance dalam args
-            local sender = nil
-            for _, a in ipairs(args) do
-                if typeof(a) == "Instance" and a:IsA("Player") then sender = a break end
-            end
-
-            local arg1 = args[1]
-            local argInfo = "?"
-            if typeof(arg1) == "Instance" then argInfo = arg1.ClassName..":"..arg1.Name
-            elseif arg1 ~= nil then argInfo = tostring(arg1):sub(1,20) end
-            dbg("[autoAcc-gift] event '"..rname.."' arg1="..argInfo)
-
-            -- Try multiple accept patterns (NO unpack, manual args)
-            if sender then
-                pcall(function() remote:FireServer("AcceptGift", sender) end)
-                task.wait(0.05)
-                pcall(function() remote:FireServer("Accept", sender) end)
-                task.wait(0.05)
-                pcall(function() remote:FireServer(sender, true) end)
+            dbg("[autoAcc-gift] GiftPet RECV: "..tostring(petUUID):sub(1,8).." '"..tostring(petName).."' from '"..tostring(senderUsername).."'")
+            -- EXACT pattern: AcceptPetGift(true, petUUID)
+            local ok, err = pcall(function()
+                acceptPetGiftRE:FireServer(true, petUUID)
+            end)
+            if ok then
+                giftAccCount = giftAccCount + 1
+                dbg("[autoAcc-gift] AcceptPetGift FIRED for "..tostring(petUUID):sub(1,8).." (#"..giftAccCount..")")
+                if accStatusLbl then
+                    accStatusLbl.Text = "Gift accept #"..giftAccCount.." dari "..tostring(senderUsername)
+                    accStatusLbl.TextColor3 = C.Teal
+                    local myCount = giftAccCount
+                    task.delay(2.5, function()
+                        if accStatusLbl and giftAccCount == myCount then
+                            accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray
+                        end
+                    end)
+                end
             else
-                pcall(function() remote:FireServer("AcceptGift") end)
-                task.wait(0.05)
-                pcall(function() remote:FireServer("Accept") end)
-                task.wait(0.05)
-                pcall(function() remote:FireServer(true) end)
-            end
-
-            -- UI
-            giftAccCount = giftAccCount + 1
-            local myCount = giftAccCount
-            if accStatusLbl then
-                accStatusLbl.Text = "Gift accept #"..myCount..(sender and (" "..sender.Name) or "")
-                accStatusLbl.TextColor3 = C.Teal
-                task.delay(2.5, function()
-                    if accStatusLbl and giftAccCount == myCount then
-                        accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray
-                    end
-                end)
+                dbg("[autoAcc-gift] FAIL fire AcceptPetGift: "..tostring(err))
             end
         end)
         table.insert(connections, conn)
+        dbg("[autoAcc] gift hook PRECISE installed (GiftPet -> AcceptPetGift)")
+    else
+        dbg("[autoAcc] WARN: GiftPet/AcceptPetGift remote gak ketemu di "..tostring(giftParent and giftParent:GetFullName() or "nil"))
     end
-    dbg("[autoAcc] gift hooks installed di "..#giftRemotes.." remote(s)")
 end)
 
 -- ============================================
@@ -2974,4 +2922,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.7: trade/gift accept multi-stage inline (no helper, no unpack)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.8: gift accept PRECISE - GiftPet -> AcceptPetGift(true, uuid) confirmed via debug")
