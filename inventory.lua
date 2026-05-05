@@ -1,6 +1,6 @@
 -- ============= ZENX INVENTORY VIEWER + REJOIN =============
 -- Standalone: Inventory Show + Rejoin (style sama dgn ZenxLvl main script)
-local SCRIPT_VERSION = "v2.0"
+local SCRIPT_VERSION = "v2.2 (mutasi range fix)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -92,12 +92,32 @@ local function isFavorite(item)
     if d == true then return true end
     return false
 end
-local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Name end
-local function getKG(item) return tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) end
+local function getPetName(item)
+    return item.Name:match("^(.-)%s*%[") or item.Name
+end
+
+-- v2.1: more flexible KG patterns (handle case insensitive, no space, various brackets)
+local function getKG(item)
+    local n = item.Name
+    -- Pattern 1: [12.5 KG], [12.5kg], [12 KG]
+    local kg = n:match("%[%s*([%d%.]+)%s*[Kk][Gg]%s*%]")
+    if kg then return tonumber(kg) end
+    -- Pattern 2: anywhere "[12.5 kg]" with whitespace variations
+    kg = n:match("([%d%.]+)%s*[Kk][Gg]")
+    if kg then return tonumber(kg) end
+    return nil
+end
+
+-- v2.1: more flexible Age patterns
 local function getAge(item)
-    for _, pat in ipairs({"%[Age%s+(%d+)%]", "%[Age(%d+)%]"}) do
-        local f = item.Name:match(pat) if f then return tonumber(f) end
+    local n = item.Name
+    -- Pattern 1: [Age 5], [Age5]
+    for _, pat in ipairs({"%[Age%s+(%d+)%]", "%[Age(%d+)%]", "%[AGE%s+(%d+)%]", "%[age%s+(%d+)%]"}) do
+        local f = n:match(pat) if f then return tonumber(f) end
     end
+    -- Pattern 2: anywhere "Age 5" without brackets
+    local f = n:match("[Aa][Gg][Ee]%s+(%d+)")
+    if f then return tonumber(f) end
     return nil
 end
 
@@ -200,7 +220,7 @@ for i, r in ipairs(kgRanges) do
 end
 
 -- ===== DETAIL PANEL =====
-local detailPanel = mk("Frame",{Size=UDim2.new(1,0,0,92), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=3, Parent=content})
+local detailPanel = mk("Frame",{Size=UDim2.new(1,0,0,110), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=3, Parent=content})
 corner(detailPanel, 7) stroke(detailPanel, C.Dim, 1.2)
 mk("UIPadding",{PaddingTop=UDim.new(0,8), PaddingLeft=UDim.new(0,10), PaddingRight=UDim.new(0,10), Parent=detailPanel})
 mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,4), Parent=detailPanel})
@@ -209,6 +229,7 @@ local detailTotal = lbl(detailPanel, "Total: -", 11, C.Teal) detailTotal.Size=UD
 local detailFav = lbl(detailPanel, "Favorite: -", 10, C.Gold) detailFav.Size=UDim2.new(1,0,0,14) detailFav.LayoutOrder=2
 local detailHigh = lbl(detailPanel, "Pet age 100+: -", 10, C.Green) detailHigh.Size=UDim2.new(1,0,0,14) detailHigh.LayoutOrder=3
 local detailRange = lbl(detailPanel, "BaseKG range: -", 10, C.Blue) detailRange.Size=UDim2.new(1,0,0,14) detailRange.LayoutOrder=4
+local detailUnread = lbl(detailPanel, "Unread (no KG/Age): -", 10, C.Red) detailUnread.Size=UDim2.new(1,0,0,14) detailUnread.LayoutOrder=5
 
 -- ===== DIVIDER =====
 div(content, 4)
@@ -242,6 +263,8 @@ local function _doBuildInvShow()
     local petsList = {}
     local minBase, maxBase, sumBase, baseCount = math.huge, 0, 0, 0
     local favCount = 0 local highAgeCount = 0
+    local unreadCount = 0
+    local unreadNames = {}
 
     for _, item in pairs(bp:GetChildren()) do
         if isPet(item) then
@@ -249,27 +272,58 @@ local function _doBuildInvShow()
             local kg = getKG(item)
             local fav = isFavorite(item)
             local baseKG = nil
+
+            -- v2.2: smart fallback - pet mutasi tanpa Age di nama biasanya udah age 100
+            -- Pakai cache dulu kalo ada, kalo gak ada pakai heuristik:
+            -- KG >= 20 -> age 100 (pet udah maxed out)
+            -- KG < 20 -> age 1 (pet masih muda)
+            if not age and kg then
+                if kg >= 20 then
+                    age = 100  -- pet gede, kemungkinan max age
+                else
+                    age = 1   -- pet kecil, kemungkinan baru hatched
+                end
+            end
+
             if kg and age and age >= 1 then
                 baseKG = kg * 11 / (age + 10)
                 if baseKG < minBase then minBase = baseKG end
                 if baseKG > maxBase then maxBase = baseKG end
                 sumBase = sumBase + baseKG
                 baseCount = baseCount + 1
+            else
+                -- pet bener-bener gak bisa di-parse (no kg)
+                unreadCount = unreadCount + 1
+                if #unreadNames < 5 then
+                    table.insert(unreadNames, item.Name:sub(1, 35))
+                end
+                print("[ZenxInv] UNREAD pet: '"..item.Name.."'")
             end
+
             if fav then favCount = favCount + 1 end
             if age and age >= 100 then highAgeCount = highAgeCount + 1 end
-            table.insert(petsList, {age=age or 0, kg=kg or 0, baseKG=baseKG, fav=fav})
+            table.insert(petsList, {age=age or 0, kg=kg or 0, baseKG=baseKG, fav=fav, name=item.Name})
         end
     end
 
     local rangeCounts = {0,0,0,0,0,0}
+    local outOfRange = 0
+    local highBaseKG = 0  -- pet baseKG > 7
+    local lowBaseKG = 0   -- pet baseKG < 1
     for _, p in ipairs(petsList) do
         if p.baseKG then
+            local matched = false
             for ri, r in ipairs(kgRanges) do
                 if p.baseKG >= r[1] and p.baseKG < r[2] then
                     rangeCounts[ri] = rangeCounts[ri] + 1
+                    matched = true
                     break
                 end
+            end
+            if not matched then
+                outOfRange = outOfRange + 1
+                if p.baseKG >= 7 then highBaseKG = highBaseKG + 1
+                elseif p.baseKG < 1 then lowBaseKG = lowBaseKG + 1 end
             end
         end
     end
@@ -288,6 +342,19 @@ local function _doBuildInvShow()
         detailRange.Text = string.format("BaseKG: min=%.2f max=%.2f avg=%.2f", minBase, maxBase, sumBase/baseCount)
     else
         detailRange.Text = "BaseKG: gak ada data"
+    end
+
+    if unreadCount > 0 then
+        detailUnread.Text = "Unread (no KG): "..unreadCount.." pet | Out-range: "..outOfRange.." (>7kg:"..highBaseKG..")"
+        detailUnread.TextColor3 = C.Red
+    else
+        if outOfRange > 0 then
+            detailUnread.Text = "Out-range >7kg: "..highBaseKG.." | <1kg: "..lowBaseKG.." pet"
+            detailUnread.TextColor3 = C.Gold
+        else
+            detailUnread.Text = "Semua pet ke-baca + masuk range"
+            detailUnread.TextColor3 = C.Green
+        end
     end
 end
 
