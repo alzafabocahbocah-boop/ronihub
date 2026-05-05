@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v10.1"
+local SCRIPT_VERSION="v10.3"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: friend-7 + 1 logo + dones counter prominent)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: parallel per-pet check + cooldown 0.5s + cycle 25ms)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2120,26 +2120,117 @@ pcall(function()
         dbg("[autoAcc] WARN: TradeEvents folder gak ketemu")
     end
 
-    if giftRE and giftRE:IsA("RemoteEvent") then
-        giftRE.OnClientEvent:Connect(function(action, ...)
-            if autoAccGift and action then
-                local actStr = tostring(action):lower()
-                if actStr:find("prompt") or actStr:find("incoming") or actStr:find("offer") then
-                    local args = {...}
-                    pcall(function()
-                        giftRE:FireServer("AcceptGift", table.unpack(args))
-                    end)
-                    if accStatusLbl then
-                        accStatusLbl.Text = "Gift diterima!"
-                        accStatusLbl.TextColor3 = C.Teal
-                        task.wait(2)
-                        if accStatusLbl then accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray end
-                    end
+    -- v10.2: gift accept hook — non-blocking + multi-pattern accept + log everything
+    -- Hook SEMUA RemoteEvent yg related ke gifting
+    local giftRemotes = {}
+    if giftRE and giftRE:IsA("RemoteEvent") then table.insert(giftRemotes, giftRE) end
+    -- Cari semua remote di PetGiftingService folder (kalo ada multiple)
+    local pgs = RS:FindFirstChild("PetGiftingService", true)
+    if pgs and pgs:IsA("Folder") then
+        for _, r in ipairs(pgs:GetChildren()) do
+            if r:IsA("RemoteEvent") and r ~= giftRE then table.insert(giftRemotes, r) end
+        end
+    elseif pgs and pgs.Parent and pgs.Parent:IsA("Folder") then
+        for _, r in ipairs(pgs.Parent:GetChildren()) do
+            if r:IsA("RemoteEvent") and r ~= giftRE then table.insert(giftRemotes, r) end
+        end
+    end
+    -- Cari folder GameEvents.GiftingEvents kalo ada
+    local ge = RS:FindFirstChild("GameEvents")
+    local giftFolder = ge and (ge:FindFirstChild("GiftingEvents") or ge:FindFirstChild("GiftEvents"))
+    if giftFolder then
+        for _, r in ipairs(giftFolder:GetChildren()) do
+            if r:IsA("RemoteEvent") and r ~= giftRE then table.insert(giftRemotes, r) end
+        end
+    end
+
+    -- Counter biar status update gak overlap
+    local giftAccCount = 0
+
+    for _, remote in ipairs(giftRemotes) do
+        remote.OnClientEvent:Connect(function(...)
+            if not autoAccGift then return end
+            local args = {...}
+
+            -- LOG semua arg (debug F9)
+            local argDesc = {}
+            for i = 1, math.min(4, #args) do
+                local a = args[i]
+                if typeof(a) == "Instance" then
+                    table.insert(argDesc, "<"..a.ClassName..":"..a.Name..">")
+                elseif type(a) == "table" then
+                    table.insert(argDesc, "<table>")
+                else
+                    table.insert(argDesc, tostring(a):sub(1, 40))
                 end
             end
+            dbg("[autoAcc-gift] event '"..remote.Name.."' args=("..table.concat(argDesc, ", ")..")")
+
+            -- Coba accept dengan banyak pattern (whatever yg sukses)
+            -- Non-blocking: spawn task biar handler langsung return
+            task.spawn(function()
+                local action = args[1]
+                local actStr = action and tostring(action):lower() or ""
+                local rest = {}
+                for i = 2, #args do rest[i-1] = args[i] end
+
+                -- Heuristik: terima kalau action string punya kata-kata gift-ish
+                local isIncoming = actStr:find("prompt") or actStr:find("incoming") or actStr:find("offer")
+                                or actStr:find("request") or actStr:find("send") or actStr:find("gift")
+                                or actStr == "" -- fallback: gak ada action string, coba aja
+                                or typeof(action) == "Instance" -- arg pertama Player Instance
+
+                if isIncoming then
+                    -- Try multiple accept patterns (urut dari paling spesifik)
+                    local tried = {}
+                    pcall(function()
+                        remote:FireServer("AcceptGift", unpack(rest))
+                        table.insert(tried, "AcceptGift")
+                    end)
+                    task.wait(0.05)
+                    pcall(function()
+                        remote:FireServer("Accept", unpack(rest))
+                        table.insert(tried, "Accept")
+                    end)
+                    task.wait(0.05)
+                    pcall(function()
+                        remote:FireServer("AcceptIncoming", unpack(rest))
+                        table.insert(tried, "AcceptIncoming")
+                    end)
+                    task.wait(0.05)
+                    -- Pattern: fire dengan args yg sama (echo back)
+                    pcall(function()
+                        remote:FireServer(unpack(args))
+                        table.insert(tried, "echo")
+                    end)
+                    -- Pattern: kalau arg pertama Player, fire balik dengan Player + true
+                    if typeof(action) == "Instance" and action:IsA("Player") then
+                        pcall(function()
+                            remote:FireServer(action, true)
+                            table.insert(tried, "Player+true")
+                        end)
+                    end
+
+                    dbg("[autoAcc-gift] tried patterns: "..table.concat(tried, ", "))
+
+                    -- Update UI status (non-blocking lewat counter)
+                    giftAccCount = giftAccCount + 1
+                    local myCount = giftAccCount
+                    if accStatusLbl then
+                        accStatusLbl.Text = "Gift coba accept (#"..myCount..")"
+                        accStatusLbl.TextColor3 = C.Teal
+                    end
+                    task.delay(2.5, function()
+                        if accStatusLbl and giftAccCount == myCount then
+                            accStatusLbl.Text = "Accept: idle"
+                            accStatusLbl.TextColor3 = C.Gray
+                        end
+                    end)
+                end
+            end)
         end)
-        dbg("[autoAcc] gift hook installed (PetGiftingService:OnClientEvent)")
     end
+    dbg("[autoAcc] gift hooks installed di "..#giftRemotes.." remote(s)")
 end)
 
 -- ============================================
@@ -2269,32 +2360,40 @@ local function pollerShouldRun()
     return false
 end
 
+-- v10.3: parallel check per-pet biar invoke server ke semua pet jalan bareng (gak sequential)
+local checkingPet = {}
+
 startGlobalPoller=function()
     if pollerTask then return end
     if not pollerShouldRun() then return end
     pollerTask=task.spawn(function()
-        dbg("[poller] global poller START")
+        dbg("[poller] global poller START (parallel mode)")
         local cycles=0
         while pollerShouldRun() do
             cycles=cycles+1
             for uuid,cfg in pairs(swapPerPet) do
-                if cfg.enabled and not currentLevelingUUIDs[uuid] then
-                    local t=getPetTime(uuid)
-                    if t~=nil and t<=0 then
-                        local last=lastSwap[uuid] or 0
-                        if tick()-last>=1.5 then
-                            local info=swapPetInfoCache[uuid] or teamPetInfoCache[uuid]
-                            local nm=(info and info.name) or "?"
-                            if cycles<=20 then
-                                dbg(string.format("[swap] %s Time=%.1f -> SWAP",nm:sub(1,12),t))
+                if cfg.enabled and not currentLevelingUUIDs[uuid] and not checkingPet[uuid] then
+                    -- Spawn parallel check: gak block iterasi pet lain
+                    checkingPet[uuid] = true
+                    task.spawn(function()
+                        local t = getPetTime(uuid)
+                        if t ~= nil and t <= 0 then
+                            local last = lastSwap[uuid] or 0
+                            if tick() - last >= 0.5 then
+                                local info = swapPetInfoCache[uuid] or teamPetInfoCache[uuid]
+                                local nm = (info and info.name) or "?"
+                                if cycles <= 20 then
+                                    dbg(string.format("[swap] %s Time=%.1f -> SWAP", nm:sub(1,12), t))
+                                end
+                                swapPet(uuid)
+                                lastSwap[uuid] = tick()
                             end
-                            swapPet(uuid)
-                            lastSwap[uuid]=tick()
                         end
-                    end
+                        checkingPet[uuid] = nil
+                    end)
                 end
             end
-            if cycles%100==0 then
+            if cycles%200==0 then
                 local active,ready,idle,skipped=0,0,0,0
                 for uuid,cfg in pairs(swapPerPet) do
                     if cfg.enabled then
@@ -2310,9 +2409,10 @@ startGlobalPoller=function()
                 end
                 dbg(string.format("[alive] cycle=%d active=%d ready=%d idle=%d skip=%d",cycles,active,ready,idle,skipped))
             end
-            task.wait(0.05)
+            task.wait(0.025) -- v10.3: 50ms -> 25ms
         end
         pollerTask=nil
+        checkingPet={} -- cleanup
         dbg("[poller] global poller STOP")
     end)
 end
@@ -2323,6 +2423,7 @@ local function stopAllSwaps()
         pollerTask=nil
     end
     lastSwap={}
+    checkingPet={}
 end
 
 local function startSwapForPet(uuid)
@@ -2704,4 +2805,4 @@ do
     end
 end
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.1: dones counter prominent (panel sendiri di kanan tombol)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v10.3: swap parallel check (5pet skrg cek bareng, dulu sequential)")
