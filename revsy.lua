@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v11.5"
+local SCRIPT_VERSION="v11.6"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + toAge scope fix)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + toAge scope fix DONE)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -120,6 +120,10 @@ elseif loaded then
 end
 local d=getgenv().ZenxData
 dbg("Step 3 OK: data loaded")
+
+-- v11.6: toAge declared EARLY (sebelum donesLbl spawn + _doBuildInvShow function)
+-- biar ke-capture sebagai upvalue, bukan global nil
+local toAge=d.toAge or 100
 
 -- v11.5: declare toAge SEBELUM function definitions yg pakai (donesLbl, _doBuildInvShow)
 -- biar ke-capture sebagai upvalue/local, bukan global nil
@@ -1068,7 +1072,6 @@ local teamPetInfoCache=d.teamPetInfoCache or {}
 local config=d.config or {equipInterval=5,rejoinMinutes=30}
 local targetPetTypes=d.targetPetTypes or {}
 local fromAge=d.fromAge or 1
-local toAge=d.toAge or 100
 local maxPetTarget=d.maxPetTarget or 1
 local autoStartEnabled=d.autoStartEnabled or false
 local autoRejoin=d.autoRejoin or false
@@ -3019,4 +3022,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.5: toAge scope fix - declared early, ngga lagi nil di invShow")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v11.6: toAge declared at line ~125, FIX scope error untuk real")
