@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.0 (weight category)"
+local SCRIPT_VERSION = "v3.1 (baseKG category)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -289,11 +289,18 @@ local function _doBuildInvShow()
                 sumKG = sumKG + kg
                 kgCount = kgCount + 1
 
-                -- Categorize by current KG
-                local cat = categorize(kg)
-                if cat then
-                    for i, c in ipairs(CATEGORIES) do
-                        if c == cat then catCounts[i] = catCounts[i] + 1 break end
+                -- v3.1: categorize by BASE KG (kg di age 1, sesuai game.guide)
+                -- baseKG = kg * 11 / (age + 10)
+                local baseKG = nil
+                if age and age >= 1 then
+                    baseKG = kg * 11 / (age + 10)
+                end
+                if baseKG then
+                    local cat = categorize(baseKG)
+                    if cat then
+                        for i, c in ipairs(CATEGORIES) do
+                            if c == cat then catCounts[i] = catCounts[i] + 1 break end
+                        end
                     end
                 end
             else
@@ -321,7 +328,7 @@ local function _doBuildInvShow()
     detailFav.Text = "Favorite: "..favCount.." pet"
     detailHigh.Text = "Pet age 100+: "..highAgeCount.." pet"
     if kgCount > 0 then
-        detailKG.Text = string.format("Weight: min=%.2fkg max=%.2fkg avg=%.2fkg", minKG, maxKG, sumKG/kgCount)
+        detailKG.Text = string.format("Current KG: min=%.2f max=%.2f avg=%.2f", minKG, maxKG, sumKG/kgCount)
     else
         detailKG.Text = "Weight: gak ada data"
     end
