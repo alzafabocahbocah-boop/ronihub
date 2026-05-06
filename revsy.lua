@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.44"
+local SCRIPT_VERSION="v12.46"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2559,82 +2559,86 @@ local function getPetHunger(uuidStr)
     return hunger
 end
 
+-- v12.46: cached UUID list + last refresh time (anti-lag)
+local cachedUUIDs = {}
+local lastUUIDRefresh = 0
+
 task.spawn(function()
     while not scriptShutdown do
         if autoFeedPet then
             local ge = RS:FindFirstChild("GameEvents")
             local r = ge and ge:FindFirstChild("ActivePetService")
             if r and player.Character then
-                local hum = player.Character:FindFirstChildOfClass("Humanoid")
                 local bp = player:FindFirstChild("Backpack")
-                if hum and bp then
-                    -- v12.44: equip food tool kalo belum
-                    local equippedFood = nil
-                    for _, item in pairs(player.Character:GetChildren()) do
+                local hum = player.Character:FindFirstChildOfClass("Humanoid")
+
+                -- v12.46: ROBUST equip - cek tool di Character dulu
+                local equippedFood = nil
+                for _, item in pairs(player.Character:GetChildren()) do
+                    if item:IsA("Tool") and not item:FindFirstChild("PetToolLocal") and not item:FindFirstChild("PetToolServer") then
+                        equippedFood = item break
+                    end
+                end
+
+                -- Equip kalo belum (multi-method)
+                if not equippedFood and bp and hum then
+                    for _, item in pairs(bp:GetChildren()) do
                         if item:IsA("Tool") and not item:FindFirstChild("PetToolLocal") and not item:FindFirstChild("PetToolServer") then
+                            -- Method 1: Humanoid:EquipTool
+                            pcall(function() hum:EquipTool(item) end)
+                            -- Method 2: direct parent move (lebih reliable)
+                            if item.Parent ~= player.Character then
+                                pcall(function() item.Parent = player.Character end)
+                            end
                             equippedFood = item
                             break
                         end
                     end
-                    if not equippedFood then
-                        for _, item in pairs(bp:GetChildren()) do
-                            if item:IsA("Tool") and not item:FindFirstChild("PetToolLocal") and not item:FindFirstChild("PetToolServer") then
-                                pcall(function() hum:EquipTool(item) end)
-                                task.wait(0.3)
-                                for _, c in pairs(player.Character:GetChildren()) do
-                                    if c:IsA("Tool") and c == item then equippedFood = c break end
-                                end
-                                break
-                            end
-                        end
-                    end
+                end
 
-                    -- v12.44: kumpulin UUID dari teamPetUUIDs + scan ActivePetUI inline
-                    local allUUIDs = {}
+                -- v12.46: refresh UUID cache cuma tiap 3 detik (gak spam scan PlayerGui)
+                if (tick() - lastUUIDRefresh) > 3 then
+                    cachedUUIDs = {}
                     for k, _ in pairs(teamPetUUIDs) do
                         local clean = tostring(k):gsub("[{}]", "")
-                        if #clean > 0 then allUUIDs[clean] = "team" end
+                        if #clean > 0 then cachedUUIDs[clean] = true end
                     end
-                    -- Scan PlayerGui untuk frame yg namanya UUID format
-                    local pg = player:FindFirstChild("PlayerGui")
-                    if pg then
-                        for _, d in ipairs(pg:GetDescendants()) do
-                            local n = d.Name
-                            if n and #n >= 32 and n:find("-") then
-                                local clean = n:gsub("[{}]", "")
-                                if clean:match("^[%w%-]+$") then
-                                    allUUIDs[clean] = allUUIDs[clean] or "ui"
+                    pcall(function()
+                        local pg = player:FindFirstChild("PlayerGui")
+                        if pg then
+                            for _, d in ipairs(pg:GetDescendants()) do
+                                local n = d.Name
+                                if n and #n >= 32 and n:find("-") then
+                                    local clean = n:gsub("[{}]", "")
+                                    if clean:match("^[%w%-]+$") then
+                                        cachedUUIDs[clean] = true
+                                    end
                                 end
                             end
                         end
-                    end
+                    end)
+                    lastUUIDRefresh = tick()
+                end
 
-                    local fed = 0
-                    local skipped = 0
-                    local total_uuid = 0
-                    if equippedFood then
-                        for uuidStr, _ in pairs(allUUIDs) do
-                            total_uuid = total_uuid + 1
-                            local ub = "{"..uuidStr.."}"
-                            local hunger = getPetHunger(uuidStr)
-                            if hunger == nil or hunger < FEED_THRESHOLD then
-                                pcall(function() r:FireServer("Feed", ub) end)
-                                fed = fed + 1
-                                feedTotal = feedTotal + 1
-                            else
-                                skipped = skipped + 1
-                            end
-                        end
+                local fed = 0
+                local total_uuid = 0
+                if equippedFood then
+                    for uuidStr, _ in pairs(cachedUUIDs) do
+                        total_uuid = total_uuid + 1
+                        local ub = "{"..uuidStr.."}"
+                        pcall(function() r:FireServer("Feed", ub) end)
+                        fed = fed + 1
+                        feedTotal = feedTotal + 1
                     end
+                end
 
-                    if setMiscStatus then
-                        local foodStr = equippedFood and equippedFood.Name:sub(1,12) or "NO FOOD"
-                        setMiscStatus("Feed: "..feedTotal.." | "..foodStr.." | uuid:"..total_uuid.." fed:"..fed, C.Teal)
-                    end
+                if setMiscStatus then
+                    local foodStr = equippedFood and equippedFood.Name:sub(1,12) or "NO FOOD"
+                    setMiscStatus("Feed: "..feedTotal.." | "..foodStr.." | uuid:"..total_uuid.." fed:"..fed, C.Teal)
                 end
             end
         end
-        task.wait(1)
+        task.wait(0.05)  -- v12.46: 0.05s (20 cycle/sec)
     end
 end)
 
@@ -3538,4 +3542,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.44: Auto Feed pakai UUID dari Active Pets panel (bukan Tim Leveling)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.46: Auto Feed equip robust + cache UUID (anti-lag)")
