@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.40"
+local SCRIPT_VERSION="v12.41"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2559,52 +2559,39 @@ local function getPetHunger(uuidStr)
     return hunger
 end
 
--- v12.40: cari semua pet UUID yg lagi EQUIPPED (active pets)
--- Scan PlayerGui.ActivePetUI + workspace pets (placed)
-local function getActivePetUUIDs()
-    local uuids = {}
-    -- Source 1: PlayerGui.ActivePetUI - frame anak yg namanya UUID
-    pcall(function()
-        local pg = player:FindFirstChild("PlayerGui")
-        if not pg then return end
-        for _, d in ipairs(pg:GetDescendants()) do
-            if d.Name:len() >= 32 and d.Name:find("-") then
-                -- Looks like UUID
-                local clean = d.Name:gsub("[{}]", "")
-                if clean:match("^[%w%-]+$") then
-                    uuids[clean] = true
-                end
-            end
-        end
-    end)
-    -- Source 2: workspace placed pets
-    pcall(function()
-        for _, d in ipairs(workspace:GetDescendants()) do
-            if (d:IsA("Model") or d:IsA("Folder")) and d.Name:len() >= 32 and d.Name:find("-") then
-                local clean = d.Name:gsub("[{}]", "")
-                if clean:match("^[%w%-]+$") then
-                    uuids[clean] = true
-                end
-            end
-        end
-    end)
-    return uuids
-end
-
 task.spawn(function()
     while not scriptShutdown do
         if autoFeedPet then
             local ge = RS:FindFirstChild("GameEvents")
             local r = ge and ge:FindFirstChild("ActivePetService")
             if r then
-                -- v12.40: pakai pet ACTIVE/EQUIPPED, bukan dari Tim Leveling
-                local activeUUIDs = getActivePetUUIDs()
-                local activeCount = 0
-                for _ in pairs(activeUUIDs) do activeCount = activeCount + 1 end
+                -- v12.41: kumpulin UUID dari 2 source - teamPetUUIDs + ActivePetUI scan
+                local allUUIDs = {}
+                for k, _ in pairs(teamPetUUIDs) do
+                    local clean = k:gsub("[{}]", "")
+                    allUUIDs[clean] = true
+                end
+                -- Scan PlayerGui buat pet yg lagi equipped
+                pcall(function()
+                    local pg = player:FindFirstChild("PlayerGui")
+                    if pg then
+                        for _, d in ipairs(pg:GetDescendants()) do
+                            local n = d.Name
+                            if n and #n >= 32 and n:find("-") then
+                                local clean = n:gsub("[{}]", "")
+                                if clean:match("^[%w%-]+$") then
+                                    allUUIDs[clean] = true
+                                end
+                            end
+                        end
+                    end
+                end)
 
                 local fed = 0
                 local skipped = 0
-                for uuidStr, _ in pairs(activeUUIDs) do
+                local total_uuid = 0
+                for uuidStr, _ in pairs(allUUIDs) do
+                    total_uuid = total_uuid + 1
                     local ub = "{"..uuidStr.."}"
                     local hunger = getPetHunger(uuidStr)
                     if hunger == nil or hunger < FEED_THRESHOLD then
@@ -2616,7 +2603,7 @@ task.spawn(function()
                     end
                 end
                 if setMiscStatus then
-                    setMiscStatus("Feed: "..feedTotal.." | active:"..activeCount.." | fed:"..fed.." kenyang:"..skipped, C.Teal)
+                    setMiscStatus("Feed: "..feedTotal.." total | uuid:"..total_uuid.." fed:"..fed.." kenyang:"..skipped, C.Teal)
                 end
             end
         end
@@ -3524,4 +3511,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.40: Feed dari pet ACTIVE/EQUIPPED (bukan dari Tim Leveling list)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.41: Feed coba teamUUIDs PLUS scan ActivePetUI untuk equipped pets")
