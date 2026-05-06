@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.25"
+local SCRIPT_VERSION="v12.31"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2460,6 +2460,81 @@ task.spawn(function()
 end)
 
 -- ============================================
+-- ============================================
+-- v12.31: ADDITIONAL confirmed-pattern tasks (gak ganggu existing v12.25 tasks)
+-- Existing tasks pakai miscRemotes.* (generic discovery, mungkin gak fire bener)
+-- Tasks tambahan ini pake remote PERSIS dari debug capture
+-- ============================================
+task.spawn(function()
+    -- BUY SEED + BUY GEAR (CONFIRMED)
+    local SEEDS = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pumpkin","Apple","Bamboo","Coconut","Cactus","Dragon Fruit","Mango","Grape","Pepper","Mushroom","Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa","Banana","Lily","Bell Pepper","Prickly Pear","Loquat","Feijoa","Cherry","Rose","Lemon"}
+    local GEARS = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"}
+    while not scriptShutdown do
+        local ge = RS:FindFirstChild("GameEvents")
+        if ge then
+            if autoBuySeed then
+                local r = ge:FindFirstChild("BuySeedStock")
+                if r then
+                    for _, name in ipairs(SEEDS) do pcall(function() r:FireServer("Shop", name) end) end
+                    if setMiscStatus then setMiscStatus("Buy seed: "..#SEEDS.." items", C.Teal) end
+                end
+            end
+            if autoBuyGear then
+                local r = ge:FindFirstChild("BuyGearStock")
+                if r then
+                    for _, name in ipairs(GEARS) do pcall(function() r:FireServer(name) end) end
+                    if setMiscStatus then setMiscStatus("Buy gear: "..#GEARS.." items", C.Teal) end
+                end
+            end
+            if autoFeedPet then
+                local r = ge:FindFirstChild("ActivePetService")
+                if r then
+                    local fed = 0
+                    for uuidStr, _ in pairs(teamPetUUIDs) do
+                        local ub = uuidStr
+                        if ub:sub(1,1) ~= "{" then ub = "{"..ub.."}" end
+                        pcall(function() r:FireServer("Feed", ub) end)
+                        fed = fed + 1
+                    end
+                    if fed > 0 and setMiscStatus then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
+                end
+            end
+        end
+        task.wait(5)
+    end
+end)
+
+task.spawn(function()
+    -- AUTO COLLECT (CONFIRMED via ProximityPrompt)
+    while not scriptShutdown do
+        if autoCollect then
+            local fired = 0
+            pcall(function()
+                local farm = workspace:FindFirstChild("Farm")
+                if not farm then return end
+                local plants = nil
+                for _, d in ipairs(farm:GetDescendants()) do
+                    if d.Name == "Plants_Physical" then plants = d break end
+                end
+                if not plants then return end
+                for _, plant in ipairs(plants:GetChildren()) do
+                    for _, d in ipairs(plant:GetDescendants()) do
+                        if d:IsA("ProximityPrompt") and d.ActionText == "Collect" and d.Enabled then
+                            pcall(function()
+                                if fireproximityprompt then fireproximityprompt(d)
+                                else d:InputHoldBegin() task.wait(d.HoldDuration or 0.1) d:InputHoldEnd() end
+                            end)
+                            fired = fired + 1
+                        end
+                    end
+                end
+            end)
+            if fired > 0 and setMiscStatus then setMiscStatus("Collect "..fired.." buah", C.Green) end
+        end
+        task.wait(8)
+    end
+end)
+
 -- Gift: GiftPet (uuid, name, sender) -> AcceptPetGift(true, uuid) (CONFIRMED v12.10)
 -- Trade: SendRequest (tradeID, sender, ts) -> RespondRequest(tradeID, true) (CONFIRMED v12.10)
 -- ============================================
@@ -3317,4 +3392,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.25: Pilih Pet Tim font lebih gede + remove Auto Buy Token")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.31: ADDITIONAL confirmed-pattern tasks (additive only, gak ganggu v12.25 base)")
