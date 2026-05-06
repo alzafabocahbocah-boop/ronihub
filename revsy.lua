@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.27"
+local SCRIPT_VERSION="v12.28"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2503,26 +2503,23 @@ task.spawn(function()
     end
 end)
 
--- v12.27: Auto Feed Pet CONFIRMED
--- Pattern: GameEvents.ActivePetService:FireServer("Feed", "{petUUID}")
-local activePetService = nil
-do
-    local ge = RS:FindFirstChild("GameEvents")
-    if ge then activePetService = ge:FindFirstChild("ActivePetService") end
-end
-dbg("[misc] ActivePetService: "..tostring(activePetService~=nil))
-
+-- v12.28: Auto Feed Pet CONFIRMED pattern (minimal change biar gak break)
 task.spawn(function()
     while not scriptShutdown do
-        if autoFeedPet and activePetService then
-            local fed = 0
-            for uuidStr, _ in pairs(teamPetUUIDs) do
-                local uuidBraced = uuidStr
-                if uuidBraced:sub(1,1) ~= "{" then uuidBraced = "{"..uuidBraced.."}" end
-                pcall(function() activePetService:FireServer("Feed", uuidBraced) end)
-                fed = fed + 1
+        if autoFeedPet then
+            local apsRemote = RS:FindFirstChild("GameEvents") and RS.GameEvents:FindFirstChild("ActivePetService")
+            if apsRemote then
+                local fed = 0
+                for uuidStr, _ in pairs(teamPetUUIDs) do
+                    local uuidBraced = uuidStr
+                    if uuidBraced:sub(1,1) ~= "{" then uuidBraced = "{"..uuidBraced.."}" end
+                    pcall(function() apsRemote:FireServer("Feed", uuidBraced) end)
+                    fed = fed + 1
+                end
+                if fed > 0 then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
+            else
+                setMiscStatus("Feed: ActivePetService not found", C.Red)
             end
-            if fed > 0 then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
         end
         task.wait(miscFeedInterval)
     end
@@ -3448,4 +3445,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.27: + Auto Feed Pet CONFIRMED (ActivePetService Feed petUUID)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.28: Feed Pet CONFIRMED (minimal change dari v12.26 stable)")
