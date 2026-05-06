@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.21"
+local SCRIPT_VERSION="v12.23"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -168,9 +168,9 @@ end
 local function togRow(parent,labelTxt,descTxt,lo)
     local row=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
     corner(row,6) local rowStroke=stroke(row,C.Dim,1.1)
-    local l=lbl(row,labelTxt,9,C.White) l.Size=UDim2.new(0.65,0,0,16) l.Position=UDim2.new(0,8,0,4)
-    if descTxt then local dl=lbl(row,descTxt,8,C.Dim) dl.Size=UDim2.new(0.75,0,0,11) dl.Position=UDim2.new(0,8,0,19) end
-    local tog=btn(row,"OFF",9,C.Panel,C.Gray) tog.Size=UDim2.new(0,44,0,20) tog.Position=UDim2.new(1,-50,0.5,-10)
+    local l=lbl(row,labelTxt,11,C.White) l.Size=UDim2.new(0.65,0,0,16) l.Position=UDim2.new(0,8,0,4)
+    if descTxt then local dl=lbl(row,descTxt,10,C.Dim) dl.Size=UDim2.new(0.75,0,0,11) dl.Position=UDim2.new(0,8,0,19) end
+    local tog=btn(row,"OFF",11,C.Panel,C.Gray) tog.Size=UDim2.new(0,44,0,20) tog.Position=UDim2.new(1,-50,0.5,-10)
     local togStroke=stroke(tog,C.Dim,1.1)
     return row,tog,togStroke,rowStroke
 end
@@ -738,11 +738,11 @@ corner(main,10) stroke(main,C.Teal,2)
 local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=main})
 corner(TB,10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5),Position=UDim2.new(0,0,1,-1.5),BackgroundColor3=C.Teal,BorderSizePixel=0,Parent=TB})
-lbl(TB,"ZENX AUTO LEVELING  "..SCRIPT_VERSION,11,C.Teal).Size=UDim2.new(1,-60,1,0)
+lbl(TB,"ZENX AUTO LEVELING  "..SCRIPT_VERSION,13,C.Teal).Size=UDim2.new(1,-60,1,0)
 
-local minBtn=btn(TB,"-",13,C.Panel,C.Gray)
+local minBtn=btn(TB,"-",15,C.Panel,C.Gray)
 minBtn.Size=UDim2.new(0,22,0,22) minBtn.Position=UDim2.new(1,-50,0.5,-11) stroke(minBtn,C.Dim,1.2)
-local closeBtn=btn(TB,"X",10,C.RDim,C.Red)
+local closeBtn=btn(TB,"X",12,C.RDim,C.Red)
 closeBtn.Size=UDim2.new(0,22,0,22) closeBtn.Position=UDim2.new(1,-24,0.5,-11) stroke(closeBtn,C.Red,1.2)
 
 -- v10.9: left sidebar + content area
@@ -761,7 +761,7 @@ mk("UIListLayout", {SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0, 4)
 
 local sectionBtns = {}
 local function makeSidebarBtn(name, idx)
-    local b = btn(leftSidebar, name, 9, C.Card, C.Gray)
+    local b = btn(leftSidebar, name, 11, C.Card, C.Gray)
     b.Size = UDim2.new(1, 0, 0, 44)
     b.LayoutOrder = idx
     b.TextWrapped = true
@@ -771,6 +771,7 @@ local function makeSidebarBtn(name, idx)
 end
 local upLvlBtn = makeSidebarBtn("UP LVL", 1)
 local invShowBtn = makeSidebarBtn("Inventory Show", 2)
+local miscBtn = makeSidebarBtn("Misc", 3)
 
 local content=mk("Frame",{Size=UDim2.new(1,-(SIDEBAR_W+15),1,-34),Position=UDim2.new(0,SIDEBAR_W+10,0,34),BackgroundTransparency=1,Parent=main})
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
@@ -797,14 +798,14 @@ local areas={} for i=1,5 do areas[i]=makeScroll(SCROLL_Y,SCROLL_H) end
 
 local botBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,SCROLL_Y+SCROLL_H+4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=content})
 corner(botBar,7) stroke(botBar,C.Dim,1.2)
-local statusLbl=lbl(botBar,"Status: Idle",9,C.Gray,Enum.TextXAlignment.Left)
+local statusLbl=lbl(botBar,"Status: Idle",11,C.Gray,Enum.TextXAlignment.Left)
 statusLbl.Size=UDim2.new(1,-10,1,0) statusLbl.Position=UDim2.new(0,8,0,0)
 
 local BOT_Y=SCROLL_Y+SCROLL_H+34
-local runBtn=btn(content,"RUNNING",10,C.Panel,C.Gray)
+local runBtn=btn(content,"RUNNING",12,C.Panel,C.Gray)
 runBtn.Size=UDim2.new(0,150,0,26) runBtn.Position=UDim2.new(0,5,0,BOT_Y)
 local runStroke=stroke(runBtn,C.Dim,1.5)
-local stopBtn=btn(content,"STOP",10,C.Panel,C.Gray)
+local stopBtn=btn(content,"STOP",12,C.Panel,C.Gray)
 stopBtn.Size=UDim2.new(0,90,0,26) stopBtn.Position=UDim2.new(0,160,0,BOT_Y)
 local stopStroke=stroke(stopBtn,C.Dim,1.5)
 
@@ -819,7 +820,7 @@ local donesPanel = mk("Frame", {
 corner(donesPanel, 7)
 stroke(donesPanel, C.Teal, 1.3)
 
-local donesLbl = lbl(donesPanel, "Total:0 Jadi:0 Kurang:0", 10, C.Teal, Enum.TextXAlignment.Center)
+local donesLbl = lbl(donesPanel, "Total:0 Jadi:0 Kurang:0", 12, C.Teal, Enum.TextXAlignment.Center)
 donesLbl.Size = UDim2.new(1, -10, 1, 0)
 donesLbl.Position = UDim2.new(0, 5, 0, 0)
 donesLbl.Font = Enum.Font.GothamBold
@@ -839,12 +840,15 @@ end
 -- v10.9: Inventory Show section - listing semua pet di backpack
 local invShowGroup = mk("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Visible=false,Parent=content})
 
+-- v12.22: MISC section - Auto Buy/Feed/Collect (sidebar 3)
+local miscGroup = mk("Frame",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Visible=false,Parent=content})
+
 local invHeader = mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=invShowGroup})
 corner(invHeader, 7) stroke(invHeader, C.Dim, 1.2)
-local invHeaderLbl = lbl(invHeader, "Inventory Pet (loading...)", 9, C.Teal, Enum.TextXAlignment.Left)
+local invHeaderLbl = lbl(invHeader, "Inventory Pet (loading...)", 11, C.Teal, Enum.TextXAlignment.Left)
 invHeaderLbl.Size = UDim2.new(1, -100, 1, 0) invHeaderLbl.Position = UDim2.new(0, 8, 0, 0) invHeaderLbl.Font = Enum.Font.GothamBold
 
-local invRefreshBtn = btn(invHeader, "Refresh", 9, C.TDim, C.Teal)
+local invRefreshBtn = btn(invHeader, "Refresh", 11, C.TDim, C.Teal)
 invRefreshBtn.Size = UDim2.new(0, 80, 0, 20) invRefreshBtn.Position = UDim2.new(1, -86, 0.5, -10)
 stroke(invRefreshBtn, C.Teal, 1.2)
 
@@ -862,7 +866,7 @@ local kgPills = {}
 for i, r in ipairs(kgRanges) do
     local pill = mk("Frame", {Size=UDim2.new(0, 68, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=statsBar})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, r[1].."-"..r[2].."kg: 0", 9, C.Gray, Enum.TextXAlignment.Center)
+    local pl = lbl(pill, r[1].."-"..r[2].."kg: 0", 11, C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1, 0, 1, 0)
     pl.Font = Enum.Font.GothamBold
     kgPills[i] = pl
@@ -961,34 +965,41 @@ local function switchSection(idx)
         if i == idx then b.TextColor3=C.Teal b.BackgroundColor3=C.TDim if s then s.Color=C.Teal end
         else b.TextColor3=C.Gray b.BackgroundColor3=C.Card if s then s.Color=C.Dim end end
     end
+    -- Hide everything first
+    tabBar.Visible = false
+    for _, a in ipairs(areas) do a.Visible = false end
+    botBar.Visible = false
+    runBtn.Visible = false
+    stopBtn.Visible = false
+    donesPanel.Visible = false
+    invShowGroup.Visible = false
+    miscGroup.Visible = false
+
     if idx == 1 then
-        -- UP LVL section: show tab bar + areas + bot bar + RUN/STOP/dones
+        -- UP LVL
         tabBar.Visible = true
         botBar.Visible = true
         runBtn.Visible = true
         stopBtn.Visible = true
         donesPanel.Visible = true
-        invShowGroup.Visible = false
         switchTab(currentTab)
-    else
-        -- Inventory Show section
-        tabBar.Visible = false
-        for _, a in ipairs(areas) do a.Visible = false end
-        botBar.Visible = false
-        runBtn.Visible = false
-        stopBtn.Visible = false
-        donesPanel.Visible = false
+    elseif idx == 2 then
+        -- Inventory Show
         invShowGroup.Visible = true
-        invHeaderLbl.TextColor3 = C.Teal -- reset color in case prev error
+        invHeaderLbl.TextColor3 = C.Teal
         buildInvShow()
+    elseif idx == 3 then
+        -- Misc
+        miscGroup.Visible = true
     end
 end
 
 upLvlBtn.MouseButton1Click:Connect(function() switchSection(1) end)
 invShowBtn.MouseButton1Click:Connect(function() switchSection(2) end)
+miscBtn.MouseButton1Click:Connect(function() switchSection(3) end)
 
 for i,name in ipairs(tabNames) do
-    local b=btn(tabBar,name,8,C.Card,C.Gray)
+    local b=btn(tabBar,name,10,C.Card,C.Gray)
     b.Size=UDim2.new(0,88,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
     local ii=i b.MouseButton1Click:Connect(function() switchTab(ii) end)
 end
@@ -1008,7 +1019,7 @@ miniZBtn.BackgroundTransparency = 1
 miniZBtn.Text = "Z"
 miniZBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
 miniZBtn.Font = Enum.Font.GothamBold
-miniZBtn.TextSize = 38
+miniZBtn.TextSize = 42
 miniZBtn.Visible = false
 miniZBtn.AutoButtonColor = false
 miniZBtn.ZIndex = 10
@@ -1230,11 +1241,11 @@ buildTimList=function()
     corner(cfgCard,7) stroke(cfgCard,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=cfgCard})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=cfgCard})
-    lbl(cfgCard,"Setting Leveling",9,C.Teal).Size=UDim2.new(1,0,0,13)
+    lbl(cfgCard,"Setting Leveling",11,C.Teal).Size=UDim2.new(1,0,0,13)
     local eqRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,Parent=cfgCard})
     corner(eqRow,5) stroke(eqRow,C.Dim,1)
-    lbl(eqRow,"Equip Interval (dtk)",9,C.Gray).Size=UDim2.new(0.6,0,1,0)
-    local eqBox=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(config.equipInterval),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=eqRow})
+    lbl(eqRow,"Equip Interval (dtk)",11,C.Gray).Size=UDim2.new(0.6,0,1,0)
+    local eqBox=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(config.equipInterval),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=eqRow})
     corner(eqBox,5) stroke(eqBox,C.Dim,1)
     eqBox:GetPropertyChangedSignal("Text"):Connect(function()
         local v=tonumber(eqBox.Text) if v then config.equipInterval=math.max(1,v) save() end
@@ -1242,8 +1253,8 @@ buildTimList=function()
 
     local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[1]})
     corner(saRow,6) stroke(saRow,C.Dim,1.1)
-    lbl(saRow,"Tampilkan semua pet",9,C.Gray).Size=UDim2.new(0.55,0,0,14)
-    local saTxt=lbl(saRow,"(bypass filter love)",7,C.Dim) saTxt.Size=UDim2.new(0.55,0,0,11) saTxt.Position=UDim2.new(0,8,0,16)
+    lbl(saRow,"Tampilkan semua pet",11,C.Gray).Size=UDim2.new(0.55,0,0,14)
+    local saTxt=lbl(saRow,"(bypass filter love)",9,C.Dim) saTxt.Size=UDim2.new(0.55,0,0,11) saTxt.Position=UDim2.new(0,8,0,16)
     local saTog=btn(saRow,showAllPets and "ON" or "OFF",9,showAllPets and C.TDim or C.Panel,showAllPets and C.Teal or C.Gray)
     saTog.Size=UDim2.new(0,44,0,20) saTog.Position=UDim2.new(1,-50,0.5,-10)
     local saTogStroke=stroke(saTog,showAllPets and C.Teal or C.Dim,1.1)
@@ -1261,9 +1272,9 @@ buildTimList=function()
     local pickerOpen=false
     local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=2,Parent=areas[1]})
     corner(pickRow,6) local pickStroke=stroke(pickRow,C.Dim,1.1)
-    local pickLbl=lbl(pickRow,"Pilih Pet Tim  ("..teamCount().." dipilih)",9,C.White)
+    local pickLbl=lbl(pickRow,"Pilih Pet Tim  ("..teamCount().." dipilih)",11,C.White)
     pickLbl.Size=UDim2.new(0.8,0,1,0) pickLbl.Position=UDim2.new(0,10,0,0)
-    local pickArrow=lbl(pickRow,"v",9,C.Teal,Enum.TextXAlignment.Right)
+    local pickArrow=lbl(pickRow,"v",11,C.Teal,Enum.TextXAlignment.Right)
     pickArrow.Size=UDim2.new(0,20,1,0) pickArrow.Position=UDim2.new(1,-24,0,0)
     local pickBtnCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=pickRow})
 
@@ -1272,7 +1283,7 @@ buildTimList=function()
     mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=picker})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=picker})
 
-    local pickSearch=mk("TextBox",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Card,Text="",PlaceholderText="Cari pet...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=9,TextScaled=false,ClearTextOnFocus=false,LayoutOrder=0,Parent=picker})
+    local pickSearch=mk("TextBox",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Card,Text="",PlaceholderText="Cari pet...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=13,TextScaled=false,ClearTextOnFocus=false,LayoutOrder=0,Parent=picker})
     corner(pickSearch,5) stroke(pickSearch,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=pickSearch})
 
     local petPickScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,150),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=picker})
@@ -1292,10 +1303,10 @@ buildTimList=function()
         div(areas[1],4)
         local timHdr=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=5,Parent=areas[1]})
         corner(timHdr,5)
-        lbl(timHdr,"Tim Leveling ("..teamCount().." pet):",9,C.Teal).Size=UDim2.new(1,-10,1,0)
+        lbl(timHdr,"Tim Leveling ("..teamCount().." pet):",11,C.Teal).Size=UDim2.new(1,-10,1,0)
         local i=0
         if teamCount()==0 then
-            local e=lbl(areas[1],"Belum ada pet dipilih",8,C.Gray,Enum.TextXAlignment.Center)
+            local e=lbl(areas[1],"Belum ada pet dipilih",10,C.Gray,Enum.TextXAlignment.Center)
             e.Size=UDim2.new(1,0,0,20) e.LayoutOrder=6
         else
             for uuid,_ in pairs(teamPetUUIDs) do
@@ -1303,9 +1314,9 @@ buildTimList=function()
                 local info=teamPetInfoCache[uuid] and teamPetInfoCache[uuid].info or uuid
                 local pr=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.TDim,BorderSizePixel=0,LayoutOrder=5+i,Parent=areas[1]})
                 corner(pr,5) stroke(pr,C.Teal,1.1)
-                local nl=lbl(pr,tostring(i)..".",9,C.Teal,Enum.TextXAlignment.Center) nl.Size=UDim2.new(0,24,1,0) nl.Position=UDim2.new(0,2,0,0)
-                local il=lbl(pr,info,8,C.White) il.Size=UDim2.new(1,-36,1,0) il.Position=UDim2.new(0,28,0,0)
-                local db=btn(pr,"X",8,C.RDim,C.Red) db.Size=UDim2.new(0,18,0,18) db.Position=UDim2.new(1,-22,0.5,-9) stroke(db,C.Red,1)
+                local nl=lbl(pr,tostring(i)..".",11,C.Teal,Enum.TextXAlignment.Center) nl.Size=UDim2.new(0,24,1,0) nl.Position=UDim2.new(0,2,0,0)
+                local il=lbl(pr,info,10,C.White) il.Size=UDim2.new(1,-36,1,0) il.Position=UDim2.new(0,28,0,0)
+                local db=btn(pr,"X",10,C.RDim,C.Red) db.Size=UDim2.new(0,18,0,18) db.Position=UDim2.new(1,-22,0.5,-9) stroke(db,C.Red,1)
                 local cu=uuid
                 db.MouseButton1Click:Connect(function()
                     teamPetUUIDs[cu]=nil pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
@@ -1317,7 +1328,7 @@ buildTimList=function()
             end
         end
         div(areas[1],100)
-        local rf=btn(areas[1],"Refresh",10,C.Panel,C.White)
+        local rf=btn(areas[1],"Refresh",12,C.Panel,C.White)
         rf.Size=UDim2.new(1,0,0,24) rf.LayoutOrder=101 stroke(rf,C.Dim,1.2)
         rf.MouseButton1Click:Connect(function()
             buildMaxKGCache()
@@ -1388,8 +1399,8 @@ buildTimList=function()
                     local info=teamPetInfoCache[uuid].info.." (di garden)"
                     local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.TDim,BorderSizePixel=0,LayoutOrder=n,Parent=petPickScroll})
                     corner(row,5) stroke(row,C.Teal,1.1)
-                    local nl=lbl(row,info,8,C.Teal) nl.Size=UDim2.new(0.72,0,1,0) nl.Position=UDim2.new(0,8,0,0)
-                    local tb=btn(row,"ON",8,C.TDim,C.Teal) tb.Size=UDim2.new(0,44,0,20) tb.Position=UDim2.new(1,-48,0.5,-10) stroke(tb,C.Teal,1.1)
+                    local nl=lbl(row,info,10,C.Teal) nl.Size=UDim2.new(0.72,0,1,0) nl.Position=UDim2.new(0,8,0,0)
+                    local tb=btn(row,"ON",10,C.TDim,C.Teal) tb.Size=UDim2.new(0,44,0,20) tb.Position=UDim2.new(1,-48,0.5,-10) stroke(tb,C.Teal,1.1)
                     local cu=uuid
                     tb.MouseButton1Click:Connect(function()
                         teamPetUUIDs[cu]=nil pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
@@ -1403,7 +1414,7 @@ buildTimList=function()
         end
         if n==0 then
             local msg=favCount==0 and "Belum ada pet di-love. Tekan icon love di pet game dulu." or "Tidak ada pet love yg cocok"
-            local e=lbl(petPickScroll,msg,8,C.Red,Enum.TextXAlignment.Center)
+            local e=lbl(petPickScroll,msg,10,C.Red,Enum.TextXAlignment.Center)
             e.Size=UDim2.new(1,0,0,30) e.LayoutOrder=1
             e.TextWrapped=true
         end
@@ -1443,16 +1454,16 @@ local function buildTargetList()
     local typePickerOpen=false
     local typeRow=mk("Frame",{Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=areas[2]})
     corner(typeRow,6) local typeStroke=stroke(typeRow,C.Dim,1.1)
-    local typeLbl=lbl(typeRow,"Jenis Pet  ("..selCount().." dipilih, 0=semua)",9,C.White)
+    local typeLbl=lbl(typeRow,"Jenis Pet  ("..selCount().." dipilih, 0=semua)",11,C.White)
     typeLbl.Size=UDim2.new(0.8,0,1,0) typeLbl.Position=UDim2.new(0,10,0,0)
-    local typeArrow=lbl(typeRow,"v",9,C.Teal,Enum.TextXAlignment.Right)
+    local typeArrow=lbl(typeRow,"v",11,C.Teal,Enum.TextXAlignment.Right)
     typeArrow.Size=UDim2.new(0,20,1,0) typeArrow.Position=UDim2.new(1,-24,0,0)
     local typeBtnCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=typeRow})
     local typePicker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=1,Parent=areas[2]})
     corner(typePicker,7) stroke(typePicker,C.Teal,1.3)
     mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=typePicker})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=typePicker})
-    local typeSearch=mk("TextBox",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Card,Text="",PlaceholderText="Cari jenis pet...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=9,TextScaled=false,ClearTextOnFocus=false,LayoutOrder=0,Parent=typePicker})
+    local typeSearch=mk("TextBox",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Card,Text="",PlaceholderText="Cari jenis pet...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=13,TextScaled=false,ClearTextOnFocus=false,LayoutOrder=0,Parent=typePicker})
     corner(typeSearch,5) stroke(typeSearch,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=typeSearch})
     local typeScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,120),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=typePicker})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=typeScroll})
@@ -1517,8 +1528,8 @@ local function buildTargetList()
     local function numRow(labelTxt,lo,default,onChange)
         local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=areas[2]})
         corner(r,6) stroke(r,C.Dim,1.1)
-        lbl(r,labelTxt,9,C.Gray).Size=UDim2.new(0.6,0,1,0)
-        local box=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(default),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
+        lbl(r,labelTxt,11,C.Gray).Size=UDim2.new(0.6,0,1,0)
+        local box=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(default),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
         corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(v) save() end end)
     end
@@ -1527,16 +1538,16 @@ local function buildTargetList()
 
     local pcRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=areas[2]})
     corner(pcRow,6) stroke(pcRow,C.Dim,1.1)
-    lbl(pcRow,"Jumlah Pet (sekaligus):",9,C.Gray).Size=UDim2.new(0.55,0,1,0)
-    local pcMin=btn(pcRow,"-",12,C.Panel,C.Gray) pcMin.Size=UDim2.new(0,22,0,20) pcMin.Position=UDim2.new(1,-72,0.5,-10) stroke(pcMin,C.Dim,1.1)
-    local pcNum=lbl(pcRow,tostring(maxPetTarget),10,C.White,Enum.TextXAlignment.Center) pcNum.Size=UDim2.new(0,26,1,0) pcNum.Position=UDim2.new(1,-48,0,0) pcNum.Font=Enum.Font.GothamBold
-    local pcPlus=btn(pcRow,"+",12,C.Panel,C.Gray) pcPlus.Size=UDim2.new(0,22,0,20) pcPlus.Position=UDim2.new(1,-22,0.5,-10) stroke(pcPlus,C.Dim,1.1)
+    lbl(pcRow,"Jumlah Pet (sekaligus):",11,C.Gray).Size=UDim2.new(0.55,0,1,0)
+    local pcMin=btn(pcRow,"-",14,C.Panel,C.Gray) pcMin.Size=UDim2.new(0,22,0,20) pcMin.Position=UDim2.new(1,-72,0.5,-10) stroke(pcMin,C.Dim,1.1)
+    local pcNum=lbl(pcRow,tostring(maxPetTarget),12,C.White,Enum.TextXAlignment.Center) pcNum.Size=UDim2.new(0,26,1,0) pcNum.Position=UDim2.new(1,-48,0,0) pcNum.Font=Enum.Font.GothamBold
+    local pcPlus=btn(pcRow,"+",14,C.Panel,C.Gray) pcPlus.Size=UDim2.new(0,22,0,20) pcPlus.Position=UDim2.new(1,-22,0.5,-10) stroke(pcPlus,C.Dim,1.1)
     pcMin.MouseButton1Click:Connect(function() if maxPetTarget>1 then maxPetTarget=maxPetTarget-1 d.maxPetTarget=maxPetTarget pcNum.Text=tostring(maxPetTarget) save() end end)
     pcPlus.MouseButton1Click:Connect(function() if maxPetTarget<10 then maxPetTarget=maxPetTarget+1 d.maxPetTarget=maxPetTarget pcNum.Text=tostring(maxPetTarget) save() end end)
 
     div(areas[2],6)
     local qHdr=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=7,Parent=areas[2]})
-    corner(qHdr,5) lbl(qHdr,"Pet target belum jadi (jenis):",9,C.Teal).Size=UDim2.new(1,-10,1,0)
+    corner(qHdr,5) lbl(qHdr,"Pet target belum jadi (jenis):",11,C.Teal).Size=UDim2.new(1,-10,1,0)
 
     local agg={}
     local total=0
@@ -1566,7 +1577,7 @@ local function buildTargetList()
     table.sort(sortedBases,function(a,b) return agg[a].count>agg[b].count end)
 
     if total==0 then
-        local e=lbl(areas[2],"Tidak ada pet yang cocok",8,C.Red,Enum.TextXAlignment.Center)
+        local e=lbl(areas[2],"Tidak ada pet yang cocok",10,C.Red,Enum.TextXAlignment.Center)
         e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=8
     else
         local idx=0
@@ -1575,21 +1586,21 @@ local function buildTargetList()
             local data=agg[base]
             local row=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=7+idx,Parent=areas[2]})
             corner(row,5) stroke(row,C.Dim,1)
-            local nl=lbl(row,base,9,C.White) nl.Size=UDim2.new(0.65,0,1,0) nl.Position=UDim2.new(0,10,0,0)
-            local cnt=lbl(row,data.count.." pet",9,C.Teal,Enum.TextXAlignment.Right)
+            local nl=lbl(row,base,11,C.White) nl.Size=UDim2.new(0.65,0,1,0) nl.Position=UDim2.new(0,10,0,0)
+            local cnt=lbl(row,data.count.." pet",11,C.Teal,Enum.TextXAlignment.Right)
             cnt.Size=UDim2.new(0,80,1,0) cnt.Position=UDim2.new(1,-90,0,0)
             cnt.Font=Enum.Font.GothamBold
             if data.mutCount>0 then
-                local mut=lbl(row,"("..data.mutCount.." mutasi)",7,C.Gold,Enum.TextXAlignment.Left)
+                local mut=lbl(row,"("..data.mutCount.." mutasi)",9,C.Gold,Enum.TextXAlignment.Left)
                 mut.Size=UDim2.new(0.35,0,0,11) mut.Position=UDim2.new(0,10,0,16)
                 nl.Size=UDim2.new(0.65,0,0,16) nl.Position=UDim2.new(0,10,0,2)
             end
         end
-        local tot=lbl(areas[2],"Total: "..total.." pet ("..(#sortedBases).." jenis)",9,C.Teal,Enum.TextXAlignment.Center)
+        local tot=lbl(areas[2],"Total: "..total.." pet ("..(#sortedBases).." jenis)",11,C.Teal,Enum.TextXAlignment.Center)
         tot.Size=UDim2.new(1,0,0,16) tot.LayoutOrder=7+#sortedBases+1
     end
     div(areas[2],200)
-    local rf=btn(areas[2],"Refresh",10,C.Panel,C.White) rf.Size=UDim2.new(1,0,0,22) rf.LayoutOrder=201 stroke(rf,C.Dim,1.2)
+    local rf=btn(areas[2],"Refresh",12,C.Panel,C.White) rf.Size=UDim2.new(1,0,0,22) rf.LayoutOrder=201 stroke(rf,C.Dim,1.2)
     rf.MouseButton1Click:Connect(function() buildMaxKGCache() buildTargetList() end)
 end
 
@@ -1605,14 +1616,14 @@ buildSwapList=function()
     corner(infoCard,7) stroke(infoCard,C.Teal,1.2)
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,5),Parent=infoCard})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=infoCard})
-    lbl(infoCard,"Swap Mechanic: friend-7",10,C.Teal).Size=UDim2.new(1,0,0,14)
-    local descLbl=lbl(infoCard,"Toggle ON utk swap. Pet HARUS udah di garden (place manual/via tim).",8,C.Gray)
+    lbl(infoCard,"Swap Mechanic: friend-7",12,C.Teal).Size=UDim2.new(1,0,0,14)
+    local descLbl=lbl(infoCard,"Toggle ON utk swap. Pet HARUS udah di garden (place manual/via tim).",10,C.Gray)
     descLbl.Size=UDim2.new(1,0,0,22) descLbl.TextWrapped=true
 
     local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[3]})
     corner(saRow,6) stroke(saRow,C.Dim,1.1)
-    lbl(saRow,"Tampilkan semua pet",9,C.Gray).Size=UDim2.new(0.55,0,0,14)
-    local saTxt=lbl(saRow,"(bypass filter love di section Favorit)",7,C.Dim) saTxt.Size=UDim2.new(0.6,0,0,11) saTxt.Position=UDim2.new(0,8,0,16)
+    lbl(saRow,"Tampilkan semua pet",11,C.Gray).Size=UDim2.new(0.55,0,0,14)
+    local saTxt=lbl(saRow,"(bypass filter love di section Favorit)",9,C.Dim) saTxt.Size=UDim2.new(0.6,0,0,11) saTxt.Position=UDim2.new(0,8,0,16)
     local saTog=btn(saRow,showAllPetsSwap and "ON" or "OFF",9,showAllPetsSwap and C.TDim or C.Panel,showAllPetsSwap and C.Teal or C.Gray)
     saTog.Size=UDim2.new(0,44,0,20) saTog.Position=UDim2.new(1,-50,0.5,-10)
     local saTogStroke=stroke(saTog,showAllPetsSwap and C.Teal or C.Dim,1.1)
@@ -1730,7 +1741,7 @@ buildSwapList=function()
     local lo=3
     makeSectionHeader("Pet Tim Leveling",#timRows,countEnabled(timRows),lo,C.Gold) lo=lo+1
     if #timRows==0 then
-        local e=lbl(areas[3],"Belum ada pet di Tim Leveling. Pilih dulu di tab 1.",8,C.Gray,Enum.TextXAlignment.Center)
+        local e=lbl(areas[3],"Belum ada pet di Tim Leveling. Pilih dulu di tab 1.",10,C.Gray,Enum.TextXAlignment.Center)
         e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=lo lo=lo+1
     else
         for _,r in ipairs(timRows) do
@@ -1744,7 +1755,7 @@ buildSwapList=function()
     makeSectionHeader("Pet Favorit (bukan tim)",#favRows,countEnabled(favRows),lo,C.Teal) lo=lo+1
     if #favRows==0 then
         local msg=favCountTotal==0 and "Belum ada pet di-love. Tekan icon love di pet game dulu." or "Tidak ada pet favorit di luar Tim Leveling"
-        local e=lbl(areas[3],msg,8,C.Gray,Enum.TextXAlignment.Center)
+        local e=lbl(areas[3],msg,10,C.Gray,Enum.TextXAlignment.Center)
         e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=lo e.TextWrapped=true lo=lo+1
     else
         for _,r in ipairs(favRows) do
@@ -1753,9 +1764,9 @@ buildSwapList=function()
     end
 
     div(areas[3],500)
-    local rf=btn(areas[3],"Refresh",9,C.Panel,C.White) rf.Size=UDim2.new(1,0,0,22) rf.LayoutOrder=501 stroke(rf,C.Dim,1.2)
+    local rf=btn(areas[3],"Refresh",11,C.Panel,C.White) rf.Size=UDim2.new(1,0,0,22) rf.LayoutOrder=501 stroke(rf,C.Dim,1.2)
     rf.MouseButton1Click:Connect(function() buildSwapList() end)
-    local clr=btn(areas[3],"Clear Semua (matikan)",9,C.RDim,C.Red) clr.Size=UDim2.new(1,0,0,22) clr.LayoutOrder=502 stroke(clr,C.Red,1.2)
+    local clr=btn(areas[3],"Clear Semua (matikan)",11,C.RDim,C.Red) clr.Size=UDim2.new(1,0,0,22) clr.LayoutOrder=502 stroke(clr,C.Red,1.2)
     clr.MouseButton1Click:Connect(function()
         for uuid,cfg in pairs(swapPerPet) do
             cfg.enabled=false
@@ -1774,13 +1785,13 @@ local function buildOtherSetting()
     local function cfgRow(labelTxt,lo,default,onChange)
         local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=areas[4]})
         corner(r,6) stroke(r,C.Dim,1.1)
-        lbl(r,labelTxt,9,C.Gray).Size=UDim2.new(0.6,0,1,0)
-        local box=mk("TextBox",{Size=UDim2.new(0,56,0,20),Position=UDim2.new(1,-62,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(default),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
+        lbl(r,labelTxt,11,C.Gray).Size=UDim2.new(0.6,0,1,0)
+        local box=mk("TextBox",{Size=UDim2.new(0,56,0,20),Position=UDim2.new(1,-62,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(default),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
         corner(box,5) stroke(box,C.Dim,1)
         box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(v) save() end end)
     end
 
-    local t1=lbl(areas[4],"LEVELING",9,C.Teal) t1.Size=UDim2.new(1,0,0,14) t1.LayoutOrder=0
+    local t1=lbl(areas[4],"LEVELING",11,C.Teal) t1.Size=UDim2.new(1,0,0,14) t1.LayoutOrder=0
     local _,asTog,asTogStroke,asStroke=togRow(areas[4],"Auto Start Leveling","Auto mulai saat script dijalankan",1)
     local function setAsTog(val)
         asTog.Text=val and "ON" or "OFF" asTog.BackgroundColor3=val and C.TDim or C.Panel asTog.TextColor3=val and C.Teal or C.Gray asTogStroke.Color=val and C.Teal or C.Dim asStroke.Color=val and C.Teal or C.Dim
@@ -1789,8 +1800,8 @@ local function buildOtherSetting()
     asTog.MouseButton1Click:Connect(function() autoStartEnabled=not autoStartEnabled setAsTog(autoStartEnabled) save() end)
 
     div(areas[4],2)
-    local t2=lbl(areas[4],"REJOIN",9,C.Teal) t2.Size=UDim2.new(1,0,0,14) t2.LayoutOrder=3
-    local rnBtn=btn(areas[4],"Rejoin Now",10,C.TDim,C.Teal)
+    local t2=lbl(areas[4],"REJOIN",11,C.Teal) t2.Size=UDim2.new(1,0,0,14) t2.LayoutOrder=3
+    local rnBtn=btn(areas[4],"Rejoin Now",12,C.TDim,C.Teal)
     rnBtn.Size=UDim2.new(1,0,0,24) rnBtn.LayoutOrder=4 stroke(rnBtn,C.Teal,1.5)
     rnBtn.MouseButton1Click:Connect(function() rnBtn.Text="Rejoining..." task.wait(0.5) TS:Teleport(game.PlaceId,player) end)
     cfgRow("Interval (menit)",5,config.rejoinMinutes,function(v)
@@ -1799,7 +1810,7 @@ local function buildOtherSetting()
 
     local _row
     _row,arTog2,arTogStroke2,arStroke2=togRow(areas[4],"Auto Rejoin","Rejoin otomatis sesuai interval",6)
-    cdLbl2=lbl(areas[4],"Auto Rejoin: OFF",9,C.Gray,Enum.TextXAlignment.Center)
+    cdLbl2=lbl(areas[4],"Auto Rejoin: OFF",11,C.Gray,Enum.TextXAlignment.Center)
     cdLbl2.Size=UDim2.new(1,0,0,20) cdLbl2.LayoutOrder=7 cdLbl2.BackgroundColor3=C.Panel cdLbl2.BackgroundTransparency=0
     corner(cdLbl2,6) stroke(cdLbl2,C.Dim,1.1)
 
@@ -1809,7 +1820,7 @@ local function buildOtherSetting()
     setArTog(autoRejoin)
 
     div(areas[4],8)
-    local t3=lbl(areas[4],"ANTI-AFK",9,C.Teal) t3.Size=UDim2.new(1,0,0,14) t3.LayoutOrder=9
+    local t3=lbl(areas[4],"ANTI-AFK",11,C.Teal) t3.Size=UDim2.new(1,0,0,14) t3.LayoutOrder=9
     local _,afkTog,afkTogStroke,afkStroke=togRow(areas[4],"Anti-AFK","Cegah kick AFK 20menit (auto)",10)
     local function setAfkTog(v)
         afkTog.Text=v and "ON" or "OFF" afkTog.BackgroundColor3=v and C.TDim or C.Panel afkTog.TextColor3=v and C.Teal or C.Gray afkTogStroke.Color=v and C.Teal or C.Dim afkStroke.Color=v and C.Teal or C.Dim
@@ -1830,16 +1841,16 @@ local function buildAutoGift()
 
     local ivRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=areas[5]})
     corner(ivRow,6) stroke(ivRow,C.Dim,1.1)
-    lbl(ivRow,"Interval Send (dtk):",9,C.Gray).Size=UDim2.new(0.6,0,1,0)
-    local ivBox=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(sendInterval),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ivRow})
+    lbl(ivRow,"Interval Send (dtk):",11,C.Gray).Size=UDim2.new(0.6,0,1,0)
+    local ivBox=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(sendInterval),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ivRow})
     corner(ivBox,5) stroke(ivBox,C.Dim,1)
     ivBox:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(ivBox.Text) if v then sendInterval=math.max(5,v) save() end end)
 
     local function makeCollapsible(title,layoutOrder)
         local hdr=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=layoutOrder,Parent=areas[5]})
         corner(hdr,7) local hdrStroke=stroke(hdr,C.Dim,1.2)
-        local titleLbl=lbl(hdr,title,11,C.White) titleLbl.Size=UDim2.new(0.85,0,1,0) titleLbl.Position=UDim2.new(0,12,0,0) titleLbl.Font=Enum.Font.GothamBold
-        local arrow=lbl(hdr,"v",11,C.Teal,Enum.TextXAlignment.Right) arrow.Size=UDim2.new(0,24,1,0) arrow.Position=UDim2.new(1,-30,0,0)
+        local titleLbl=lbl(hdr,title,13,C.White) titleLbl.Size=UDim2.new(0.85,0,1,0) titleLbl.Position=UDim2.new(0,12,0,0) titleLbl.Font=Enum.Font.GothamBold
+        local arrow=lbl(hdr,"v",13,C.Teal,Enum.TextXAlignment.Right) arrow.Size=UDim2.new(0,24,1,0) arrow.Position=UDim2.new(1,-30,0,0)
         local cover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=hdr})
         local content=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=layoutOrder+1,ClipsDescendants=true,AutomaticSize=Enum.AutomaticSize.None,Parent=areas[5]})
         corner(content,7) stroke(content,C.Dim,1)
@@ -1869,8 +1880,8 @@ local function buildAutoGift()
         local trOpen=false
         local trRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
         corner(trRow,6) local trStroke=stroke(trRow,C.Dim,1.1)
-        local trLbl=lbl(trRow,"Target: "..trText(),9,C.White) trLbl.Size=UDim2.new(0.85,0,1,0) trLbl.Position=UDim2.new(0,10,0,0)
-        local trArrow=lbl(trRow,"v",9,C.Teal,Enum.TextXAlignment.Right) trArrow.Size=UDim2.new(0,20,1,0) trArrow.Position=UDim2.new(1,-24,0,0)
+        local trLbl=lbl(trRow,"Target: "..trText(),11,C.White) trLbl.Size=UDim2.new(0.85,0,1,0) trLbl.Position=UDim2.new(0,10,0,0)
+        local trArrow=lbl(trRow,"v",11,C.Teal,Enum.TextXAlignment.Right) trArrow.Size=UDim2.new(0,20,1,0) trArrow.Position=UDim2.new(1,-24,0,0)
         local trCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=trRow})
         local trPicker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.BG,BorderSizePixel=0,Visible=false,LayoutOrder=2,Parent=parent})
         corner(trPicker,6) stroke(trPicker,C.Teal,1.2)
@@ -1919,7 +1930,7 @@ local function buildAutoGift()
                 end)
             end
             if #plist == 0 then
-                local e=lbl(trScroll,"(belum ada player lain di server)",8,C.Red,Enum.TextXAlignment.Center)
+                local e=lbl(trScroll,"(belum ada player lain di server)",10,C.Red,Enum.TextXAlignment.Center)
                 e.Size=UDim2.new(1,-12,0,22) e.LayoutOrder=1 e.TextWrapped=true
             end
         end
@@ -1942,9 +1953,9 @@ local function buildAutoGift()
         local pickerOpen=false
         local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=3,Parent=parent})
         corner(pickRow,6) local pickStroke=stroke(pickRow,C.Dim,1.1)
-        local pickLbl=lbl(pickRow,"Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)",9,C.White)
+        local pickLbl=lbl(pickRow,"Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)",11,C.White)
         pickLbl.Size=UDim2.new(0.85,0,1,0) pickLbl.Position=UDim2.new(0,10,0,0)
-        local pickArrow=lbl(pickRow,"v",9,C.Teal,Enum.TextXAlignment.Right) pickArrow.Size=UDim2.new(0,20,1,0) pickArrow.Position=UDim2.new(1,-24,0,0)
+        local pickArrow=lbl(pickRow,"v",11,C.Teal,Enum.TextXAlignment.Right) pickArrow.Size=UDim2.new(0,20,1,0) pickArrow.Position=UDim2.new(1,-24,0,0)
         local pickCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=pickRow})
         local picker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.BG,BorderSizePixel=0,Visible=false,LayoutOrder=4,Parent=parent})
         corner(picker,6) stroke(picker,C.Teal,1.2)
@@ -1992,7 +2003,7 @@ local function buildAutoGift()
                     save()
                 end)
             end
-            if n==0 then local e=lbl(typeScroll,"Backpack kosong",8,C.Red,Enum.TextXAlignment.Center) e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=1 end
+            if n==0 then local e=lbl(typeScroll,"Backpack kosong",10,C.Red,Enum.TextXAlignment.Center) e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=1 end
         end
         buildTypeList()
         pickCover.MouseButton1Click:Connect(function()
@@ -2012,8 +2023,8 @@ local function buildAutoGift()
         local mfOpen=false
         local mfRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=parent})
         corner(mfRow,6) local mfStroke=stroke(mfRow,C.Dim,1.1)
-        local mfLbl=lbl(mfRow,"Mutasi: "..mfText(),9,C.White) mfLbl.Size=UDim2.new(0.85,0,1,0) mfLbl.Position=UDim2.new(0,10,0,0)
-        local mfArrow=lbl(mfRow,"v",9,C.Teal,Enum.TextXAlignment.Right) mfArrow.Size=UDim2.new(0,20,1,0) mfArrow.Position=UDim2.new(1,-24,0,0)
+        local mfLbl=lbl(mfRow,"Mutasi: "..mfText(),11,C.White) mfLbl.Size=UDim2.new(0.85,0,1,0) mfLbl.Position=UDim2.new(0,10,0,0)
+        local mfArrow=lbl(mfRow,"v",11,C.Teal,Enum.TextXAlignment.Right) mfArrow.Size=UDim2.new(0,20,1,0) mfArrow.Position=UDim2.new(1,-24,0,0)
         local mfCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=mfRow})
         local mfPicker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.BG,BorderSizePixel=0,Visible=false,LayoutOrder=6,Parent=parent})
         corner(mfPicker,6) stroke(mfPicker,C.Teal,1.2)
@@ -2052,15 +2063,15 @@ local function buildAutoGift()
 
         local kgRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=8,Parent=parent})
         corner(kgRow,6) stroke(kgRow,C.Dim,1.1)
-        lbl(kgRow,"KG: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0)
-        local kgBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.kg,PlaceholderText="-60",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=kgRow})
+        lbl(kgRow,"KG: -N=bawah, N=atas",11,C.Gray).Size=UDim2.new(0.7,0,1,0)
+        local kgBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.kg,PlaceholderText="-60",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=kgRow})
         corner(kgBox,5) stroke(kgBox,C.Dim,1)
         kgBox:GetPropertyChangedSignal("Text"):Connect(function() slot.kg=kgBox.Text save() end)
 
         local ageRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=7,Parent=parent})
         corner(ageRow,6) stroke(ageRow,C.Dim,1.1)
-        lbl(ageRow,"Age: -N=bawah, N=atas",9,C.Gray).Size=UDim2.new(0.7,0,1,0)
-        local ageBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.age,PlaceholderText="-100",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=10,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ageRow})
+        lbl(ageRow,"Age: -N=bawah, N=atas",11,C.Gray).Size=UDim2.new(0.7,0,1,0)
+        local ageBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.age,PlaceholderText="-100",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ageRow})
         corner(ageBox,5) stroke(ageBox,C.Dim,1)
         ageBox:GetPropertyChangedSignal("Text"):Connect(function() slot.age=ageBox.Text save() end)
 
@@ -2109,11 +2120,11 @@ local function buildAutoGift()
         save()
     end)
 
-    sendStatusLbl=lbl(areas[5],"Send: idle",9,C.Gray,Enum.TextXAlignment.Center)
+    sendStatusLbl=lbl(areas[5],"Send: idle",11,C.Gray,Enum.TextXAlignment.Center)
     sendStatusLbl.Size=UDim2.new(1,0,0,18) sendStatusLbl.LayoutOrder=60 sendStatusLbl.BackgroundColor3=C.Panel sendStatusLbl.BackgroundTransparency=0
     corner(sendStatusLbl,5) stroke(sendStatusLbl,C.Dim,1)
 
-    accStatusLbl=lbl(areas[5],"Accept: idle",9,C.Gray,Enum.TextXAlignment.Center)
+    accStatusLbl=lbl(areas[5],"Accept: idle",11,C.Gray,Enum.TextXAlignment.Center)
     accStatusLbl.Size=UDim2.new(1,0,0,18) accStatusLbl.LayoutOrder=61 accStatusLbl.BackgroundColor3=C.Panel accStatusLbl.BackgroundTransparency=0
     corner(accStatusLbl,5) stroke(accStatusLbl,C.Dim,1)
 end
@@ -2272,6 +2283,171 @@ end)
 
 -- ============================================
 -- AUTO ACCEPT HOOKS (FIXED v8.2)
+-- ============================================
+-- v12.22: MISC SECTION UI - Auto Buy + Feed + Collect
+-- ============================================
+local autoBuyEgg = false
+local autoBuySeed = false
+local autoBuyGear = false
+local autoBuyToken = false
+local autoFeedPet = false
+local autoCollect = false
+
+local miscBuyInterval = 5
+local miscFeedInterval = 30
+local miscCollectInterval = 10
+
+local miscStatusLbl
+do
+    -- Header (full width inside miscGroup)
+    local miscHdr = mk("Frame",{Size=UDim2.new(1,-10,0,30),Position=UDim2.new(0,5,0,4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=miscGroup})
+    corner(miscHdr, 7) stroke(miscHdr, C.Teal, 1.3)
+    local hl = lbl(miscHdr, "MISC AUTO TASKS", 14, C.Teal, Enum.TextXAlignment.Center)
+    hl.Size = UDim2.new(1,0,1,0)
+    hl.Font = Enum.Font.GothamBold
+
+    -- Scroll area buat toggle list
+    local miscScroll = mk("ScrollingFrame",{
+        Size=UDim2.new(1,-10,1,-72),Position=UDim2.new(0,5,0,38),
+        BackgroundTransparency=1,ScrollBarThickness=4,ScrollBarImageColor3=C.Teal,
+        CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,
+        Parent=miscGroup
+    })
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,5),Parent=miscScroll})
+    mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,3),PaddingRight=UDim.new(0,3),Parent=miscScroll})
+
+    -- v12.22: toggle row dgn font lebih gede
+    local function miscTogRow(labelTxt, descTxt, lo, getF, setF)
+        local row = mk("Frame",{Size=UDim2.new(1,0,0,42), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=miscScroll})
+        corner(row, 7) local rowStroke = stroke(row, C.Dim, 1.2)
+        local l = lbl(row, labelTxt, 14, C.White) l.Size = UDim2.new(0.65,0,0,18) l.Position = UDim2.new(0,12,0,5)
+        l.Font = Enum.Font.GothamBold
+        if descTxt then
+            local dl = lbl(row, descTxt, 12, C.Gray) dl.Size = UDim2.new(0.75,0,0,14) dl.Position = UDim2.new(0,12,0,23)
+        end
+        local tog = btn(row, "OFF", 13, C.Panel, C.Gray) tog.Size = UDim2.new(0,56,0,26) tog.Position = UDim2.new(1,-66,0.5,-13)
+        tog.Font = Enum.Font.GothamBold
+        local togStroke = stroke(tog, C.Dim, 1.2)
+        local function refresh()
+            local on = getF()
+            tog.Text = on and "ON" or "OFF"
+            tog.BackgroundColor3 = on and C.TDim or C.Panel
+            tog.TextColor3 = on and C.Teal or C.Gray
+            togStroke.Color = on and C.Teal or C.Dim
+            rowStroke.Color = on and C.Teal or C.Dim
+        end
+        refresh()
+        tog.MouseButton1Click:Connect(function() setF(not getF()) refresh() end)
+        return row
+    end
+
+    miscTogRow("Auto Buy Egg", "Beli egg otomatis di toko", 1, function() return autoBuyEgg end, function(v) autoBuyEgg=v end)
+    miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, function() return autoBuySeed end, function(v) autoBuySeed=v end)
+    miscTogRow("Auto Buy Gear", "Beli gear (sprinkler, water can, dll)", 3, function() return autoBuyGear end, function(v) autoBuyGear=v end)
+    miscTogRow("Auto Buy Token", "Beli item pakai token (egg lama, event)", 4, function() return autoBuyToken end, function(v) autoBuyToken=v end)
+    miscTogRow("Auto Feed Pet", "Kasih makan pet di tim leveling", 5, function() return autoFeedPet end, function(v) autoFeedPet=v end)
+    miscTogRow("Auto Collect", "Panen semua buah di kebun", 6, function() return autoCollect end, function(v) autoCollect=v end)
+
+    -- Status (bottom)
+    miscStatusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
+    miscStatusLbl.Size = UDim2.new(1,-10,0,26)
+    miscStatusLbl.Position = UDim2.new(0,5,1,-30)
+    miscStatusLbl.BackgroundColor3 = C.Panel
+    miscStatusLbl.BackgroundTransparency = 0
+    miscStatusLbl.Font = Enum.Font.GothamBold
+    corner(miscStatusLbl, 6) stroke(miscStatusLbl, C.Dim, 1.1)
+end
+
+-- Discover remotes
+local miscRemotes = {buyEgg={},buySeed={},buyGear={},buyToken={},feedPet={},collect={}}
+do
+    local ge = RS:FindFirstChild("GameEvents")
+    if ge then
+        for _, c in ipairs(ge:GetDescendants()) do
+            if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
+                local n = c.Name:lower()
+                if n:find("buy") and (n:find("egg") or n:find("pet")) and not n:find("token") then
+                    table.insert(miscRemotes.buyEgg, c)
+                end
+                if n:find("buy") and n:find("seed") then table.insert(miscRemotes.buySeed, c) end
+                if n:find("buy") and n:find("gear") then table.insert(miscRemotes.buyGear, c) end
+                if n:find("token") or (n:find("event") and n:find("buy")) then table.insert(miscRemotes.buyToken, c) end
+                if n:find("feed") and n:find("pet") then table.insert(miscRemotes.feedPet, c) end
+                if n:find("collect") or n:find("harvest") then table.insert(miscRemotes.collect, c) end
+            end
+        end
+    end
+    dbg("[misc] remotes: buyEgg="..#miscRemotes.buyEgg.." buySeed="..#miscRemotes.buySeed.." buyGear="..#miscRemotes.buyGear.." token="..#miscRemotes.buyToken.." feed="..#miscRemotes.feedPet.." collect="..#miscRemotes.collect)
+end
+
+local function setMiscStatus(text, color)
+    if miscStatusLbl then
+        miscStatusLbl.Text = text
+        miscStatusLbl.TextColor3 = color or C.Teal
+    end
+end
+
+local function fireAllMisc(remotesList)
+    if #remotesList == 0 then return false end
+    local fired = 0
+    for _, r in ipairs(remotesList) do
+        local ok = pcall(function()
+            if r:IsA("RemoteFunction") then r:InvokeServer()
+            else r:FireServer() end
+        end)
+        if ok then fired = fired + 1 end
+    end
+    return fired > 0
+end
+
+-- Auto buy loop
+task.spawn(function()
+    while not scriptShutdown do
+        if autoBuyEgg then pcall(fireAllMisc, miscRemotes.buyEgg) setMiscStatus("Buy egg fired", C.Teal) end
+        if autoBuySeed then pcall(fireAllMisc, miscRemotes.buySeed) setMiscStatus("Buy seed fired", C.Teal) end
+        if autoBuyGear then pcall(fireAllMisc, miscRemotes.buyGear) setMiscStatus("Buy gear fired", C.Teal) end
+        if autoBuyToken then pcall(fireAllMisc, miscRemotes.buyToken) setMiscStatus("Buy token fired", C.Teal) end
+        task.wait(miscBuyInterval)
+    end
+end)
+
+-- Auto feed pet di tim
+task.spawn(function()
+    while not scriptShutdown do
+        if autoFeedPet and #miscRemotes.feedPet > 0 then
+            local fed = 0
+            for uuidStr, _ in pairs(teamPetUUIDs) do
+                for _, r in ipairs(miscRemotes.feedPet) do
+                    pcall(function()
+                        if r:IsA("RemoteFunction") then r:InvokeServer(uuidStr)
+                        else r:FireServer(uuidStr) end
+                    end)
+                end
+                fed = fed + 1
+            end
+            if fed > 0 then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
+        end
+        task.wait(miscFeedInterval)
+    end
+end)
+
+-- Auto collect
+task.spawn(function()
+    while not scriptShutdown do
+        if autoCollect and #miscRemotes.collect > 0 then
+            for _, r in ipairs(miscRemotes.collect) do
+                pcall(function()
+                    if r:IsA("RemoteFunction") then r:InvokeServer()
+                    else r:FireServer() end
+                end)
+            end
+            setMiscStatus("Collect fired", C.Teal)
+        end
+        task.wait(miscCollectInterval)
+    end
+end)
+
+-- ============================================
 -- Gift: GiftPet (uuid, name, sender) -> AcceptPetGift(true, uuid) (CONFIRMED v12.10)
 -- Trade: SendRequest (tradeID, sender, ts) -> RespondRequest(tradeID, true) (CONFIRMED v12.10)
 -- ============================================
@@ -3050,13 +3226,13 @@ closeBtn.MouseButton1Click:Connect(function()
     local overlay=mk("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.fromRGB(0,0,0),BackgroundTransparency=0.5,BorderSizePixel=0,ZIndex=10,Parent=main})
     local modal=mk("Frame",{Size=UDim2.new(0,300,0,140),Position=UDim2.new(0.5,-150,0.5,-70),BackgroundColor3=C.Panel,BorderSizePixel=0,ZIndex=11,Parent=overlay})
     corner(modal,10) stroke(modal,C.Red,2)
-    local title=lbl(modal,"YAKIN MAU CLOSE?",11,C.Red,Enum.TextXAlignment.Center)
+    local title=lbl(modal,"YAKIN MAU CLOSE?",13,C.Red,Enum.TextXAlignment.Center)
     title.Size=UDim2.new(1,0,0,28) title.Position=UDim2.new(0,0,0,10) title.ZIndex=11
-    local msg=lbl(modal,"Semua aktivitas akan dihentikan & GUI ditutup.",8,C.Gray,Enum.TextXAlignment.Center)
+    local msg=lbl(modal,"Semua aktivitas akan dihentikan & GUI ditutup.",10,C.Gray,Enum.TextXAlignment.Center)
     msg.Size=UDim2.new(1,-20,0,40) msg.Position=UDim2.new(0,10,0,40) msg.TextWrapped=true msg.ZIndex=11
-    local yaBtn=btn(modal,"YA, CLOSE",10,C.RDim,C.Red)
+    local yaBtn=btn(modal,"YA, CLOSE",12,C.RDim,C.Red)
     yaBtn.Size=UDim2.new(0,120,0,28) yaBtn.Position=UDim2.new(0.5,-130,1,-40) yaBtn.ZIndex=11 stroke(yaBtn,C.Red,1.5)
-    local noBtn=btn(modal,"BATAL",10,C.Card,C.White)
+    local noBtn=btn(modal,"BATAL",12,C.Card,C.White)
     noBtn.Size=UDim2.new(0,120,0,28) noBtn.Position=UDim2.new(0.5,10,1,-40) noBtn.ZIndex=11 stroke(noBtn,C.Dim,1.5)
     noBtn.MouseButton1Click:Connect(function() overlay:Destroy() end)
     yaBtn.MouseButton1Click:Connect(function()
@@ -3129,4 +3305,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.21: + findPetInBackpack cek Character (pet equipped) + age fallback lebih aggresif (Everchanted)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.23: SEMUA font size +2 (lebih gede di seluruh GUI)")
