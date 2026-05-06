@@ -1,12 +1,12 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.41"
+local SCRIPT_VERSION="v12.44"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HS = game:GetService("HttpService")
-local TS = game:GetService("TeleportService") 
+local TS = game:GetService("TeleportService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui",10)
 print("[ZenxLvl] step 1 OK - services loaded")
@@ -2564,15 +2564,38 @@ task.spawn(function()
         if autoFeedPet then
             local ge = RS:FindFirstChild("GameEvents")
             local r = ge and ge:FindFirstChild("ActivePetService")
-            if r then
-                -- v12.41: kumpulin UUID dari 2 source - teamPetUUIDs + ActivePetUI scan
-                local allUUIDs = {}
-                for k, _ in pairs(teamPetUUIDs) do
-                    local clean = k:gsub("[{}]", "")
-                    allUUIDs[clean] = true
-                end
-                -- Scan PlayerGui buat pet yg lagi equipped
-                pcall(function()
+            if r and player.Character then
+                local hum = player.Character:FindFirstChildOfClass("Humanoid")
+                local bp = player:FindFirstChild("Backpack")
+                if hum and bp then
+                    -- v12.44: equip food tool kalo belum
+                    local equippedFood = nil
+                    for _, item in pairs(player.Character:GetChildren()) do
+                        if item:IsA("Tool") and not item:FindFirstChild("PetToolLocal") and not item:FindFirstChild("PetToolServer") then
+                            equippedFood = item
+                            break
+                        end
+                    end
+                    if not equippedFood then
+                        for _, item in pairs(bp:GetChildren()) do
+                            if item:IsA("Tool") and not item:FindFirstChild("PetToolLocal") and not item:FindFirstChild("PetToolServer") then
+                                pcall(function() hum:EquipTool(item) end)
+                                task.wait(0.3)
+                                for _, c in pairs(player.Character:GetChildren()) do
+                                    if c:IsA("Tool") and c == item then equippedFood = c break end
+                                end
+                                break
+                            end
+                        end
+                    end
+
+                    -- v12.44: kumpulin UUID dari teamPetUUIDs + scan ActivePetUI inline
+                    local allUUIDs = {}
+                    for k, _ in pairs(teamPetUUIDs) do
+                        local clean = tostring(k):gsub("[{}]", "")
+                        if #clean > 0 then allUUIDs[clean] = "team" end
+                    end
+                    -- Scan PlayerGui untuk frame yg namanya UUID format
                     local pg = player:FindFirstChild("PlayerGui")
                     if pg then
                         for _, d in ipairs(pg:GetDescendants()) do
@@ -2580,34 +2603,38 @@ task.spawn(function()
                             if n and #n >= 32 and n:find("-") then
                                 local clean = n:gsub("[{}]", "")
                                 if clean:match("^[%w%-]+$") then
-                                    allUUIDs[clean] = true
+                                    allUUIDs[clean] = allUUIDs[clean] or "ui"
                                 end
                             end
                         end
                     end
-                end)
 
-                local fed = 0
-                local skipped = 0
-                local total_uuid = 0
-                for uuidStr, _ in pairs(allUUIDs) do
-                    total_uuid = total_uuid + 1
-                    local ub = "{"..uuidStr.."}"
-                    local hunger = getPetHunger(uuidStr)
-                    if hunger == nil or hunger < FEED_THRESHOLD then
-                        pcall(function() r:FireServer("Feed", ub) end)
-                        fed = fed + 1
-                        feedTotal = feedTotal + 1
-                    else
-                        skipped = skipped + 1
+                    local fed = 0
+                    local skipped = 0
+                    local total_uuid = 0
+                    if equippedFood then
+                        for uuidStr, _ in pairs(allUUIDs) do
+                            total_uuid = total_uuid + 1
+                            local ub = "{"..uuidStr.."}"
+                            local hunger = getPetHunger(uuidStr)
+                            if hunger == nil or hunger < FEED_THRESHOLD then
+                                pcall(function() r:FireServer("Feed", ub) end)
+                                fed = fed + 1
+                                feedTotal = feedTotal + 1
+                            else
+                                skipped = skipped + 1
+                            end
+                        end
                     end
-                end
-                if setMiscStatus then
-                    setMiscStatus("Feed: "..feedTotal.." total | uuid:"..total_uuid.." fed:"..fed.." kenyang:"..skipped, C.Teal)
+
+                    if setMiscStatus then
+                        local foodStr = equippedFood and equippedFood.Name:sub(1,12) or "NO FOOD"
+                        setMiscStatus("Feed: "..feedTotal.." | "..foodStr.." | uuid:"..total_uuid.." fed:"..fed, C.Teal)
+                    end
                 end
             end
         end
-        task.wait()
+        task.wait(1)
     end
 end)
 
@@ -3511,4 +3538,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.41: Feed coba teamUUIDs PLUS scan ActivePetUI untuk equipped pets")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.44: Auto Feed pakai UUID dari Active Pets panel (bukan Tim Leveling)")
