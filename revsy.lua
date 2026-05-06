@@ -1,9 +1,9 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.31"
+local SCRIPT_VERSION="v12.32"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
-local RS = game:GetService("ReplicatedStorage") 
+local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HS = game:GetService("HttpService")
 local TS = game:GetService("TeleportService")
@@ -2465,42 +2465,67 @@ end)
 -- Existing tasks pakai miscRemotes.* (generic discovery, mungkin gak fire bener)
 -- Tasks tambahan ini pake remote PERSIS dari debug capture
 -- ============================================
+local SEEDS_v32 = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pumpkin","Apple","Bamboo","Coconut","Cactus","Dragon Fruit","Mango","Grape","Pepper","Mushroom","Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa","Banana","Lily","Bell Pepper","Prickly Pear","Loquat","Feijoa","Cherry","Rose","Lemon"}
+local GEARS_v32 = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"}
+
+-- v12.32: separate task per fitur biar fire-nya independent + lebih cepet
+-- BUY SEED loop (1.5s interval, parallel fire)
 task.spawn(function()
-    -- BUY SEED + BUY GEAR (CONFIRMED)
-    local SEEDS = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pumpkin","Apple","Bamboo","Coconut","Cactus","Dragon Fruit","Mango","Grape","Pepper","Mushroom","Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa","Banana","Lily","Bell Pepper","Prickly Pear","Loquat","Feijoa","Cherry","Rose","Lemon"}
-    local GEARS = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"}
     while not scriptShutdown do
-        local ge = RS:FindFirstChild("GameEvents")
-        if ge then
-            if autoBuySeed then
-                local r = ge:FindFirstChild("BuySeedStock")
-                if r then
-                    for _, name in ipairs(SEEDS) do pcall(function() r:FireServer("Shop", name) end) end
-                    if setMiscStatus then setMiscStatus("Buy seed: "..#SEEDS.." items", C.Teal) end
+        if autoBuySeed then
+            local ge = RS:FindFirstChild("GameEvents")
+            local r = ge and ge:FindFirstChild("BuySeedStock")
+            if r then
+                local fired = 0
+                for _, name in ipairs(SEEDS_v32) do
+                    -- v12.32: parallel spawn biar gak block - fire SEMUA seed bersamaan
+                    task.spawn(function() pcall(function() r:FireServer("Shop", name) end) end)
+                    fired = fired + 1
                 end
-            end
-            if autoBuyGear then
-                local r = ge:FindFirstChild("BuyGearStock")
-                if r then
-                    for _, name in ipairs(GEARS) do pcall(function() r:FireServer(name) end) end
-                    if setMiscStatus then setMiscStatus("Buy gear: "..#GEARS.." items", C.Teal) end
-                end
-            end
-            if autoFeedPet then
-                local r = ge:FindFirstChild("ActivePetService")
-                if r then
-                    local fed = 0
-                    for uuidStr, _ in pairs(teamPetUUIDs) do
-                        local ub = uuidStr
-                        if ub:sub(1,1) ~= "{" then ub = "{"..ub.."}" end
-                        pcall(function() r:FireServer("Feed", ub) end)
-                        fed = fed + 1
-                    end
-                    if fed > 0 and setMiscStatus then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
-                end
+                if setMiscStatus then setMiscStatus("Buy seed x"..fired, C.Teal) end
             end
         end
-        task.wait(5)
+        task.wait(1.5)  -- v12.32: 5s -> 1.5s (3x lebih cepet)
+    end
+end)
+
+-- BUY GEAR loop (1.5s interval, parallel)
+task.spawn(function()
+    while not scriptShutdown do
+        if autoBuyGear then
+            local ge = RS:FindFirstChild("GameEvents")
+            local r = ge and ge:FindFirstChild("BuyGearStock")
+            if r then
+                local fired = 0
+                for _, name in ipairs(GEARS_v32) do
+                    task.spawn(function() pcall(function() r:FireServer(name) end) end)
+                    fired = fired + 1
+                end
+                if setMiscStatus then setMiscStatus("Buy gear x"..fired, C.Teal) end
+            end
+        end
+        task.wait(1.5)
+    end
+end)
+
+-- FEED loop (10s interval - feed gak butuh fast)
+task.spawn(function()
+    while not scriptShutdown do
+        if autoFeedPet then
+            local ge = RS:FindFirstChild("GameEvents")
+            local r = ge and ge:FindFirstChild("ActivePetService")
+            if r then
+                local fed = 0
+                for uuidStr, _ in pairs(teamPetUUIDs) do
+                    local ub = uuidStr
+                    if ub:sub(1,1) ~= "{" then ub = "{"..ub.."}" end
+                    task.spawn(function() pcall(function() r:FireServer("Feed", ub) end) end)
+                    fed = fed + 1
+                end
+                if fed > 0 and setMiscStatus then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
+            end
+        end
+        task.wait(10)
     end
 end)
 
@@ -3392,4 +3417,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.31: ADDITIONAL confirmed-pattern tasks (additive only, gak ganggu v12.25 base)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.32: Auto Buy lebih cepet (loop 1.5s, fire batch parallel)")
