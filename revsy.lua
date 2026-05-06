@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.28"
+local SCRIPT_VERSION="v12.29"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2413,174 +2413,95 @@ local function fireAllMisc(remotesList)
     return fired > 0
 end
 
--- v12.26: CONFIRMED patterns from debug session
+-- v12.29: confirmed patterns + fallback ke generic discovery
 -- Buy Seed: GameEvents.BuySeedStock:FireServer("Shop", itemName)
 -- Buy Gear: GameEvents.BuyGearStock:FireServer(itemName)
--- Buy Egg: TBD (belum ke-capture, pakai pattern guess "Shop"+name)
--- Collect: ProximityPrompt di Workspace.Farm.Farm.Important.Plants_Physical.{plant}.Fruits
+-- Feed: GameEvents.ActivePetService:FireServer("Feed", "{petUUID}")
+-- Collect: ProximityPrompt di Workspace.Farm.Farm.Important.Plants_Physical
 
-local SEED_LIST = {
-    "Carrot","Strawberry","Blueberry","Tomato","Watermelon",
-    "Pumpkin","Apple","Bamboo","Coconut","Cactus",
-    "Dragon Fruit","Mango","Grape","Pepper","Mushroom",
-    "Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa",
-    -- common premium seed names
-    "Banana","Lily","Bell Pepper","Prickly Pear","Loquat",
-    "Feijoa","Pitcher Plant","Cherry","Rose","Lemon",
-}
+local SEED_LIST_v29 = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pumpkin","Apple","Bamboo","Coconut","Cactus","Dragon Fruit","Mango","Grape","Pepper","Mushroom","Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa","Banana","Lily","Bell Pepper","Prickly Pear","Loquat","Feijoa","Cherry","Rose","Lemon"}
+local GEAR_LIST_v29 = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"}
 
-local GEAR_LIST = {
-    "Watering Can","Trowel","Recall Wrench","Basic Sprinkler",
-    "Advanced Sprinkler","Godly Sprinkler","Master Sprinkler",
-    "Magnifying Glass","Tanning Mirror","Cleaning Spray",
-    "Favorite Tool","Harvest Tool","Friendship Pot",
-    "Trading Ticket","Lightning Rod","Star Caller",
-    "Night Staff","Chocolate Sprinkler","Honey Sprinkler",
-    "Nectar Staff","Levelup Lollipop",
-}
-
-local EGG_LIST = {
-    "Common Egg","Uncommon Egg","Rare Egg","Legendary Egg",
-    "Mythical Egg","Bug Egg","Night Egg","Premium Night Egg",
-    "Bee Egg","Anti Bee Egg","Common Summer Egg",
-    "Rare Summer Egg","Paradise Egg","Premium Egg",
-    "Premium Anti Bee Egg","Oasis Egg","Dinosaur Egg",
-    "Primal Egg","Zen Egg",
-}
-
--- Find confirmed remotes
-local buySeedRE = nil
-local buyGearRE = nil
-local buyEggRE = nil
-do
-    local ge = RS:FindFirstChild("GameEvents")
-    if ge then
-        buySeedRE = ge:FindFirstChild("BuySeedStock")
-        buyGearRE = ge:FindFirstChild("BuyGearStock")
-        -- Try common egg names
-        buyEggRE = ge:FindFirstChild("BuyPetEgg") or ge:FindFirstChild("BuyEggStock") or ge:FindFirstChild("BuyEgg")
-    end
-end
-dbg("[misc] confirmed: BuySeedStock="..tostring(buySeedRE~=nil).." BuyGearStock="..tostring(buyGearRE~=nil).." BuyEgg="..tostring(buyEggRE~=nil))
-
--- Auto Buy Seed loop (confirmed pattern)
+-- Auto buy loop (CONFIRMED + fallback)
 task.spawn(function()
     while not scriptShutdown do
-        if autoBuySeed and buySeedRE then
-            for _, name in ipairs(SEED_LIST) do
-                pcall(function() buySeedRE:FireServer("Shop", name) end)
+        if autoBuyEgg then pcall(fireAllMisc, miscRemotes.buyEgg) setMiscStatus("Buy egg fired", C.Teal) end
+        if autoBuySeed then
+            local r = RS:FindFirstChild("GameEvents") and RS.GameEvents:FindFirstChild("BuySeedStock")
+            if r then
+                for _, name in ipairs(SEED_LIST_v29) do
+                    pcall(function() r:FireServer("Shop", name) end)
+                end
+                setMiscStatus("Buy seed: "..#SEED_LIST_v29.." items", C.Teal)
+            else
+                pcall(fireAllMisc, miscRemotes.buySeed)
+                setMiscStatus("Buy seed fallback", C.Gold)
             end
-            setMiscStatus("Buy seed: "..#SEED_LIST.." items fired", C.Teal)
+        end
+        if autoBuyGear then
+            local r = RS:FindFirstChild("GameEvents") and RS.GameEvents:FindFirstChild("BuyGearStock")
+            if r then
+                for _, name in ipairs(GEAR_LIST_v29) do
+                    pcall(function() r:FireServer(name) end)
+                end
+                setMiscStatus("Buy gear: "..#GEAR_LIST_v29.." items", C.Teal)
+            else
+                pcall(fireAllMisc, miscRemotes.buyGear)
+                setMiscStatus("Buy gear fallback", C.Gold)
+            end
         end
         task.wait(miscBuyInterval)
     end
 end)
 
--- Auto Buy Gear loop (confirmed pattern)
-task.spawn(function()
-    while not scriptShutdown do
-        if autoBuyGear and buyGearRE then
-            for _, name in ipairs(GEAR_LIST) do
-                pcall(function() buyGearRE:FireServer(name) end)
-            end
-            setMiscStatus("Buy gear: "..#GEAR_LIST.." items fired", C.Teal)
-        end
-        task.wait(miscBuyInterval)
-    end
-end)
-
--- Auto Buy Egg loop (guess pattern)
-task.spawn(function()
-    while not scriptShutdown do
-        if autoBuyEgg and buyEggRE then
-            for _, name in ipairs(EGG_LIST) do
-                pcall(function() buyEggRE:FireServer(name) end)
-                pcall(function() buyEggRE:FireServer("Shop", name) end)  -- fallback
-            end
-            setMiscStatus("Buy egg: "..#EGG_LIST.." items tried", C.Teal)
-        end
-        task.wait(miscBuyInterval)
-    end
-end)
-
--- v12.28: Auto Feed Pet CONFIRMED pattern (minimal change biar gak break)
+-- Auto feed pet di tim (CONFIRMED pattern)
 task.spawn(function()
     while not scriptShutdown do
         if autoFeedPet then
-            local apsRemote = RS:FindFirstChild("GameEvents") and RS.GameEvents:FindFirstChild("ActivePetService")
-            if apsRemote then
+            local r = RS:FindFirstChild("GameEvents") and RS.GameEvents:FindFirstChild("ActivePetService")
+            if r then
                 local fed = 0
                 for uuidStr, _ in pairs(teamPetUUIDs) do
                     local uuidBraced = uuidStr
                     if uuidBraced:sub(1,1) ~= "{" then uuidBraced = "{"..uuidBraced.."}" end
-                    pcall(function() apsRemote:FireServer("Feed", uuidBraced) end)
+                    pcall(function() r:FireServer("Feed", uuidBraced) end)
                     fed = fed + 1
                 end
                 if fed > 0 then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
-            else
-                setMiscStatus("Feed: ActivePetService not found", C.Red)
             end
         end
         task.wait(miscFeedInterval)
     end
 end)
 
--- Auto Collect (CONFIRMED: scan ProximityPrompt di Plants_Physical)
-local function findFruitPrompts()
-    local prompts = {}
-    local farm = workspace:FindFirstChild("Farm")
-    if not farm then return prompts end
-    -- Path: Farm.Farm.Important.Plants_Physical
-    local farmInner = farm:FindFirstChild("Farm") or farm
-    local important = farmInner:FindFirstChild("Important")
-    local plants = important and important:FindFirstChild("Plants_Physical")
-    if not plants then
-        -- Fallback search
-        for _, d in ipairs(farm:GetDescendants()) do
-            if d.Name == "Plants_Physical" then plants = d break end
-        end
-    end
-    if not plants then return prompts end
-
-    for _, plant in ipairs(plants:GetChildren()) do
-        local fruits = plant:FindFirstChild("Fruits")
-        if fruits then
-            for _, fruitGroup in ipairs(fruits:GetChildren()) do
-                for _, fruitInst in ipairs(fruitGroup:GetChildren()) do
-                    for _, d in ipairs(fruitInst:GetDescendants()) do
-                        if d:IsA("ProximityPrompt") and d.ActionText == "Collect" and d.Enabled then
-                            table.insert(prompts, d)
-                        end
-                    end
-                    -- Also check if fruitInst itself has prompt
-                    if fruitInst:IsA("ProximityPrompt") and fruitInst.ActionText == "Collect" and fruitInst.Enabled then
-                        table.insert(prompts, fruitInst)
-                    end
-                end
-            end
-        end
-    end
-    return prompts
-end
-
+-- Auto collect (CONFIRMED via proximity prompt)
 task.spawn(function()
     while not scriptShutdown do
         if autoCollect then
-            local prompts = findFruitPrompts()
             local fired = 0
-            for _, prompt in ipairs(prompts) do
-                pcall(function()
-                    if fireproximityprompt then
-                        fireproximityprompt(prompt)
-                    else
-                        prompt:InputHoldBegin()
-                        task.wait(prompt.HoldDuration or 0)
-                        prompt:InputHoldEnd()
+            pcall(function()
+                local farm = workspace:FindFirstChild("Farm")
+                if not farm then return end
+                local farmInner = farm:FindFirstChild("Farm") or farm
+                local important = farmInner:FindFirstChild("Important")
+                local plants = important and important:FindFirstChild("Plants_Physical")
+                if not plants then return end
+                for _, plant in ipairs(plants:GetChildren()) do
+                    local fruits = plant:FindFirstChild("Fruits")
+                    if fruits then
+                        for _, fg in ipairs(fruits:GetChildren()) do
+                            for _, d in ipairs(fg:GetDescendants()) do
+                                if d:IsA("ProximityPrompt") and d.ActionText == "Collect" and d.Enabled then
+                                    pcall(function()
+                                        if fireproximityprompt then fireproximityprompt(d) end
+                                    end)
+                                    fired = fired + 1
+                                end
+                            end
+                        end
                     end
-                end)
-                fired = fired + 1
-                if fired % 5 == 0 then task.wait(0.05) end  -- yield tiap 5 buah
-            end
+                end
+            end)
             if fired > 0 then setMiscStatus("Collected "..fired.." buah", C.Green) end
         end
         task.wait(miscCollectInterval)
@@ -3445,4 +3366,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.28: Feed Pet CONFIRMED (minimal change dari v12.26 stable)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.29: from v12.25 stable + confirmed Buy Seed/Gear + Feed + Collect")
