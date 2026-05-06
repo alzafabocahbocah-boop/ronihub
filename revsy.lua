@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.24"
+local SCRIPT_VERSION="v12.25"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -1325,11 +1325,12 @@ buildTimList=function()
             for uuid,_ in pairs(teamPetUUIDs) do
                 i=i+1
                 local info=teamPetInfoCache[uuid] and teamPetInfoCache[uuid].info or uuid
-                local pr=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.TDim,BorderSizePixel=0,LayoutOrder=5+i,Parent=areas[1]})
+                -- v12.25: preview row di-bump
+                local pr=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.TDim,BorderSizePixel=0,LayoutOrder=5+i,Parent=areas[1]})
                 corner(pr,5) stroke(pr,C.Teal,1.1)
-                local nl=lbl(pr,tostring(i)..".",11,C.Teal,Enum.TextXAlignment.Center) nl.Size=UDim2.new(0,24,1,0) nl.Position=UDim2.new(0,2,0,0)
-                local il=lbl(pr,info,10,C.White) il.Size=UDim2.new(1,-36,1,0) il.Position=UDim2.new(0,28,0,0)
-                local db=btn(pr,"X",10,C.RDim,C.Red) db.Size=UDim2.new(0,18,0,18) db.Position=UDim2.new(1,-22,0.5,-9) stroke(db,C.Red,1)
+                local nl=lbl(pr,tostring(i)..".",13,C.Teal,Enum.TextXAlignment.Center) nl.Size=UDim2.new(0,24,1,0) nl.Position=UDim2.new(0,2,0,0)
+                local il=lbl(pr,info,12,C.White) il.Size=UDim2.new(1,-40,1,0) il.Position=UDim2.new(0,28,0,0)
+                local db=btn(pr,"X",12,C.RDim,C.Red) db.Size=UDim2.new(0,22,0,22) db.Position=UDim2.new(1,-26,0.5,-11) stroke(db,C.Red,1)
                 local cu=uuid
                 db.MouseButton1Click:Connect(function()
                     teamPetUUIDs[cu]=nil pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
@@ -1370,12 +1371,13 @@ buildTimList=function()
                             local info=getPetInfo(item)
                             teamPetInfoCache[uuidStr]={name=name,info=info}
                             local inTeam=teamPetUUIDs[uuidStr]==true
-                            local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=inTeam and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=petPickScroll})
+                            -- v12.25: row 26->34, font 8->12 (lebih jelas)
+                            local row=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=inTeam and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=petPickScroll})
                             corner(row,5) if inTeam then stroke(row,C.Teal,1.1) end
-                            local nameLbl=lbl(row,info,8,inTeam and C.Teal or C.White)
+                            local nameLbl=lbl(row,info,12,inTeam and C.Teal or C.White)
                             nameLbl.Size=UDim2.new(0.72,0,1,0) nameLbl.Position=UDim2.new(0,8,0,0)
-                            local togBtn=btn(row,inTeam and "ON" or "OFF",8,inTeam and C.TDim or C.Panel,inTeam and C.Teal or C.Gray)
-                            togBtn.Size=UDim2.new(0,44,0,20) togBtn.Position=UDim2.new(1,-48,0.5,-10)
+                            local togBtn=btn(row,inTeam and "ON" or "OFF",12,inTeam and C.TDim or C.Panel,inTeam and C.Teal or C.Gray)
+                            togBtn.Size=UDim2.new(0,52,0,24) togBtn.Position=UDim2.new(1,-56,0.5,-12)
                             local togStroke=stroke(togBtn,inTeam and C.Teal or C.Dim,1.1)
                             local cu=uuidStr
                             togBtn.MouseButton1Click:Connect(function()
@@ -1410,10 +1412,11 @@ buildTimList=function()
                 if show then
                     n=n+1
                     local info=teamPetInfoCache[uuid].info.." (di garden)"
-                    local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.TDim,BorderSizePixel=0,LayoutOrder=n,Parent=petPickScroll})
+                    -- v12.25: garden row juga di-bump
+                    local row=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.TDim,BorderSizePixel=0,LayoutOrder=n,Parent=petPickScroll})
                     corner(row,5) stroke(row,C.Teal,1.1)
-                    local nl=lbl(row,info,10,C.Teal) nl.Size=UDim2.new(0.72,0,1,0) nl.Position=UDim2.new(0,8,0,0)
-                    local tb=btn(row,"ON",10,C.TDim,C.Teal) tb.Size=UDim2.new(0,44,0,20) tb.Position=UDim2.new(1,-48,0.5,-10) stroke(tb,C.Teal,1.1)
+                    local nl=lbl(row,info,12,C.Teal) nl.Size=UDim2.new(0.72,0,1,0) nl.Position=UDim2.new(0,8,0,0)
+                    local tb=btn(row,"ON",12,C.TDim,C.Teal) tb.Size=UDim2.new(0,52,0,24) tb.Position=UDim2.new(1,-56,0.5,-12) stroke(tb,C.Teal,1.1)
                     local cu=uuid
                     tb.MouseButton1Click:Connect(function()
                         teamPetUUIDs[cu]=nil pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
@@ -2302,7 +2305,6 @@ end)
 local autoBuyEgg = false
 local autoBuySeed = false
 local autoBuyGear = false
-local autoBuyToken = false
 local autoFeedPet = false
 local autoCollect = false
 
@@ -2357,9 +2359,8 @@ do
     miscTogRow("Auto Buy Egg", "Beli egg otomatis di toko", 1, function() return autoBuyEgg end, function(v) autoBuyEgg=v end)
     miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, function() return autoBuySeed end, function(v) autoBuySeed=v end)
     miscTogRow("Auto Buy Gear", "Beli gear (sprinkler, water can, dll)", 3, function() return autoBuyGear end, function(v) autoBuyGear=v end)
-    miscTogRow("Auto Buy Token", "Beli item pakai token (egg lama, event)", 4, function() return autoBuyToken end, function(v) autoBuyToken=v end)
-    miscTogRow("Auto Feed Pet", "Kasih makan pet di tim leveling", 5, function() return autoFeedPet end, function(v) autoFeedPet=v end)
-    miscTogRow("Auto Collect", "Panen semua buah di kebun", 6, function() return autoCollect end, function(v) autoCollect=v end)
+    miscTogRow("Auto Feed Pet", "Kasih makan pet di tim leveling", 4, function() return autoFeedPet end, function(v) autoFeedPet=v end)
+    miscTogRow("Auto Collect", "Panen semua buah di kebun", 5, function() return autoCollect end, function(v) autoCollect=v end)
 
     -- Status (bottom)
     miscStatusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
@@ -2372,7 +2373,7 @@ do
 end
 
 -- Discover remotes
-local miscRemotes = {buyEgg={},buySeed={},buyGear={},buyToken={},feedPet={},collect={}}
+local miscRemotes = {buyEgg={},buySeed={},buyGear={},feedPet={},collect={}}
 do
     local ge = RS:FindFirstChild("GameEvents")
     if ge then
@@ -2384,13 +2385,12 @@ do
                 end
                 if n:find("buy") and n:find("seed") then table.insert(miscRemotes.buySeed, c) end
                 if n:find("buy") and n:find("gear") then table.insert(miscRemotes.buyGear, c) end
-                if n:find("token") or (n:find("event") and n:find("buy")) then table.insert(miscRemotes.buyToken, c) end
-                if n:find("feed") and n:find("pet") then table.insert(miscRemotes.feedPet, c) end
+if n:find("feed") and n:find("pet") then table.insert(miscRemotes.feedPet, c) end
                 if n:find("collect") or n:find("harvest") then table.insert(miscRemotes.collect, c) end
             end
         end
     end
-    dbg("[misc] remotes: buyEgg="..#miscRemotes.buyEgg.." buySeed="..#miscRemotes.buySeed.." buyGear="..#miscRemotes.buyGear.." token="..#miscRemotes.buyToken.." feed="..#miscRemotes.feedPet.." collect="..#miscRemotes.collect)
+    dbg("[misc] remotes: buyEgg="..#miscRemotes.buyEgg.." buySeed="..#miscRemotes.buySeed.." buyGear="..#miscRemotes.buyGear.." feed="..#miscRemotes.feedPet.." collect="..#miscRemotes.collect)
 end
 
 local function setMiscStatus(text, color)
@@ -2419,7 +2419,6 @@ task.spawn(function()
         if autoBuyEgg then pcall(fireAllMisc, miscRemotes.buyEgg) setMiscStatus("Buy egg fired", C.Teal) end
         if autoBuySeed then pcall(fireAllMisc, miscRemotes.buySeed) setMiscStatus("Buy seed fired", C.Teal) end
         if autoBuyGear then pcall(fireAllMisc, miscRemotes.buyGear) setMiscStatus("Buy gear fired", C.Teal) end
-        if autoBuyToken then pcall(fireAllMisc, miscRemotes.buyToken) setMiscStatus("Buy token fired", C.Teal) end
         task.wait(miscBuyInterval)
     end
 end)
@@ -3318,4 +3317,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.24: + mini Z fixed di atas Shop (gak bisa drag) + lebih kecil (44x44)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.25: Pilih Pet Tim font lebih gede + remove Auto Buy Token")
