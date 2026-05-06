@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.23"
+local SCRIPT_VERSION="v12.24"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -1026,22 +1026,35 @@ miniZBtn.ZIndex = 10
 miniZBtn.Parent = main
 
 local minimized=false
+local savedMainPos = nil  -- v12.24: simpan posisi sebelum minimize
 local function setMinimized(state)
     minimized = state
     local mainStroke = main:FindFirstChildOfClass("UIStroke")
     if state then
+        -- v12.24: simpan posisi GUI sebelum minimize
+        savedMainPos = main.Position
         TB.Visible = false
         content.Visible = false
-        leftSidebar.Visible = false  -- v11.0: hide sidebar pas mini Z
-        main.Size = UDim2.new(0, 56, 0, 56)
+        leftSidebar.Visible = false
+        -- v12.24: lebih kecil (44x44, was 56x56)
+        main.Size = UDim2.new(0, 44, 0, 44)
+        -- v12.24: fixed position di atas tombol Shop (gak bisa di-drag)
+        main.Position = UDim2.new(0, 18, 0.5, -22)
+        main.Active = false
+        main.Draggable = false
         main.BackgroundColor3 = NEON_GREEN
         if mainStroke then mainStroke.Color = NEON_DARK end
+        miniZBtn.TextSize = 30  -- v12.24: dari 42 -> 30 (cocok ukuran 44x44)
         miniZBtn.Visible = true
     else
         TB.Visible = true
         content.Visible = true
-        leftSidebar.Visible = true  -- v11.0: restore sidebar
+        leftSidebar.Visible = true
         main.Size = UDim2.new(0, GUI_W, 0, GUI_H)
+        -- v12.24: restore posisi dan draggable
+        if savedMainPos then main.Position = savedMainPos end
+        main.Active = true
+        main.Draggable = true
         main.BackgroundColor3 = C.BG
         if mainStroke then mainStroke.Color = C.Teal end
         miniZBtn.Visible = false
@@ -3305,4 +3318,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.23: SEMUA font size +2 (lebih gede di seluruh GUI)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.24: + mini Z fixed di atas Shop (gak bisa drag) + lebih kecil (44x44)")
