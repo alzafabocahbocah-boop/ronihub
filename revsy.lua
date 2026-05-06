@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.32"
+local SCRIPT_VERSION="v12.35"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2469,46 +2469,96 @@ local SEEDS_v32 = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pump
 local GEARS_v32 = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"}
 
 -- v12.32: separate task per fitur biar fire-nya independent + lebih cepet
--- BUY SEED loop (1.5s interval, parallel fire)
+-- v12.33: BUY SEED non-stop fire (gak ada delay sama sekali)
 task.spawn(function()
+    local total = 0
     while not scriptShutdown do
         if autoBuySeed then
             local ge = RS:FindFirstChild("GameEvents")
             local r = ge and ge:FindFirstChild("BuySeedStock")
             if r then
-                local fired = 0
                 for _, name in ipairs(SEEDS_v32) do
-                    -- v12.32: parallel spawn biar gak block - fire SEMUA seed bersamaan
-                    task.spawn(function() pcall(function() r:FireServer("Shop", name) end) end)
-                    fired = fired + 1
+                    pcall(function() r:FireServer("Shop", name) end)
+                    total = total + 1
                 end
-                if setMiscStatus then setMiscStatus("Buy seed x"..fired, C.Teal) end
+                if setMiscStatus then setMiscStatus("Buy seed total: "..total, C.Teal) end
             end
         end
-        task.wait(1.5)  -- v12.32: 5s -> 1.5s (3x lebih cepet)
+        task.wait()  -- v12.33: next frame aja, gak ada wait spesifik
     end
 end)
 
--- BUY GEAR loop (1.5s interval, parallel)
+-- v12.33: BUY GEAR non-stop fire
 task.spawn(function()
+    local total = 0
     while not scriptShutdown do
         if autoBuyGear then
             local ge = RS:FindFirstChild("GameEvents")
             local r = ge and ge:FindFirstChild("BuyGearStock")
             if r then
-                local fired = 0
                 for _, name in ipairs(GEARS_v32) do
-                    task.spawn(function() pcall(function() r:FireServer(name) end) end)
-                    fired = fired + 1
+                    pcall(function() r:FireServer(name) end)
+                    total = total + 1
                 end
-                if setMiscStatus then setMiscStatus("Buy gear x"..fired, C.Teal) end
+                if setMiscStatus then setMiscStatus("Buy gear total: "..total, C.Teal) end
             end
         end
-        task.wait(1.5)
+        task.wait()  -- next frame
     end
 end)
 
--- FEED loop (10s interval - feed gak butuh fast)
+-- v12.35: SMART FEED - cek hunger dulu sebelum feed
+-- Max hunger 25000. Default feed kalo hunger < 20000 (5000 buat boleh feed)
+local FEED_THRESHOLD = 20000  -- feed kalo hunger DI BAWAH ini
+local feedTotal = 0
+
+-- Helper: cari hunger pet dari berbagai source
+local function getPetHunger(uuidStr)
+    local cleanUUID = uuidStr:gsub("[{}]", "")
+
+    -- Source 1: cek di workspace pets (placed pet model)
+    pcall(function()
+        for _, root in ipairs({workspace}) do
+            for _, d in ipairs(root:GetDescendants()) do
+                if d.Name == cleanUUID or d.Name == "{"..cleanUUID.."}" then
+                    -- Try attribute
+                    local h = d:GetAttribute("Hunger") or d:GetAttribute("hunger")
+                    if h then return h end
+                    -- Try child Value object
+                    local hv = d:FindFirstChild("Hunger") or d:FindFirstChild("HUNGER")
+                    if hv and hv.Value then return hv.Value end
+                end
+            end
+        end
+    end)
+
+    -- Source 2: cek di PlayerGui (Pet detail UI biasa nampilin hunger)
+    local hunger = nil
+    pcall(function()
+        local pg = player:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, d in ipairs(pg:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Text:find("HGR") then
+                -- Format: "4656.62 / 25000 HGR"
+                local cur = d.Text:match("([%d%.]+)%s*/%s*[%d%.]+%s*HGR")
+                if cur then
+                    -- Find parent's UUID context
+                    local parent = d.Parent
+                    for _ = 1, 6 do
+                        if not parent then break end
+                        if parent.Name == cleanUUID or parent.Name == "{"..cleanUUID.."}" then
+                            hunger = tonumber(cur)
+                            return
+                        end
+                        parent = parent.Parent
+                    end
+                end
+            end
+        end
+    end)
+    return hunger
+end
+
 task.spawn(function()
     while not scriptShutdown do
         if autoFeedPet then
@@ -2516,47 +2566,71 @@ task.spawn(function()
             local r = ge and ge:FindFirstChild("ActivePetService")
             if r then
                 local fed = 0
+                local skipped = 0
                 for uuidStr, _ in pairs(teamPetUUIDs) do
                     local ub = uuidStr
                     if ub:sub(1,1) ~= "{" then ub = "{"..ub.."}" end
-                    task.spawn(function() pcall(function() r:FireServer("Feed", ub) end) end)
-                    fed = fed + 1
+                    -- v12.35: cek hunger dulu
+                    local hunger = getPetHunger(uuidStr)
+                    if hunger == nil or hunger < FEED_THRESHOLD then
+                        -- pet lapar atau gak ke-detect hunger (safe default = feed aja)
+                        pcall(function() r:FireServer("Feed", ub) end)
+                        fed = fed + 1
+                        feedTotal = feedTotal + 1
+                    else
+                        skipped = skipped + 1
+                    end
                 end
-                if fed > 0 and setMiscStatus then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
+                if setMiscStatus then
+                    setMiscStatus("Feed: "..feedTotal.." total | now: "..fed.." fed, "..skipped.." kenyang", C.Teal)
+                end
             end
         end
-        task.wait(10)
+        task.wait()  -- tiap frame
     end
 end)
 
+-- v12.34: AUTO COLLECT non-stop
 task.spawn(function()
-    -- AUTO COLLECT (CONFIRMED via ProximityPrompt)
+    local cachedPlants = nil
+    local lastScan = 0
+    local total = 0
     while not scriptShutdown do
         if autoCollect then
-            local fired = 0
-            pcall(function()
-                local farm = workspace:FindFirstChild("Farm")
-                if not farm then return end
-                local plants = nil
-                for _, d in ipairs(farm:GetDescendants()) do
-                    if d.Name == "Plants_Physical" then plants = d break end
-                end
-                if not plants then return end
-                for _, plant in ipairs(plants:GetChildren()) do
-                    for _, d in ipairs(plant:GetDescendants()) do
-                        if d:IsA("ProximityPrompt") and d.ActionText == "Collect" and d.Enabled then
-                            pcall(function()
-                                if fireproximityprompt then fireproximityprompt(d)
-                                else d:InputHoldBegin() task.wait(d.HoldDuration or 0.1) d:InputHoldEnd() end
-                            end)
-                            fired = fired + 1
+            -- v12.34: cache Plants_Physical reference, refresh tiap 5 detik
+            if not cachedPlants or not cachedPlants.Parent or (tick() - lastScan) > 5 then
+                cachedPlants = nil
+                pcall(function()
+                    local farm = workspace:FindFirstChild("Farm")
+                    if farm then
+                        for _, d in ipairs(farm:GetDescendants()) do
+                            if d.Name == "Plants_Physical" then cachedPlants = d break end
                         end
                     end
-                end
-            end)
-            if fired > 0 and setMiscStatus then setMiscStatus("Collect "..fired.." buah", C.Green) end
+                end)
+                lastScan = tick()
+            end
+
+            local fired = 0
+            if cachedPlants then
+                pcall(function()
+                    for _, plant in ipairs(cachedPlants:GetChildren()) do
+                        for _, d in ipairs(plant:GetDescendants()) do
+                            if d:IsA("ProximityPrompt") and d.ActionText == "Collect" and d.Enabled then
+                                pcall(function()
+                                    if fireproximityprompt then fireproximityprompt(d)
+                                    else d:InputHoldBegin() d:InputHoldEnd() end
+                                end)
+                                fired = fired + 1
+                                total = total + 1
+                            end
+                        end
+                    end
+                end)
+            end
+            if setMiscStatus then setMiscStatus("Collect total: "..total.." (now: "..fired..")", C.Green) end
         end
-        task.wait(8)
+        task.wait()  -- v12.34: tiap frame
     end
 end)
 
@@ -3417,4 +3491,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.32: Auto Buy lebih cepet (loop 1.5s, fire batch parallel)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.35: Smart Feed - cek Hunger dulu sebelum feed (skip kalo kenyang)")
