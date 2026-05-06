@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.12"
+local SCRIPT_VERSION="v12.22"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -307,11 +307,16 @@ local function getPlacedPetAge(placedModel)
 end
 
 local function findPetInBackpack(uuid)
-    local bp=player:FindFirstChild("Backpack") if not bp then return nil end
-    for _,item in pairs(bp:GetChildren()) do
-        if isPet(item) then
-            local u=getPetUUID(item)
-            if u and tostring(u)==tostring(uuid) then return item end
+    -- v12.21: cek Backpack DAN Character (pet equipped pindah ke Character)
+    local locations = {player:FindFirstChild("Backpack"), player.Character}
+    for _, loc in ipairs(locations) do
+        if loc then
+            for _,item in pairs(loc:GetChildren()) do
+                if isPet(item) then
+                    local u=getPetUUID(item)
+                    if u and tostring(u)==tostring(uuid) then return item end
+                end
+            end
         end
     end
     return nil
@@ -547,6 +552,19 @@ local MUTATION_PREFIXES={
     "Toxic ","Radiant ","Mystic ","Phantom ","Spectral ",
     "Eldritch ","Primal ","Ethereal ","Astral ","Chromatic ",
     "Prismatic ","Volcanic ","Glacial ","Tempest ","Solar ",
+    -- v12.19: tambahan mutation baru
+    "Nightmare ","Dreadbound ","Ghostly ","Diamond ","Bearded ",
+    "Glimmering ","Sparkling ","Inverted ","Bloodlust ","Dawn ",
+    "Twilight ","Eclipse ","Aurora ","Frostbite ","Inferno ",
+    "Emerald ","Ruby ","Sapphire ","Amethyst ","Obsidian ",
+    "Crimson ","Azure ","Emerald ","Topaz ","Onyx ",
+    "Demonic ","Holy ","Cursed ","Blessed ","Chaotic ",
+    "Pristine ","Pure ","Tainted ","Corrupted ","Hallowed ",
+    "Hellfire ","Starlight ","Moonlight ","Sunlight ","Voidborn ",
+    "Skybound ","Earthbound ","Seabound ","Cloudborn ","Nightborn ",
+    "GIANT ","Mega ","Mini ","Tiny ","Huge ",
+    "Royal ","Imperial ","Noble ","Common ","Rare ",
+    "Epic ","Legendary ","Mythical ","Exotic ","Festive ",
 }
 function getBaseName(name)
     local result=name
@@ -676,8 +694,14 @@ function getAgeFromKG(item)
     end
     local age=getAge(item) if age then return age end
     local kg=getKG(item) if not kg then return nil end
-    local maxKG=getMaxKGForPet(getPetName(item)) if not maxKG then return nil end
-    return math.max(1,math.min(100,math.floor(kg*110/maxKG - 10)))
+    local maxKG=getMaxKGForPet(getPetName(item))
+    if maxKG then
+        return math.max(1,math.min(100,math.floor(kg*110/maxKG - 10)))
+    end
+    -- v12.13: smart fallback untuk pet mutasi tanpa cache hit
+    -- KG gede (>=20) = pet udah maxed/age tinggi, KG kecil = pet baru
+    if kg >= 20 then return 100 end
+    return 1
 end
 
 local function getAgeByUUID(uuid)
@@ -752,7 +776,7 @@ local content=mk("Frame",{Size=UDim2.new(1,-(SIDEBAR_W+15),1,-34),Position=UDim2
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,2),Parent=tabBar})
 
-local tabNames={"Tim Leveling","Pet ke 100","Swap Skill","Other Setting","Auto Gift"}
+local tabNames={"Tim Leveling","Pet ke 100","Swap Skill","Other Setting","Auto Gift","Misc"}
 local tabBtns={}
 
 local function makeScroll(yPos,height)
@@ -769,7 +793,7 @@ end
 
 local SCROLL_Y=34
 local SCROLL_H=GUI_H-34-68
-local areas={} for i=1,5 do areas[i]=makeScroll(SCROLL_Y,SCROLL_H) end
+local areas={} for i=1,6 do areas[i]=makeScroll(SCROLL_Y,SCROLL_H) end
 
 local botBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,SCROLL_Y+SCROLL_H+4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=content})
 corner(botBar,7) stroke(botBar,C.Dim,1.2)
@@ -795,32 +819,12 @@ local donesPanel = mk("Frame", {
 corner(donesPanel, 7)
 stroke(donesPanel, C.Teal, 1.3)
 
-local donesLbl = lbl(donesPanel, "Pet jadi: 0 (100+)", 11, C.Teal, Enum.TextXAlignment.Center)
+local donesLbl = lbl(donesPanel, "Total:0 Jadi:0 Kurang:0", 10, C.Teal, Enum.TextXAlignment.Center)
 donesLbl.Size = UDim2.new(1, -10, 1, 0)
 donesLbl.Position = UDim2.new(0, 5, 0, 0)
 donesLbl.Font = Enum.Font.GothamBold
 
-task.spawn(function()
-    while donesLbl and donesLbl.Parent and not scriptShutdown do
-        local count = 0
-        local bp = player:FindFirstChild("Backpack")
-        if bp then
-            for _, item in pairs(bp:GetChildren()) do
-                if isPet(item) then
-                    local age = getAgeFromKG(item)
-                    if age and age >= toAge then
-                        count = count + 1
-                    end
-                end
-            end
-        end
-        if donesLbl and donesLbl.Parent then
-            donesLbl.Text = "Pet jadi: "..count.." ("..toAge.."+)"
-            donesLbl.TextColor3 = count > 0 and C.Teal or C.Gray
-        end
-        task.wait(2)
-    end
-end)
+
 
 local currentTab = 1
 local function switchTab(idx)
@@ -1100,9 +1104,102 @@ local function selCount() local n=0 for _ in pairs(targetPetTypes) do n=n+1 end 
 local function isTargetPet(name)
     if selCount()==0 then return true end
     if targetPetTypes[name] then return true end
-    if targetPetTypes[getBaseName(name)] then return true end
+    -- v12.19: cek getBaseName (strip mutation prefix)
+    local baseName = getBaseName(name)
+    if targetPetTypes[baseName] then return true end
+    -- v12.19: substring fallback - kalo nama target ada di pet name
+    -- (handle mutation prefix yg blm ke-list)
+    local nameLower = name:lower()
+    for targetName, _ in pairs(targetPetTypes) do
+        local targetLower = targetName:lower()
+        -- exact word match (biar gak too lenient - cuma match kalo target name muncul as substring)
+        if nameLower:find(targetLower, 1, true) then return true end
+    end
     return false
 end
+
+-- v12.20: count task.spawn moved AFTER isTargetPet (fix scope issue)
+task.spawn(function()
+    while donesLbl and donesLbl.Parent and not scriptShutdown do
+        -- v12.18: 3 stats - cek BACKPACK + GARDEN (pet equipped)
+        -- Tanpa filter team (pet team yg lagi level harus tetep ke-count)
+        -- Pakai dedupe by UUID biar gak double-count
+        local total = 0
+        local done = 0
+        local remaining = 0
+        local seenUUIDs = {}
+
+        -- Backpack pets
+        local bp = player:FindFirstChild("Backpack")
+        if bp then
+            for _, item in pairs(bp:GetChildren()) do
+                if isPet(item) then
+                    local name = getPetName(item)
+                    local uuid = getPetUUID(item)
+                    local uuidStr = uuid and tostring(uuid) or nil
+                    if isTargetPet(name) and not isFavorite(item) then
+                        if not (uuidStr and seenUUIDs[uuidStr]) then
+                            if uuidStr then seenUUIDs[uuidStr] = true end
+                            total = total + 1
+                            local age = getAgeFromKG(item)
+                            if age and age >= toAge then
+                                done = done + 1
+                            else
+                                remaining = remaining + 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Garden/equipped pets (ActivePetUI - source of truth untuk pet equipped)
+        local pg = player:FindFirstChild("PlayerGui")
+        local activePetUI = pg and pg:FindFirstChild("ActivePetUI")
+        if activePetUI then
+            for _, d in ipairs(activePetUI:GetDescendants()) do
+                if d:IsA("Frame") or d:IsA("ImageLabel") then
+                    local n = d.Name:gsub("^{",""):gsub("}$","")
+                    if #n >= 20 and n:find("-") then  -- looks like UUID
+                        if not seenUUIDs[n] then
+                            -- check if has PET_AGE child (it's a pet frame)
+                            local ageLbl = d:FindFirstChild("PET_AGE", true)
+                            if ageLbl then
+                                seenUUIDs[n] = true
+                                -- Get name from UI
+                                local petTypeLbl = d:FindFirstChild("PET_NAME", true) or d:FindFirstChild("PET_TYPE", true)
+                                local petName = petTypeLbl and petTypeLbl.Text or ""
+                                if petName == "" or isTargetPet(petName) then
+                                    total = total + 1
+                                    local txt = ""
+                                    pcall(function() txt = ageLbl.Text end)
+                                    local age = tonumber((txt or ""):match("(%d+)"))
+                                    if age and age >= toAge then
+                                        done = done + 1
+                                    else
+                                        remaining = remaining + 1
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if donesLbl and donesLbl.Parent then
+            donesLbl.Text = "Total:"..total.." Jadi:"..done.." Kurang:"..remaining
+            if total == 0 then
+                donesLbl.TextColor3 = C.Gray
+            elseif remaining == 0 then
+                donesLbl.TextColor3 = C.Green
+            else
+                donesLbl.TextColor3 = C.Teal
+            end
+        end
+        task.wait(2)
+    end
+end)
 local function getTeamPetInfo(uuid)
     if teamPetInfoCache[uuid] then return teamPetInfoCache[uuid] end
     local item=findPetInBackpack(uuid)
@@ -2175,7 +2272,210 @@ end)
 
 -- ============================================
 -- AUTO ACCEPT HOOKS (FIXED v8.2)
--- Gift: GiftPet (uuid, name, sender) -> AcceptPetGift(true, uuid) (CONFIRMED v12.10)
+-- ============================================
+-- v12.22: MISC TAB - Auto Buy Egg/Seed/Gear/Token + Auto Feed + Auto Collect
+-- ============================================
+local autoBuyEgg = false
+local autoBuySeed = false
+local autoBuyGear = false
+local autoBuyToken = false
+local autoFeedPet = false
+local autoCollect = false
+
+local miscBuyInterval = 5    -- detik antar buy attempt
+local miscFeedInterval = 30  -- detik antar feed
+local miscCollectInterval = 10  -- detik antar collect
+
+-- Build Misc tab UI
+do
+    for _, c in pairs(areas[6]:GetChildren()) do
+        if c:IsA("UIListLayout") or c:IsA("UIPadding") then continue end
+        c:Destroy()
+    end
+
+    local miscHdr = mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[6]})
+    corner(miscHdr, 6) stroke(miscHdr, C.Dim, 1.1)
+    lbl(miscHdr, "MISC AUTO TASKS", 9, C.Teal, Enum.TextXAlignment.Center).Size = UDim2.new(1,0,1,0)
+
+    -- Helper untuk bikin toggle row di Misc
+    local function miscTogRow(labelTxt, descTxt, lo, getF, setF)
+        local row = mk("Frame",{Size=UDim2.new(1,0,0,32), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=areas[6]})
+        corner(row, 6) local rowStroke = stroke(row, C.Dim, 1.1)
+        local l = lbl(row, labelTxt, 9, C.White) l.Size = UDim2.new(0.65,0,0,16) l.Position = UDim2.new(0,8,0,4)
+        if descTxt then
+            local dl = lbl(row, descTxt, 8, C.Dim) dl.Size = UDim2.new(0.75,0,0,11) dl.Position = UDim2.new(0,8,0,19)
+        end
+        local tog = btn(row, "OFF", 9, C.Panel, C.Gray) tog.Size = UDim2.new(0,44,0,20) tog.Position = UDim2.new(1,-50,0.5,-10)
+        local togStroke = stroke(tog, C.Dim, 1.1)
+        local function refresh()
+            local on = getF()
+            tog.Text = on and "ON" or "OFF"
+            tog.BackgroundColor3 = on and C.TDim or C.Panel
+            tog.TextColor3 = on and C.Teal or C.Gray
+            togStroke.Color = on and C.Teal or C.Dim
+            rowStroke.Color = on and C.Teal or C.Dim
+        end
+        refresh()
+        tog.MouseButton1Click:Connect(function() setF(not getF()) refresh() end)
+        return row
+    end
+
+    miscTogRow("Auto Buy Egg", "Beli egg otomatis di toko", 1, function() return autoBuyEgg end, function(v) autoBuyEgg=v end)
+    miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, function() return autoBuySeed end, function(v) autoBuySeed=v end)
+    miscTogRow("Auto Buy Gear", "Beli gear otomatis (sprinkler, dll)", 3, function() return autoBuyGear end, function(v) autoBuyGear=v end)
+    miscTogRow("Auto Buy Token", "Beli item dengan token (egg lama, dll)", 4, function() return autoBuyToken end, function(v) autoBuyToken=v end)
+    miscTogRow("Auto Feed Pet", "Kasih makan pet di tim leveling", 5, function() return autoFeedPet end, function(v) autoFeedPet=v end)
+    miscTogRow("Auto Collect", "Panen semua buah di kebun", 6, function() return autoCollect end, function(v) autoCollect=v end)
+
+    div(areas[6], 7)
+
+    -- Status display
+    local miscStatus = lbl(areas[6], "Misc: idle", 9, C.Gray, Enum.TextXAlignment.Center)
+    miscStatus.Size = UDim2.new(1,0,0,18)
+    miscStatus.LayoutOrder = 8
+    miscStatus.BackgroundColor3 = C.Panel
+    miscStatus.BackgroundTransparency = 0
+    corner(miscStatus, 5) stroke(miscStatus, C.Dim, 1)
+    _G.miscStatusLbl = miscStatus  -- expose buat update dari background tasks
+end
+
+-- ============================================
+-- MISC: discover remotes
+-- ============================================
+local miscRemotes = {
+    buyEgg = {}, buySeed = {}, buyGear = {}, buyToken = {},
+    feedPet = {}, collect = {},
+}
+
+do
+    local ge = RS:FindFirstChild("GameEvents")
+    if ge then
+        for _, c in ipairs(ge:GetDescendants()) do
+            if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
+                local n = c.Name:lower()
+                -- Buy egg patterns
+                if n:find("buy") and (n:find("egg") or n:find("pet")) and not n:find("token") then
+                    table.insert(miscRemotes.buyEgg, c)
+                end
+                -- Buy seed
+                if n:find("buy") and n:find("seed") then
+                    table.insert(miscRemotes.buySeed, c)
+                end
+                -- Buy gear
+                if (n:find("buy") and n:find("gear")) or n:find("buygearstock") then
+                    table.insert(miscRemotes.buyGear, c)
+                end
+                -- Token shop / event shop
+                if n:find("token") or n:find("event") and n:find("buy") then
+                    table.insert(miscRemotes.buyToken, c)
+                end
+                -- Feed pet
+                if n:find("feed") and n:find("pet") then
+                    table.insert(miscRemotes.feedPet, c)
+                end
+                -- Collect/harvest
+                if n:find("collect") or n:find("harvest") then
+                    table.insert(miscRemotes.collect, c)
+                end
+            end
+        end
+    end
+    dbg("[misc] remotes found: buyEgg="..#miscRemotes.buyEgg.." buySeed="..#miscRemotes.buySeed.." buyGear="..#miscRemotes.buyGear.." token="..#miscRemotes.buyToken.." feed="..#miscRemotes.feedPet.." collect="..#miscRemotes.collect)
+end
+
+local function setMiscStatus(text, color)
+    if _G.miscStatusLbl then
+        _G.miscStatusLbl.Text = text
+        _G.miscStatusLbl.TextColor3 = color or C.Teal
+    end
+end
+
+-- ============================================
+-- MISC: Auto Buy logic (try all known patterns)
+-- ============================================
+local function fireAllRemotes(remotesList, label)
+    if #remotesList == 0 then return false end
+    local fired = 0
+    for _, r in ipairs(remotesList) do
+        local ok = pcall(function()
+            if r:IsA("RemoteFunction") then
+                r:InvokeServer()
+            else
+                r:FireServer()
+            end
+        end)
+        if ok then fired = fired + 1 end
+    end
+    return fired > 0
+end
+
+-- Auto Buy loop (1 task untuk semua buy, beda interval per type)
+task.spawn(function()
+    while not scriptShutdown do
+        if autoBuyEgg and #miscRemotes.buyEgg > 0 then
+            pcall(function() fireAllRemotes(miscRemotes.buyEgg, "egg") end)
+            setMiscStatus("Buy egg fired", C.Teal)
+        end
+        if autoBuySeed and #miscRemotes.buySeed > 0 then
+            pcall(function() fireAllRemotes(miscRemotes.buySeed, "seed") end)
+            setMiscStatus("Buy seed fired", C.Teal)
+        end
+        if autoBuyGear and #miscRemotes.buyGear > 0 then
+            pcall(function() fireAllRemotes(miscRemotes.buyGear, "gear") end)
+            setMiscStatus("Buy gear fired", C.Teal)
+        end
+        if autoBuyToken and #miscRemotes.buyToken > 0 then
+            pcall(function() fireAllRemotes(miscRemotes.buyToken, "token") end)
+            setMiscStatus("Buy token fired", C.Teal)
+        end
+        task.wait(miscBuyInterval)
+    end
+end)
+
+-- ============================================
+-- MISC: Auto Feed Pet (feed pet di tim leveling)
+-- ============================================
+task.spawn(function()
+    while not scriptShutdown do
+        if autoFeedPet and #miscRemotes.feedPet > 0 then
+            -- Try fire feed buat semua pet di team
+            local fed = 0
+            for uuidStr, _ in pairs(teamPetUUIDs) do
+                for _, r in ipairs(miscRemotes.feedPet) do
+                    pcall(function()
+                        if r:IsA("RemoteFunction") then r:InvokeServer(uuidStr)
+                        else r:FireServer(uuidStr) end
+                    end)
+                end
+                fed = fed + 1
+            end
+            if fed > 0 then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
+        end
+        task.wait(miscFeedInterval)
+    end
+end)
+
+-- ============================================
+-- MISC: Auto Collect (panen semua buah di kebun)
+-- ============================================
+task.spawn(function()
+    while not scriptShutdown do
+        if autoCollect and #miscRemotes.collect > 0 then
+            -- Try generic fire (mungkin gak butuh args)
+            for _, r in ipairs(miscRemotes.collect) do
+                pcall(function()
+                    if r:IsA("RemoteFunction") then r:InvokeServer()
+                    else r:FireServer() end
+                end)
+            end
+            setMiscStatus("Collect fired", C.Teal)
+        end
+        task.wait(miscCollectInterval)
+    end
+end)
+
+-- ============================================
+-- -- Gift: GiftPet (uuid, name, sender) -> AcceptPetGift(true, uuid) (CONFIRMED v12.10)
 -- Trade: SendRequest (tradeID, sender, ts) -> RespondRequest(tradeID, true) (CONFIRMED v12.10)
 -- ============================================
 pcall(function()
@@ -2191,26 +2491,34 @@ pcall(function()
         local conn = giftPetRE.OnClientEvent:Connect(function(petUUID, petName, senderUsername)
             if not autoAccGift then return end
             local short = tostring(petUUID):sub(1,8)
-            local ok = pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
-            if ok then
+
+            -- v12.14: FAST gift accept - INSTANT fire (sebelum proses lainnya)
+            -- Plus task.spawn biar handler langsung return, gak block event berikutnya
+            -- Plus retry 2x dengan jarak kecil buat handle packet drop
+            pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)  -- fire #1 INSTANT
+            task.spawn(function()
+                task.wait(0.05)
+                pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)  -- fire #2 backup
+            end)
+
+            -- Update counter + status (non-blocking)
+            task.spawn(function()
                 giftAccCount = giftAccCount + 1
-                dbg("[autoAcc-gift] OK #"..giftAccCount.." "..short.." from "..tostring(senderUsername))
+                dbg("[autoAcc-gift] FAST #"..giftAccCount.." "..short.." from "..tostring(senderUsername))
                 if accStatusLbl then
                     accStatusLbl.Text = "Gift accept #"..giftAccCount.." ("..tostring(senderUsername)..")"
                     accStatusLbl.TextColor3 = C.Teal
                     local myCount = giftAccCount
-                    task.delay(2.5, function()
+                    task.delay(1.5, function()  -- v12.14: 2.5s -> 1.5s (lebih snappy)
                         if accStatusLbl and giftAccCount == myCount then
                             accStatusLbl.Text="Accept: idle" accStatusLbl.TextColor3=C.Gray
                         end
                     end)
                 end
-            else
-                dbg("[autoAcc-gift] FAIL "..short)
-            end
+            end)
         end)
         table.insert(connections, conn)
-        dbg("[autoAcc] gift hook PRECISE installed (GiftPet -> AcceptPetGift)")
+        dbg("[autoAcc] gift hook FAST installed (instant fire + 50ms retry)")
     else
         dbg("[autoAcc] WARN: GiftPet/AcceptPetGift gak ketemu (path: GameEvents direct)")
     end
@@ -2535,8 +2843,8 @@ startGlobalPoller=function()
                                 end
                                 nextCheckAt[uuid] = tick() + 0.05
                             elseif t > 2 then
-                                -- Cooldown masih jauh - sleep lama, save server invokes
-                                nextCheckAt[uuid] = tick() + math.min(t * 0.6, 4)
+                                -- v12.15: max sleep 4 -> 2 detik (lebih responsive)
+                                nextCheckAt[uuid] = tick() + math.min(t * 0.6, 2)
                             elseif t > 0.5 then
                                 -- Mendekati - polling 100ms
                                 nextCheckAt[uuid] = tick() + 0.1
@@ -2850,9 +3158,12 @@ local function doStart()
                 end
             end
 
+            -- v12.15: jangan auto-stop, tetep waiting mode (gak doStop lagi)
+            -- biar user trade pet baru, queue refresh otomatis level lagi
             if slotsUsed==0 and #available==0 then
-                doStop("Semua pet selesai Age "..toAge.."!")
-                statusLbl.TextColor3=C.Green buildTargetList() break
+                statusLbl.Text="Semua pet selesai Age "..toAge.."! (waiting...)"
+                statusLbl.TextColor3=C.Green
+                -- gak break, lanjut loop terus
             end
 
             if slotsFree>0 and #available>0 then
@@ -2889,6 +3200,37 @@ local function doStart()
                     local item=findPetInBackpack(uuid)
                     if item then age=getAgeFromKG(item) end
                 end
+                if not age then
+                    local placed=findPlacedPetByUUID(uuid)
+                    if placed then age=getPlacedPetAge(placed) end
+                end
+                if not age then
+                    -- v12.21: KG estimate dari item di Backpack ATAU Character
+                    local item=findPetInBackpack(uuid)
+                    if item then
+                        local kg=getKG(item)
+                        if kg then
+                            -- Pakai cache maxKG kalo ada
+                            local maxKG = getMaxKGForPet(getPetName(item))
+                            if maxKG and maxKG > 0 then
+                                age = math.max(1, math.min(100, math.floor(kg * 11 / maxKG - 10)))
+                            elseif kg >= 20 then
+                                age = 100
+                            else
+                                age = 1
+                            end
+                        end
+                    end
+                end
+                if not age then
+                    -- v12.21: last resort - get KG from placed model name (kalo nama-nya bukan UUID)
+                    local placed=findPlacedPetByUUID(uuid)
+                    if placed and placed.Name and not placed.Name:find("-") then
+                        local kg = tonumber(placed.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]"))
+                        if kg and kg >= 20 then age = 100
+                        elseif kg then age = 1 end
+                    end
+                end
                 local ageStr=age and (age.."/"..toAge) or ("?/"..toAge)
                 table.insert(activeNames,nameStr.." "..ageStr)
             end
@@ -2899,7 +3241,7 @@ local function doStart()
             end
             statusLbl.TextColor3=C.Teal
 
-            task.wait(0.25)
+            task.wait(0.15)  -- v12.15: 0.25 -> 0.15 (lebih snappy)
         end
     end)
 end
@@ -2990,4 +3332,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.12: Start tetep jalan walau belum pilih pet target (wait mode)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.22: + Misc tab (Auto Buy Egg/Seed/Gear/Token + Auto Feed Pet + Auto Collect)")
