@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.38"
+local SCRIPT_VERSION="v12.40"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2509,7 +2509,7 @@ end)
 
 -- v12.35: SMART FEED - cek hunger dulu sebelum feed
 -- Max hunger 25000. Default feed kalo hunger < 20000 (5000 buat boleh feed)
-local FEED_THRESHOLD = 20000  -- feed kalo hunger DI BAWAH ini
+local FEED_THRESHOLD = 24000  -- v12.39: lebih agresif (max 25000, margin 1000)
 local feedTotal = 0
 
 -- Helper: cari hunger pet dari berbagai source
@@ -2559,21 +2559,55 @@ local function getPetHunger(uuidStr)
     return hunger
 end
 
+-- v12.40: cari semua pet UUID yg lagi EQUIPPED (active pets)
+-- Scan PlayerGui.ActivePetUI + workspace pets (placed)
+local function getActivePetUUIDs()
+    local uuids = {}
+    -- Source 1: PlayerGui.ActivePetUI - frame anak yg namanya UUID
+    pcall(function()
+        local pg = player:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, d in ipairs(pg:GetDescendants()) do
+            if d.Name:len() >= 32 and d.Name:find("-") then
+                -- Looks like UUID
+                local clean = d.Name:gsub("[{}]", "")
+                if clean:match("^[%w%-]+$") then
+                    uuids[clean] = true
+                end
+            end
+        end
+    end)
+    -- Source 2: workspace placed pets
+    pcall(function()
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if (d:IsA("Model") or d:IsA("Folder")) and d.Name:len() >= 32 and d.Name:find("-") then
+                local clean = d.Name:gsub("[{}]", "")
+                if clean:match("^[%w%-]+$") then
+                    uuids[clean] = true
+                end
+            end
+        end
+    end)
+    return uuids
+end
+
 task.spawn(function()
     while not scriptShutdown do
         if autoFeedPet then
             local ge = RS:FindFirstChild("GameEvents")
             local r = ge and ge:FindFirstChild("ActivePetService")
             if r then
+                -- v12.40: pakai pet ACTIVE/EQUIPPED, bukan dari Tim Leveling
+                local activeUUIDs = getActivePetUUIDs()
+                local activeCount = 0
+                for _ in pairs(activeUUIDs) do activeCount = activeCount + 1 end
+
                 local fed = 0
                 local skipped = 0
-                for uuidStr, _ in pairs(teamPetUUIDs) do
-                    local ub = uuidStr
-                    if ub:sub(1,1) ~= "{" then ub = "{"..ub.."}" end
-                    -- v12.35: cek hunger dulu
+                for uuidStr, _ in pairs(activeUUIDs) do
+                    local ub = "{"..uuidStr.."}"
                     local hunger = getPetHunger(uuidStr)
                     if hunger == nil or hunger < FEED_THRESHOLD then
-                        -- pet lapar atau gak ke-detect hunger (safe default = feed aja)
                         pcall(function() r:FireServer("Feed", ub) end)
                         fed = fed + 1
                         feedTotal = feedTotal + 1
@@ -2582,43 +2616,54 @@ task.spawn(function()
                     end
                 end
                 if setMiscStatus then
-                    setMiscStatus("Feed: "..feedTotal.." total | now: "..fed.." fed, "..skipped.." kenyang", C.Teal)
+                    setMiscStatus("Feed: "..feedTotal.." | active:"..activeCount.." | fed:"..fed.." kenyang:"..skipped, C.Teal)
                 end
             end
         end
-        task.wait()  -- tiap frame
+        task.wait()
     end
 end)
 
--- v12.38: AUTO COLLECT - scan SELURUH workspace cari prompt "Collect"
+-- v12.39: AUTO COLLECT - stop kalo backpack full
+local BACKPACK_LIMIT = 200  -- threshold max items di backpack sebelum stop collect
+
 task.spawn(function()
     local total = 0
     while not scriptShutdown do
         if autoCollect then
-            local fired = 0
-            local prompts = 0
-            pcall(function()
-                -- v12.38: scan SELURUH workspace, gak cari Plants_Physical specific
-                -- Tiap ProximityPrompt dgn ActionText="Collect" akan di-fire
-                for _, d in ipairs(workspace:GetDescendants()) do
-                    if d:IsA("ProximityPrompt") and d.ActionText == "Collect" then
-                        prompts = prompts + 1
-                        pcall(function()
-                            d.MaxActivationDistance = 1000
-                            d.HoldDuration = 0
-                        end)
-                        pcall(function()
-                            if fireproximityprompt then fireproximityprompt(d)
-                            else d:InputHoldBegin() d:InputHoldEnd() end
-                        end)
-                        fired = fired + 1
-                        total = total + 1
+            -- v12.39: cek backpack count dulu
+            local bp = player:FindFirstChild("Backpack")
+            local bpCount = bp and #bp:GetChildren() or 0
+
+            if bpCount >= BACKPACK_LIMIT then
+                if setMiscStatus then setMiscStatus("Collect PAUSE: backpack full ("..bpCount..")", C.Gold) end
+                task.wait(2)  -- check ulang tiap 2 detik
+            else
+                local fired = 0
+                local prompts = 0
+                pcall(function()
+                    for _, d in ipairs(workspace:GetDescendants()) do
+                        if d:IsA("ProximityPrompt") and d.ActionText == "Collect" then
+                            prompts = prompts + 1
+                            pcall(function()
+                                d.MaxActivationDistance = 1000
+                                d.HoldDuration = 0
+                            end)
+                            pcall(function()
+                                if fireproximityprompt then fireproximityprompt(d)
+                                else d:InputHoldBegin() d:InputHoldEnd() end
+                            end)
+                            fired = fired + 1
+                            total = total + 1
+                        end
                     end
-                end
-            end)
-            if setMiscStatus then setMiscStatus("Collect: "..total.." total | "..prompts.." prompts", C.Green) end
+                end)
+                if setMiscStatus then setMiscStatus("Collect: "..total.." | "..prompts.." prompts | bp:"..bpCount.."/"..BACKPACK_LIMIT, C.Green) end
+                task.wait(0.1)
+            end
+        else
+            task.wait(0.5)  -- collect off, sleep lama
         end
-        task.wait(0.1)  -- v12.38: yield 0.1s biar gak overload (workspace scan berat)
     end
 end)
 
@@ -3479,4 +3524,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.38: Auto Collect scan workspace fully + Smart Feed fixed")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.40: Feed dari pet ACTIVE/EQUIPPED (bukan dari Tim Leveling list)")
