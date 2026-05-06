@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.5 (+Semi Titanic)"
+local SCRIPT_VERSION = "v3.6 (age regex + maxKG cache)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -134,18 +134,87 @@ local function getKG(item)
 end
 local function getAge(item)
     local n = item.Name
-    for _, pat in ipairs({"%[Age%s+(%d+)%]", "%[Age(%d+)%]", "%[AGE%s+(%d+)%]", "%[age%s+(%d+)%]"}) do
+    -- v3.6: super lenient - "Age" followed by non-digit, then digits (case insensitive)
+    -- handles "[Age 65]", "[Age:65]", "[ Age 65]", "Age65", "AGE 65", etc
+    for _, pat in ipairs({
+        "[Aa][Gg][Ee][^%d]*(%d+)",     -- Age + any non-digits + digits
+        "[Aa][Gg][Ee]%s*(%d+)",         -- Age (optional space) digits
+    }) do
         local f = n:match(pat) if f then return tonumber(f) end
     end
-    local f = n:match("[Aa][Gg][Ee]%s+(%d+)")
-    if f then return tonumber(f) end
     return nil
 end
 
--- v3.0: smart age fallback (kalo gak ada Age di nama)
+-- v3.6: maxKG cache - build dari pet yg punya BOTH age + kg di nama
+-- Pakai buat back-calculate age di pet yg gak punya Age di nama
+local function getBaseName(name)
+    -- Strip common mutation prefixes
+    local mutPrefixes = {
+        "Everchanted ","Enchanted ","Shiny ","Rainbow ","Wet ","Chocolate ","Zombified ","Disco ","Gold ","Frozen ",
+        "Lunar ","Plasma ","Angelic ","Corrupt ","Crystal ","Verdant ","Blazing ","Icy ","Storm ","Shadow ",
+        "Celestial ","Infernal ","Ancient ","Mythic ","Divine ","Venom ","Mimic ","Cosmic ","Galactic ","Stellar ",
+        "Toxic ","Radiant ","Mystic ","Phantom ","Spectral ","Eldritch ","Primal ","Ethereal ","Astral ","Chromatic ",
+        "Prismatic ","Volcanic ","Glacial ","Tempest ","Solar ","Nightmare ","Dreadbound ","Ghostly ","Diamond ","Bearded ",
+        "Glimmering ","Sparkling ","Inverted ","Bloodlust ","Dawn ","Twilight ","Eclipse ","Aurora ","Frostbite ","Inferno ",
+        "Demonic ","Holy ","Cursed ","Blessed ","Chaotic ","GIANT ","Mega ","Mini ","Tiny ","Royal ",
+    }
+    local current = name
+    -- Strip multiple prefixes (e.g. "Nightmare Diamond Panther" → "Panther")
+    for _ = 1, 3 do  -- max 3 layers
+        local matched = false
+        for _, prefix in ipairs(mutPrefixes) do
+            if current:sub(1, #prefix) == prefix then
+                current = current:sub(#prefix + 1)
+                matched = true
+                break
+            end
+        end
+        if not matched then break end
+    end
+    return current
+end
+
+local maxKGCache = {}
+local function buildMaxKGCache()
+    maxKGCache = {}
+    local bp = player:FindFirstChild("Backpack") if not bp then return end
+    for _, item in pairs(bp:GetChildren()) do
+        if isPet(item) then
+            local name = getPetName(item)
+            local age = getAge(item)  -- pakai getAge raw, BUKAN estimated
+            local kg = getKG(item)
+            if name and age and kg and age >= 1 then
+                local maxKG = kg * 11 / (age + 10)
+                -- Index by full name + base name
+                local existing = maxKGCache[name]
+                if not existing or maxKG > existing then maxKGCache[name] = maxKG end
+                local base = getBaseName(name)
+                if base ~= name then
+                    local existingBase = maxKGCache[base]
+                    if not existingBase or maxKG > existingBase then maxKGCache[base] = maxKG end
+                end
+            end
+        end
+    end
+end
+
+local function getMaxKGForPet(name)
+    if maxKGCache[name] then return maxKGCache[name] end
+    local base = getBaseName(name)
+    if maxKGCache[base] then return maxKGCache[base] end
+    return nil
+end
+
+-- v3.6: smart age fallback w/ maxKG cache lookup
 local function getEstimatedAge(item)
     local age = getAge(item) if age then return age end
     local kg = getKG(item) if not kg then return nil end
+    -- Try cache lookup buat back-calc age
+    local maxKG = getMaxKGForPet(getPetName(item))
+    if maxKG and maxKG > 0 then
+        return math.max(1, math.min(100, math.floor(kg * 11 / maxKG - 10 + 0.5)))
+    end
+    -- Last resort
     if kg >= 20 then return 100 end
     return 1
 end
@@ -265,6 +334,9 @@ corner(cdLbl, 6) stroke(cdLbl, C.Dim, 1.1)
 local function _doBuildInvShow()
     local bp = player:FindFirstChild("Backpack")
     if not bp then invHeaderLbl.Text = "Backpack gak ada" return end
+
+    -- v3.6: build maxKG cache dulu (dari pet yg punya age di nama)
+    pcall(buildMaxKGCache)
 
     local petsList = {}
     local minKG, maxKG, sumKG, kgCount = math.huge, 0, 0, 0
