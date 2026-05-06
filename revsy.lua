@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.37"
+local SCRIPT_VERSION="v12.38"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2590,53 +2590,35 @@ task.spawn(function()
     end
 end)
 
--- v12.37: AUTO COLLECT - bypass distance + gak filter Enabled
+-- v12.38: AUTO COLLECT - scan SELURUH workspace cari prompt "Collect"
 task.spawn(function()
-    local cachedPlants = nil
-    local lastScan = 0
     local total = 0
     while not scriptShutdown do
         if autoCollect then
-            if not cachedPlants or not cachedPlants.Parent or (tick() - lastScan) > 5 then
-                cachedPlants = nil
-                pcall(function()
-                    local farm = workspace:FindFirstChild("Farm")
-                    if farm then
-                        for _, d in ipairs(farm:GetDescendants()) do
-                            if d.Name == "Plants_Physical" then cachedPlants = d break end
-                        end
-                    end
-                end)
-                lastScan = tick()
-            end
-
             local fired = 0
             local prompts = 0
-            if cachedPlants then
-                pcall(function()
-                    for _, plant in ipairs(cachedPlants:GetChildren()) do
-                        for _, d in ipairs(plant:GetDescendants()) do
-                            if d:IsA("ProximityPrompt") and d.ActionText == "Collect" then
-                                prompts = prompts + 1
-                                -- v12.37: bypass distance + hold duration
-                                pcall(function()
-                                    d.MaxActivationDistance = 1000
-                                    d.HoldDuration = 0
-                                end)
-                                pcall(function()
-                                    if fireproximityprompt then fireproximityprompt(d)
-                                    else d:InputHoldBegin() d:InputHoldEnd() end
-                                end)
-                                fired = fired + 1
-                                total = total + 1
-                            end
-                        end
+            pcall(function()
+                -- v12.38: scan SELURUH workspace, gak cari Plants_Physical specific
+                -- Tiap ProximityPrompt dgn ActionText="Collect" akan di-fire
+                for _, d in ipairs(workspace:GetDescendants()) do
+                    if d:IsA("ProximityPrompt") and d.ActionText == "Collect" then
+                        prompts = prompts + 1
+                        pcall(function()
+                            d.MaxActivationDistance = 1000
+                            d.HoldDuration = 0
+                        end)
+                        pcall(function()
+                            if fireproximityprompt then fireproximityprompt(d)
+                            else d:InputHoldBegin() d:InputHoldEnd() end
+                        end)
+                        fired = fired + 1
+                        total = total + 1
                     end
-                end)
-            end
+                end
+            end)
             if setMiscStatus then setMiscStatus("Collect: "..total.." total | "..prompts.." prompts", C.Green) end
         end
-        task.wait()
+        task.wait(0.1)  -- v12.38: yield 0.1s biar gak overload (workspace scan berat)
     end
 end)
 
@@ -3497,4 +3479,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.37: Auto Collect bypass distance (minimal change dari v12.35 stable)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.38: Auto Collect scan workspace fully + Smart Feed fixed")
