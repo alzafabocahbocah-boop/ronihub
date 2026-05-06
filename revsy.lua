@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.36"
+local SCRIPT_VERSION="v12.37"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2488,32 +2488,22 @@ task.spawn(function()
     end
 end)
 
--- v12.36: BUY GEAR + diagnostic
+-- v12.33: BUY GEAR non-stop fire
 task.spawn(function()
     local total = 0
-    local logged = false
     while not scriptShutdown do
         if autoBuyGear then
             local ge = RS:FindFirstChild("GameEvents")
             local r = ge and ge:FindFirstChild("BuyGearStock")
             if r then
-                if not logged then
-                    print("[Gear/Diag] BuyGearStock found, firing "..#GEARS_v32.." items per frame")
-                    logged = true
-                end
-                local thisRound = 0
                 for _, name in ipairs(GEARS_v32) do
-                    local ok, err = pcall(function() r:FireServer(name) end)
-                    if ok then total = total + 1 thisRound = thisRound + 1
-                    elseif setMiscStatus then setMiscStatus("Gear ERR: "..tostring(err), C.Red) end
+                    pcall(function() r:FireServer(name) end)
+                    total = total + 1
                 end
-                if setMiscStatus then setMiscStatus("Buy gear: "..total.." total ("..thisRound.."/"..#GEARS_v32..")", C.Teal) end
-            else
-                if setMiscStatus then setMiscStatus("BuyGearStock NOT FOUND", C.Red) end
-                print("[Gear/Diag] BuyGearStock not found in GameEvents")
+                if setMiscStatus then setMiscStatus("Buy gear total: "..total, C.Teal) end
             end
         end
-        task.wait()
+        task.wait()  -- next frame
     end
 end)
 
@@ -2600,64 +2590,42 @@ task.spawn(function()
     end
 end)
 
--- v12.36: AUTO COLLECT - bypass distance + scan workspace fully
-local function findAllPlantsPhysical()
-    local results = {}
-    local farm = workspace:FindFirstChild("Farm")
-    if farm then
-        for _, d in ipairs(farm:GetDescendants()) do
-            if d.Name == "Plants_Physical" then
-                table.insert(results, d)
-            end
-        end
-    end
-    -- fallback: search all workspace
-    if #results == 0 then
-        for _, d in ipairs(workspace:GetDescendants()) do
-            if d.Name == "Plants_Physical" then
-                table.insert(results, d)
-            end
-        end
-    end
-    return results
-end
-
-local hasFireProm = (fireproximityprompt ~= nil)
-print("[Collect/Diag] fireproximityprompt available: "..tostring(hasFireProm))
-
+-- v12.37: AUTO COLLECT - bypass distance + gak filter Enabled
 task.spawn(function()
-    local cachedPlants = {}
+    local cachedPlants = nil
     local lastScan = 0
     local total = 0
     while not scriptShutdown do
         if autoCollect then
-            if #cachedPlants == 0 or (tick() - lastScan) > 3 then
-                cachedPlants = findAllPlantsPhysical()
+            if not cachedPlants or not cachedPlants.Parent or (tick() - lastScan) > 5 then
+                cachedPlants = nil
+                pcall(function()
+                    local farm = workspace:FindFirstChild("Farm")
+                    if farm then
+                        for _, d in ipairs(farm:GetDescendants()) do
+                            if d.Name == "Plants_Physical" then cachedPlants = d break end
+                        end
+                    end
+                end)
                 lastScan = tick()
-                print("[Collect/Diag] found "..#cachedPlants.." Plants_Physical folders")
             end
 
             local fired = 0
-            local promptCount = 0
-            for _, plants in ipairs(cachedPlants) do
+            local prompts = 0
+            if cachedPlants then
                 pcall(function()
-                    for _, plant in ipairs(plants:GetChildren()) do
+                    for _, plant in ipairs(cachedPlants:GetChildren()) do
                         for _, d in ipairs(plant:GetDescendants()) do
                             if d:IsA("ProximityPrompt") and d.ActionText == "Collect" then
-                                promptCount = promptCount + 1
-                                -- v12.36: bypass distance + force enable
+                                prompts = prompts + 1
+                                -- v12.37: bypass distance + hold duration
                                 pcall(function()
-                                    d.MaxActivationDistance = math.huge
+                                    d.MaxActivationDistance = 1000
                                     d.HoldDuration = 0
-                                    d.Enabled = true
                                 end)
                                 pcall(function()
-                                    if hasFireProm then
-                                        fireproximityprompt(d)
-                                    else
-                                        d:InputHoldBegin()
-                                        d:InputHoldEnd()
-                                    end
+                                    if fireproximityprompt then fireproximityprompt(d)
+                                    else d:InputHoldBegin() d:InputHoldEnd() end
                                 end)
                                 fired = fired + 1
                                 total = total + 1
@@ -2666,9 +2634,7 @@ task.spawn(function()
                     end
                 end)
             end
-            if setMiscStatus then
-                setMiscStatus("Collect: "..total.." total | "..promptCount.." prompts | "..fired.." fired", C.Green)
-            end
+            if setMiscStatus then setMiscStatus("Collect: "..total.." total | "..prompts.." prompts", C.Green) end
         end
         task.wait()
     end
@@ -3531,4 +3497,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.36: Auto Collect bypass distance + Auto Buy Gear diagnostic")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.37: Auto Collect bypass distance (minimal change dari v12.35 stable)")
