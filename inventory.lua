@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.6 (age regex + maxKG cache)"
+local SCRIPT_VERSION = "v3.8 (compact + expand)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -228,13 +228,15 @@ end
 -- ============================================
 -- BUILD GUI
 -- ============================================
-local GUI_W = 480 local GUI_H = 460
+local GUI_W = 480 local GUI_H_COMPACT = 240 local GUI_H_FULL = 460 local GUI_H = GUI_H_COMPACT  -- v3.8: start compact
 local sg = mk("ScreenGui",{Name="ZenxInvGui", DisplayOrder=999, ResetOnSpawn=false, Parent=player:WaitForChild("PlayerGui")})
 
 local main = mk("Frame",{
     Size=UDim2.new(0, GUI_W, 0, GUI_H),
-    Position=UDim2.new(0.5, -GUI_W/2, 0.5, -GUI_H/2),
-    BackgroundColor3=C.BG, BorderSizePixel=0, Active=true, Draggable=true, Parent=sg
+    Position=UDim2.new(0, 70, 0.5, -GUI_H/2),  -- v3.7: start at left side near Shop
+    BackgroundColor3=C.BG, BorderSizePixel=0, Active=true, Draggable=true,
+    Visible=false,  -- v3.7: start hidden, klik logo Z buat buka
+    Parent=sg
 })
 corner(main, 10) stroke(main, C.Teal, 2)
 
@@ -245,17 +247,22 @@ mk("Frame",{Size=UDim2.new(1,0,0,1.5), Position=UDim2.new(0,0,1,-1.5), Backgroun
 local titleLbl = lbl(TB, "ZENX INVENTORY  "..SCRIPT_VERSION, 11, C.Teal)
 titleLbl.Size = UDim2.new(1, -60, 1, 0) titleLbl.Position = UDim2.new(0, 10, 0, 0)
 
+-- v3.8: tombol expand "+" (toggle Rejoin section), minimize "-", close "X"
+local expBtn = btn(TB, "+", 14, C.TDim, C.Teal)
+expBtn.Size = UDim2.new(0,22,0,22) expBtn.Position = UDim2.new(1,-76,0.5,-11) stroke(expBtn, C.Teal, 1.2)
 local minBtn = btn(TB, "-", 13, C.Panel, C.Gray)
 minBtn.Size = UDim2.new(0,22,0,22) minBtn.Position = UDim2.new(1,-50,0.5,-11) stroke(minBtn, C.Dim, 1.2)
 local closeBtn = btn(TB, "X", 10, C.RDim, C.Red)
 closeBtn.Size = UDim2.new(0,22,0,22) closeBtn.Position = UDim2.new(1,-24,0.5,-11) stroke(closeBtn, C.Red, 1.2)
 closeBtn.MouseButton1Click:Connect(function() sg:Destroy() end)
 
+-- v3.7: mini Z fixed di atas Shop (gak draggable, di kiri layar)
 local miniIcon = mk("TextButton",{
-    Size=UDim2.new(0,38,0,38), Position=UDim2.new(0.5,-19,0.5,-19),
+    Size=UDim2.new(0,40,0,40),
+    Position=UDim2.new(0,18,0.5,-20),  -- atas Shop button (kiri tengah layar)
     BackgroundColor3=C.BG, Text="Z", TextColor3=C.Teal,
-    Font=Enum.Font.GothamBold, TextSize=18, AutoButtonColor=false,
-    Visible=false, Active=true, Draggable=true, Parent=sg
+    Font=Enum.Font.GothamBold, TextSize=22, AutoButtonColor=false,
+    Visible=true, Active=false, Draggable=false, Parent=sg
 })
 corner(miniIcon, 8) stroke(miniIcon, C.Teal, 2)
 minBtn.MouseButton1Click:Connect(function() main.Visible=false miniIcon.Visible=true end)
@@ -481,6 +488,31 @@ end
 arTog.MouseButton1Click:Connect(function()
     if isAR then stopAR() else startAR() end
 end)
+
+-- v3.8: expand/collapse logic
+local expanded = false
+local function setExpanded(state)
+    expanded = state
+    -- Hide/show rejoin elements (LayoutOrder >= 5 = rejoin section)
+    for _, child in ipairs(content:GetChildren()) do
+        if child:IsA("Frame") or child:IsA("TextLabel") or child:IsA("TextButton") then
+            local lo = child.LayoutOrder
+            if lo and lo >= 5 then
+                child.Visible = state
+            end
+        end
+    end
+    -- Resize GUI
+    main.Size = UDim2.new(0, GUI_W, 0, state and GUI_H_FULL or GUI_H_COMPACT)
+    -- Update + button
+    expBtn.Text = state and "-" or "+"
+    expBtn.BackgroundColor3 = state and C.Panel or C.TDim
+    expBtn.TextColor3 = state and C.Gray or C.Teal
+    local s = expBtn:FindFirstChildOfClass("UIStroke")
+    if s then s.Color = state and C.Dim or C.Teal end
+end
+setExpanded(false)
+expBtn.MouseButton1Click:Connect(function() setExpanded(not expanded) end)
 
 -- Auto resume Auto Rejoin
 if savedState.autoRejoin == true then
