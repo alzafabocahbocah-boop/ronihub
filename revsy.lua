@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.35"
+local SCRIPT_VERSION="v12.36"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2488,22 +2488,32 @@ task.spawn(function()
     end
 end)
 
--- v12.33: BUY GEAR non-stop fire
+-- v12.36: BUY GEAR + diagnostic
 task.spawn(function()
     local total = 0
+    local logged = false
     while not scriptShutdown do
         if autoBuyGear then
             local ge = RS:FindFirstChild("GameEvents")
             local r = ge and ge:FindFirstChild("BuyGearStock")
             if r then
-                for _, name in ipairs(GEARS_v32) do
-                    pcall(function() r:FireServer(name) end)
-                    total = total + 1
+                if not logged then
+                    print("[Gear/Diag] BuyGearStock found, firing "..#GEARS_v32.." items per frame")
+                    logged = true
                 end
-                if setMiscStatus then setMiscStatus("Buy gear total: "..total, C.Teal) end
+                local thisRound = 0
+                for _, name in ipairs(GEARS_v32) do
+                    local ok, err = pcall(function() r:FireServer(name) end)
+                    if ok then total = total + 1 thisRound = thisRound + 1
+                    elseif setMiscStatus then setMiscStatus("Gear ERR: "..tostring(err), C.Red) end
+                end
+                if setMiscStatus then setMiscStatus("Buy gear: "..total.." total ("..thisRound.."/"..#GEARS_v32..")", C.Teal) end
+            else
+                if setMiscStatus then setMiscStatus("BuyGearStock NOT FOUND", C.Red) end
+                print("[Gear/Diag] BuyGearStock not found in GameEvents")
             end
         end
-        task.wait()  -- next frame
+        task.wait()
     end
 end)
 
@@ -2590,36 +2600,64 @@ task.spawn(function()
     end
 end)
 
--- v12.34: AUTO COLLECT non-stop
+-- v12.36: AUTO COLLECT - bypass distance + scan workspace fully
+local function findAllPlantsPhysical()
+    local results = {}
+    local farm = workspace:FindFirstChild("Farm")
+    if farm then
+        for _, d in ipairs(farm:GetDescendants()) do
+            if d.Name == "Plants_Physical" then
+                table.insert(results, d)
+            end
+        end
+    end
+    -- fallback: search all workspace
+    if #results == 0 then
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d.Name == "Plants_Physical" then
+                table.insert(results, d)
+            end
+        end
+    end
+    return results
+end
+
+local hasFireProm = (fireproximityprompt ~= nil)
+print("[Collect/Diag] fireproximityprompt available: "..tostring(hasFireProm))
+
 task.spawn(function()
-    local cachedPlants = nil
+    local cachedPlants = {}
     local lastScan = 0
     local total = 0
     while not scriptShutdown do
         if autoCollect then
-            -- v12.34: cache Plants_Physical reference, refresh tiap 5 detik
-            if not cachedPlants or not cachedPlants.Parent or (tick() - lastScan) > 5 then
-                cachedPlants = nil
-                pcall(function()
-                    local farm = workspace:FindFirstChild("Farm")
-                    if farm then
-                        for _, d in ipairs(farm:GetDescendants()) do
-                            if d.Name == "Plants_Physical" then cachedPlants = d break end
-                        end
-                    end
-                end)
+            if #cachedPlants == 0 or (tick() - lastScan) > 3 then
+                cachedPlants = findAllPlantsPhysical()
                 lastScan = tick()
+                print("[Collect/Diag] found "..#cachedPlants.." Plants_Physical folders")
             end
 
             local fired = 0
-            if cachedPlants then
+            local promptCount = 0
+            for _, plants in ipairs(cachedPlants) do
                 pcall(function()
-                    for _, plant in ipairs(cachedPlants:GetChildren()) do
+                    for _, plant in ipairs(plants:GetChildren()) do
                         for _, d in ipairs(plant:GetDescendants()) do
-                            if d:IsA("ProximityPrompt") and d.ActionText == "Collect" and d.Enabled then
+                            if d:IsA("ProximityPrompt") and d.ActionText == "Collect" then
+                                promptCount = promptCount + 1
+                                -- v12.36: bypass distance + force enable
                                 pcall(function()
-                                    if fireproximityprompt then fireproximityprompt(d)
-                                    else d:InputHoldBegin() d:InputHoldEnd() end
+                                    d.MaxActivationDistance = math.huge
+                                    d.HoldDuration = 0
+                                    d.Enabled = true
+                                end)
+                                pcall(function()
+                                    if hasFireProm then
+                                        fireproximityprompt(d)
+                                    else
+                                        d:InputHoldBegin()
+                                        d:InputHoldEnd()
+                                    end
                                 end)
                                 fired = fired + 1
                                 total = total + 1
@@ -2628,9 +2666,11 @@ task.spawn(function()
                     end
                 end)
             end
-            if setMiscStatus then setMiscStatus("Collect total: "..total.." (now: "..fired..")", C.Green) end
+            if setMiscStatus then
+                setMiscStatus("Collect: "..total.." total | "..promptCount.." prompts | "..fired.." fired", C.Green)
+            end
         end
-        task.wait()  -- v12.34: tiap frame
+        task.wait()
     end
 end)
 
@@ -3491,4 +3531,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.35: Smart Feed - cek Hunger dulu sebelum feed (skip kalo kenyang)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.36: Auto Collect bypass distance + Auto Buy Gear diagnostic")
