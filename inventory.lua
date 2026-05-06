@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.10 (full + collapsible)"
+local SCRIPT_VERSION = "v3.12 (kotak, pills 3+2)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -228,7 +228,7 @@ end
 -- ============================================
 -- BUILD GUI
 -- ============================================
-local GUI_W = 480 local GUI_H_COMPACT = 240 local GUI_H_FULL = 460 local GUI_H = GUI_H_FULL  -- v3.10: start full (expanded)
+local GUI_W = 320 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_FULL  -- v3.12: kotak shape (pills 3+2)
 local sg = mk("ScreenGui",{Name="ZenxInvGui", DisplayOrder=999, ResetOnSpawn=false, Parent=player:WaitForChild("PlayerGui")})
 
 local main = mk("Frame",{
@@ -286,34 +286,32 @@ local invRefreshBtn = btn(invHeader, "Refresh", 9, C.TDim, C.Teal)
 invRefreshBtn.Size = UDim2.new(0,80,0,20) invRefreshBtn.Position = UDim2.new(1,-86,0.5,-10)
 stroke(invRefreshBtn, C.Teal, 1.2)
 
--- v3.0: WEIGHT CATEGORY PILLS (7 categories)
--- 2 rows: Row 1 (4 pills) + Row 2 (3 pills) biar muat
-local catRow1 = mk("Frame",{Size=UDim2.new(1,0,0,32), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
+-- v3.12: WEIGHT CATEGORY PILLS - 2 rows: 3 atas (Small/Large/Semi Huge), 2 bawah (Huge/Semi Tit)
+local catRow1 = mk("Frame",{Size=UDim2.new(1,0,0,30), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,4), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow1})
+
+local catRow2 = mk("Frame",{Size=UDim2.new(1,0,0,30), BackgroundTransparency=1, LayoutOrder=3, Parent=content})
+mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,4), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow2})
 
 local catLabels = {}
 for i, cat in ipairs(CATEGORIES) do
-    -- v3.4: 4 pills 1 row (Small/Large/Semi Huge/Huge), pill lebih lebar
-    local pillW = 90  -- v3.5: 5 pills fit
-    local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow1})
+    -- v3.12: row 1 (i 1-3): 3 pills, row 2 (i 4-5): 2 pills
+    local row = i <= 3 and catRow1 or catRow2
+    local pillW = i <= 3 and 100 or 152  -- row1: 3x100=300, row2: 2x152=304
+    local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=row})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, cat.name..": 0", 10, C.Gray, Enum.TextXAlignment.Center)
+    local pl = lbl(pill, cat.name..": 0", 11, C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
     pl.Font = Enum.Font.GothamBold
     catLabels[i] = pl
 end
 
--- DETAIL PANEL
-local detailPanel = mk("Frame",{Size=UDim2.new(1,0,0,110), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=3, Parent=content})
-corner(detailPanel, 7) stroke(detailPanel, C.Dim, 1.2)
-mk("UIPadding",{PaddingTop=UDim.new(0,8), PaddingLeft=UDim.new(0,10), PaddingRight=UDim.new(0,10), Parent=detailPanel})
-mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder, Padding=UDim.new(0,4), Parent=detailPanel})
-
-local detailTotal = lbl(detailPanel, "Total: -", 11, C.Teal) detailTotal.Size=UDim2.new(1,0,0,16) detailTotal.LayoutOrder=1
-local detailFav = lbl(detailPanel, "Favorite: -", 10, C.Gold) detailFav.Size=UDim2.new(1,0,0,14) detailFav.LayoutOrder=2
-local detailHigh = lbl(detailPanel, "Pet age 100+: -", 10, C.Green) detailHigh.Size=UDim2.new(1,0,0,14) detailHigh.LayoutOrder=3
-local detailKG = lbl(detailPanel, "Weight range: -", 10, C.Blue) detailKG.Size=UDim2.new(1,0,0,14) detailKG.LayoutOrder=4
-local detailUnread = lbl(detailPanel, "Unread: -", 10, C.Gray) detailUnread.Size=UDim2.new(1,0,0,14) detailUnread.LayoutOrder=5
+-- v3.11: detail panel dihapus (gak guna). Sisain stub vars buat backward-compat sama _doBuildInvShow.
+local detailTotal = {Text="", TextColor3=C.Teal}
+local detailFav = {Text="", TextColor3=C.Gold}
+local detailHigh = {Text="", TextColor3=C.Green}
+local detailKG = {Text="", TextColor3=C.Blue}
+local detailUnread = {Text="", TextColor3=C.Gray}
 
 -- DIVIDER
 div(content, 4)
