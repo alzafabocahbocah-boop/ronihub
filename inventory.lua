@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.8 (compact + expand)"
+local SCRIPT_VERSION = "v3.10 (full + collapsible)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -228,14 +228,14 @@ end
 -- ============================================
 -- BUILD GUI
 -- ============================================
-local GUI_W = 480 local GUI_H_COMPACT = 240 local GUI_H_FULL = 460 local GUI_H = GUI_H_COMPACT  -- v3.8: start compact
+local GUI_W = 480 local GUI_H_COMPACT = 240 local GUI_H_FULL = 460 local GUI_H = GUI_H_FULL  -- v3.10: start full (expanded)
 local sg = mk("ScreenGui",{Name="ZenxInvGui", DisplayOrder=999, ResetOnSpawn=false, Parent=player:WaitForChild("PlayerGui")})
 
 local main = mk("Frame",{
     Size=UDim2.new(0, GUI_W, 0, GUI_H),
-    Position=UDim2.new(0, 70, 0.5, -GUI_H/2),  -- v3.7: start at left side near Shop
+    Position=UDim2.new(0, 70, 0.5, -GUI_H/2),
     BackgroundColor3=C.BG, BorderSizePixel=0, Active=true, Draggable=true,
-    Visible=false,  -- v3.7: start hidden, klik logo Z buat buka
+    Visible=true,  -- v3.10: start visible (gui lebar langsung muncul)
     Parent=sg
 })
 corner(main, 10) stroke(main, C.Teal, 2)
@@ -256,13 +256,13 @@ local closeBtn = btn(TB, "X", 10, C.RDim, C.Red)
 closeBtn.Size = UDim2.new(0,22,0,22) closeBtn.Position = UDim2.new(1,-24,0.5,-11) stroke(closeBtn, C.Red, 1.2)
 closeBtn.MouseButton1Click:Connect(function() sg:Destroy() end)
 
--- v3.7: mini Z fixed di atas Shop (gak draggable, di kiri layar)
+-- v3.10: mini Z fixed (visible cuma pas minimize, gak nongol pas pertama load)
 local miniIcon = mk("TextButton",{
     Size=UDim2.new(0,40,0,40),
-    Position=UDim2.new(0,18,0.5,-20),  -- atas Shop button (kiri tengah layar)
+    Position=UDim2.new(0,18,0.5,-20),
     BackgroundColor3=C.BG, Text="Z", TextColor3=C.Teal,
     Font=Enum.Font.GothamBold, TextSize=22, AutoButtonColor=false,
-    Visible=true, Active=false, Draggable=false, Parent=sg
+    Visible=false, Active=false, Draggable=false, Parent=sg
 })
 corner(miniIcon, 8) stroke(miniIcon, C.Teal, 2)
 minBtn.MouseButton1Click:Connect(function() main.Visible=false miniIcon.Visible=true end)
@@ -511,7 +511,7 @@ local function setExpanded(state)
     local s = expBtn:FindFirstChildOfClass("UIStroke")
     if s then s.Color = state and C.Dim or C.Teal end
 end
-setExpanded(false)
+setExpanded(true)  -- v3.10: start expanded
 expBtn.MouseButton1Click:Connect(function() setExpanded(not expanded) end)
 
 -- Auto resume Auto Rejoin
