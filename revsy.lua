@@ -2327,7 +2327,12 @@ local M78 = {
     autoBuyGear = d.autoBuyGear or false,
     autoFeedPet = d.autoFeedPet or false,
     autoCollect = d.autoCollect or false,
-    feedThresholdPct = d.feedThresholdPct or 70,
+    feedThresholdPct = d.feedThresholdPct or 70, -- legacy, gak dipake lagi tp tetep di-load biar gak break
+    feedCycleMin = d.feedCycleMin or 15,
+    feedDuration = 20,
+    feedMode = "idle",
+    feedNextStartAt = 0,
+    feedEndAt = 0,
     -- Hidden defaults
     miscBuyInterval = 5,
     feedCooldown = 5,
@@ -2532,14 +2537,16 @@ do
 
     local thRow = mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=miscScroll})
     corner(thRow,6) stroke(thRow,C.Dim,1.1)
-    lbl(thRow,"Feed Threshold % (kalo hunger di bawah ini)",11,C.Gray).Size=UDim2.new(0.7,0,1,0)
-    local thBox=mk("TextBox",{Size=UDim2.new(0,50,0,22),Position=UDim2.new(1,-58,0.5,-11),BackgroundColor3=C.Panel,Text=tostring(M78.feedThresholdPct),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=thRow})
+    lbl(thRow,"Feed Cycle (menit) - aktif 20s tiap N menit",11,C.Gray).Size=UDim2.new(0.7,0,1,0)
+    local thBox=mk("TextBox",{Size=UDim2.new(0,50,0,22),Position=UDim2.new(1,-58,0.5,-11),BackgroundColor3=C.Panel,Text=tostring(M78.feedCycleMin),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=thRow})
     corner(thBox,5) stroke(thBox,C.Dim,1)
     thBox:GetPropertyChangedSignal("Text"):Connect(function()
         local v = tonumber(thBox.Text)
         if v then
-            M78.feedThresholdPct = math.max(0, math.min(100, v))
-            d.feedThresholdPct = M78.feedThresholdPct
+            M78.feedCycleMin = math.max(1, math.min(120, v))
+            d.feedCycleMin = M78.feedCycleMin
+            -- Reset cycle: kalo lagi idle, restart timer dgn nilai baru
+            if M78.feedMode == "idle" then M78.feedNextStartAt = 0 end
             save()
         end
     end)
@@ -2600,82 +2607,69 @@ task.spawn(function()
 end)
 
 -- Feed loop
-M78.feedTick = function()
-    if not M78.feedRE then return end
+-- v12.79: Cycle-based feed - tiap feedCycleMin menit, aktif feedDuration detik, feed semua pet
+M78.feedAllPets = function()
+    if not M78.feedRE then return 0 end
     local pets = M78.getPlacedPets()
-    local petsCount = 0
-    for _ in pairs(pets) do petsCount = petsCount + 1 end
-    M78.feedTotalPets = petsCount
-    if petsCount == 0 then M78.feedHungry = 0 return end
-
-    local now = tick()
-    local hungry = {}
-    local unknownCount = 0
-    for uuid, info in pairs(pets) do
-        if not M78.petFeedState[uuid] then M78.petFeedState[uuid] = { lastFedAt = 0 } end
-        local st = M78.petFeedState[uuid]
-        local shouldFeed = false
-        local pctSort = 999
-        if info.hunger and info.maxHunger and info.maxHunger > 0 then
-            local pct = info.hunger / info.maxHunger * 100
-            if pct < M78.feedThresholdPct then shouldFeed = true; pctSort = pct end
-        else
-            -- v12.79: hunger UI gak ke-parse → SKIP (jangan feed asal-asalan)
-            unknownCount = unknownCount + 1
-        end
-        if shouldFeed and (now - st.lastFedAt) >= M78.feedCooldown then
-            table.insert(hungry, { uuid = uuid, pct = pctSort, st = st })
-        end
-    end
-    M78.feedHungry = #hungry
-    M78.feedUnknown = unknownCount
-    if #hungry == 0 then
-        if unknownCount > 0 and unknownCount == petsCount then
-            -- Semua pet hunger UI gak ke-parse → kasih warning sekali
-            M78.setStatus("Feed: SKIP "..unknownCount.." pet (hunger UI gak ke-detect)", C.Gold)
-        end
-        return
-    end
-    table.sort(hungry, function(a, b) return a.pct < b.pct end)
-
-    local fedNow = math.min(M78.feedMaxPerTick, #hungry)
-    local fedActual = 0
-    for i = 1, fedNow do
-        local h = hungry[i]
+    local count = 0
+    for uuid, _ in pairs(pets) do
         local food = M78.pickFood()
         if not food then
             M78.lastFood = "NO FOOD"
             break
         end
         M78.lastFood = food.Name:sub(1, 18)
-        pcall(function() M78.feedRE:FireServer("Feed", "{"..h.uuid.."}") end)
-        h.st.lastFedAt = now
+        pcall(function() M78.feedRE:FireServer("Feed", "{"..uuid.."}") end)
+        count = count + 1
         M78.feedTotalFed = M78.feedTotalFed + 1
-        fedActual = fedActual + 1
-        if i < fedNow then task.wait(0.1) end
+        task.wait(0.05)
     end
-    if fedActual > 0 then
-        local extraInfo = unknownCount > 0 and " (skip:"..unknownCount..")" or ""
-        M78.setStatus("Feed: "..fedActual.."/"..petsCount.." (food:"..M78.lastFood..", total:"..M78.feedTotalFed..")"..extraInfo, C.Teal)
-    end
+    M78.feedTotalPets = count
+    return count
 end
 
 task.spawn(function()
-    local lastTargetReached = false
     while not scriptShutdown do
         if M78.autoFeedPet then
-            M78.feedTick()
-            local targetReached = (M78.feedTotalPets > 0 and M78.feedHungry == 0)
-            if targetReached and not lastTargetReached then
-                M78.setStatus("Feed PAUSED: target tercapai ("..M78.feedTotalPets.." pet >= "..M78.feedThresholdPct.."%)", C.Gold)
-            elseif not targetReached and lastTargetReached then
-                M78.setStatus("Feed RESUMED: ada pet lapar lagi", C.Green)
+            local now = tick()
+            if M78.feedMode == "idle" then
+                -- Kalo feedNextStartAt belum di-set atau udah lewat, mulai cycle
+                if M78.feedNextStartAt <= 0 or now >= M78.feedNextStartAt then
+                    M78.feedMode = "feeding"
+                    M78.feedEndAt = now + M78.feedDuration
+                    M78.setStatus("Feed: cycle MULAI ("..M78.feedDuration.."s)", C.Teal)
+                else
+                    -- Display countdown ke next cycle
+                    local secLeft = math.ceil(M78.feedNextStartAt - now)
+                    local mins = math.floor(secLeft / 60)
+                    local secs = secLeft % 60
+                    M78.setStatus(string.format("Feed: idle, next %02d:%02d (total fed:%d)", mins, secs, M78.feedTotalFed), C.Gray)
+                end
+            elseif M78.feedMode == "feeding" then
+                if now >= M78.feedEndAt then
+                    -- Cycle selesai
+                    M78.feedMode = "idle"
+                    M78.feedNextStartAt = now + (M78.feedCycleMin * 60)
+                    M78.setStatus(string.format("Feed: SELESAI cycle. Next %dm (total fed:%d)", M78.feedCycleMin, M78.feedTotalFed), C.Green)
+                else
+                    -- Lagi dalam window 20s, feed semua pet
+                    local fed = M78.feedAllPets()
+                    local secLeft = math.ceil(M78.feedEndAt - now)
+                    if fed > 0 then
+                        M78.setStatus("Feed: "..fed.." pet ("..secLeft.."s left, food:"..M78.lastFood..")", C.Teal)
+                    elseif M78.lastFood == "NO FOOD" then
+                        M78.setStatus("Feed: NO FOOD di backpack ("..secLeft.."s left)", C.Gold)
+                    else
+                        M78.setStatus("Feed: 0 pet ditemukan ("..secLeft.."s left)", C.Gold)
+                    end
+                end
             end
-            lastTargetReached = targetReached
         else
-            lastTargetReached = false
+            -- Toggle off → reset cycle, ready to start when toggled on
+            M78.feedMode = "idle"
+            M78.feedNextStartAt = 0
         end
-        task.wait(M78.feedInterval)
+        task.wait(1)
     end
 end)
 
