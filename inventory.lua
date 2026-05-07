@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.17 (getAge: cek attribute + child Value)"
+local SCRIPT_VERSION = "v3.18 (label dipersingkat)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -43,11 +43,11 @@ local C = {
 -- v3.0: WEIGHT CATEGORIES dari game.guide
 -- Pakai CURRENT KG (bukan baseKG) buat kategorisasi
 local CATEGORIES = {
-    {name="Small",     short="Sm",  min=0, max=2, color=C.Blue},
-    {name="Large",     short="Lg",  min=2, max=3, color=C.Cyan},
-    {name="Semi Huge", short="SH",  min=3, max=5, color=C.Pink},
-    {name="Huge",      short="Hg",  min=5, max=6, color=C.Purple},
-    {name="Semi Tit",  short="ST",  min=6, max=math.huge, color=C.Orange},
+    {name="Small",   short="Small",   min=0, max=2, color=C.Blue},
+    {name="Large",   short="Large",   min=2, max=3, color=C.Cyan},
+    {name="S.Huge",  short="S.Huge",  min=3, max=5, color=C.Pink},
+    {name="Huge",    short="Huge",    min=5, max=6, color=C.Purple},
+    {name="S.Titan", short="S.Titan", min=6, max=math.huge, color=C.Orange},
 }
 
 local function categorize(kg)
@@ -438,7 +438,7 @@ local function _doBuildInvShow()
         else
             rangeStr = cat.min.."-"..cat.max
         end
-        lblWidget.Text = cat.name.." ("..rangeStr.."): "..count
+        lblWidget.Text = cat.name..": "..count  -- v3.18: no range, biar count keliatan
         lblWidget.TextColor3 = count > 0 and cat.color or C.Gray
     end
 
