@@ -2610,6 +2610,7 @@ M78.feedTick = function()
 
     local now = tick()
     local hungry = {}
+    local unknownCount = 0
     for uuid, info in pairs(pets) do
         if not M78.petFeedState[uuid] then M78.petFeedState[uuid] = { lastFedAt = 0 } end
         local st = M78.petFeedState[uuid]
@@ -2619,14 +2620,22 @@ M78.feedTick = function()
             local pct = info.hunger / info.maxHunger * 100
             if pct < M78.feedThresholdPct then shouldFeed = true; pctSort = pct end
         else
-            shouldFeed = true; pctSort = 50
+            -- v12.79: hunger UI gak ke-parse → SKIP (jangan feed asal-asalan)
+            unknownCount = unknownCount + 1
         end
         if shouldFeed and (now - st.lastFedAt) >= M78.feedCooldown then
             table.insert(hungry, { uuid = uuid, pct = pctSort, st = st })
         end
     end
     M78.feedHungry = #hungry
-    if #hungry == 0 then return end
+    M78.feedUnknown = unknownCount
+    if #hungry == 0 then
+        if unknownCount > 0 and unknownCount == petsCount then
+            -- Semua pet hunger UI gak ke-parse → kasih warning sekali
+            M78.setStatus("Feed: SKIP "..unknownCount.." pet (hunger UI gak ke-detect)", C.Gold)
+        end
+        return
+    end
     table.sort(hungry, function(a, b) return a.pct < b.pct end)
 
     local fedNow = math.min(M78.feedMaxPerTick, #hungry)
@@ -2646,7 +2655,8 @@ M78.feedTick = function()
         if i < fedNow then task.wait(0.1) end
     end
     if fedActual > 0 then
-        M78.setStatus("Feed: "..fedActual.."/"..petsCount.." (food:"..M78.lastFood..", total:"..M78.feedTotalFed..")", C.Teal)
+        local extraInfo = unknownCount > 0 and " (skip:"..unknownCount..")" or ""
+        M78.setStatus("Feed: "..fedActual.."/"..petsCount.." (food:"..M78.lastFood..", total:"..M78.feedTotalFed..")"..extraInfo, C.Teal)
     end
 end
 
@@ -2687,9 +2697,10 @@ end
 
 task.spawn(function()
     local lastBpFull = false
-    local emptyTicks = 0
+    local zeroGainStreak = 0
+    local pausedUntil = 0
     while not scriptShutdown do
-        if M78.autoCollect then
+        if M78.autoCollect and tick() >= pausedUntil then
             local fruitsBefore, total = M78.countBp()
             M78.lastBpFruits = fruitsBefore
             M78.lastBpTotal = total
@@ -2723,18 +2734,33 @@ task.spawn(function()
                 M78.lastPromptCount = fired
 
                 -- Cek delta backpack: yg masuk inventory beneran
-                task.wait(0.15) -- tunggu sebentar biar fruit propagate ke backpack
+                task.wait(0.15)
                 local fruitsAfter = M78.countBp()
                 local gained = math.max(0, fruitsAfter - fruitsBefore)
                 M78.collectTotalFired = M78.collectTotalFired + gained
 
                 if gained > 0 then
-                    emptyTicks = 0
+                    zeroGainStreak = 0
                     M78.setStatus("Collect: +"..gained.." (total "..M78.collectTotalFired..", bp:"..fruitsAfter..")", C.Green)
                 else
-                    emptyTicks = emptyTicks + 1
-                    if emptyTicks % 10 == 1 then -- update tiap ~10 cycle (5s) biar gak spam
-                        M78.setStatus("Collect: idle (kebun kosong / belum ada yg siap), bp:"..fruitsAfter, C.Gray)
+                    if fired > 0 then
+                        zeroGainStreak = zeroGainStreak + 1
+                        if zeroGainStreak >= 5 then
+                            -- Stuck: prob backpack penuh atau kebun kosong
+                            pausedUntil = tick() + 30
+                            zeroGainStreak = 0
+                            -- Force refresh cache pas resume nanti
+                            M78.promptsCacheT = 0
+                            M78.setStatus("Collect PAUSED 30s: bp penuh / kebun kosong (bp:"..fruitsAfter..")", C.Gold)
+                        elseif zeroGainStreak == 1 then
+                            M78.setStatus("Collect: cek... (bp:"..fruitsAfter..")", C.Gray)
+                        end
+                    else
+                        -- Gak ada prompts sama sekali → kebun beneran kosong
+                        zeroGainStreak = 0
+                        if (tick() % 10) < 1 then
+                            M78.setStatus("Collect: idle (gak ada plant siap panen)", C.Gray)
+                        end
                     end
                 end
             end
