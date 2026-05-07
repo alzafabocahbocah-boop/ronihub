@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.50"
+local SCRIPT_VERSION="v12.51"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -609,13 +609,12 @@ local function getMaxKGForPet(name)
     return nil
 end
 
-local function getAgeFromUI(uuid)
-    if not uuid then return nil end
-    local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
-    local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
-    if #uuidStr<10 then return nil end
-    -- v12.50: scan SEMUA child PlayerGui (gak limit ke ActivePetUI doang)
-    -- Plus match nama "PET_AGE" ATAU text content "Age: N"
+-- v12.51: BATCH UI scan - 1x scan PlayerGui per 3 detik (anti-lag)
+local _uiAgeCache={}
+local _lastUIAgeScan=0
+local function _buildUIAgeCache()
+    _uiAgeCache={}
+    local pg=player:FindFirstChild("PlayerGui") if not pg then return end
     for _,sg in ipairs(pg:GetChildren()) do
         local ok=false
         pcall(function() ok=sg:IsA("ScreenGui") or sg:IsA("Frame") or sg:IsA("Folder") end)
@@ -624,7 +623,6 @@ local function getAgeFromUI(uuid)
                 if d:IsA("TextLabel") then
                     local txt=""
                     pcall(function() txt=d.Text or "" end)
-                    -- Match by name "PET_AGE" OR text content "Age: N"
                     local age=nil
                     if d.Name=="PET_AGE" then
                         age=tonumber(txt:match("(%d+)"))
@@ -632,10 +630,14 @@ local function getAgeFromUI(uuid)
                         age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
                     end
                     if age and age>0 and age<=200 then
+                        -- Trace parent chain ke atas cari UUID format
                         local p=d.Parent local depth=0
                         while p and depth<12 do
                             local pn=p.Name:gsub("^{",""):gsub("}$","")
-                            if pn==uuidStr then return age end
+                            if #pn>=32 and pn:find("-") then
+                                _uiAgeCache[pn]=age
+                                break
+                            end
                             p=p.Parent depth=depth+1
                         end
                     end
@@ -643,7 +645,17 @@ local function getAgeFromUI(uuid)
             end
         end
     end
-    return nil
+    _lastUIAgeScan=tick()
+end
+
+-- v12.51: lookup cache (cepet, no per-call scan)
+local function getAgeFromUI(uuid)
+    if not uuid then return nil end
+    -- Refresh cache kalo udah lebih 3 detik (lazy)
+    if tick()-_lastUIAgeScan > 3 then pcall(_buildUIAgeCache) end
+    local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
+    if #uuidStr<10 then return nil end
+    return _uiAgeCache[uuidStr]
 end
 
 local function getPetTypeFromUI(uuid)
@@ -3554,4 +3566,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.50: getAgeFromUI lebih lenient (minimal change dari v12.47 stable)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.51: getAgeFromUI batch cache (anti-lag, 1x scan per 3s)")
