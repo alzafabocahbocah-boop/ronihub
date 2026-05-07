@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.74"
+local SCRIPT_VERSION="v12.75"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2671,16 +2671,19 @@ task.spawn(function()
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
                             -- Feed kalo: hunger nil (fail-safe), atau pct < threshold
-                            -- v12.74: feed cycle - tiap 30 menit, fire 15 detik
-                            _G._zenxFeedCycleStart = _G._zenxFeedCycleStart or (tick() - 1800)  -- start "expired" biar langsung jalan
+                            -- v12.75: feed cycle 30min, tiap pet 1x per cycle
+                            _G._zenxFeedCycleStart = _G._zenxFeedCycleStart or (tick() - 1800)
+                            _G._zenxFedThisCycle = _G._zenxFedThisCycle or {}
                             local elapsed = tick() - _G._zenxFeedCycleStart
-                            local inFeedWindow = elapsed > 1800 and elapsed < 1815  -- antara 30 menit (1800s) sampe 30:15
+                            local inFeedWindow = elapsed > 1800 and elapsed < 1815
                             if elapsed >= 1815 then
-                                _G._zenxFeedCycleStart = tick() - 1800  -- reset, masuk feed window lagi
+                                _G._zenxFeedCycleStart = tick() - 1800
+                                _G._zenxFedThisCycle = {}  -- reset cycle: fed list clear
                                 inFeedWindow = true
                             end
-                            if inFeedWindow then
+                            if inFeedWindow and not _G._zenxFedThisCycle[info.uuid] then
                                 pcall(function() r:FireServer("Feed", ub) end)
+                                _G._zenxFedThisCycle[info.uuid] = true  -- v12.75: mark fed di cycle ini
                                 fed = fed + 1
                                 feedTotal = feedTotal + 1
                             else
@@ -3600,4 +3603,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.74: feed cycle - tiap 30 menit fire 15 detik (no hunger detect)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.75: feed cycle 30min, tiap pet ke-feed 1x per cycle (gak overfeed)")
