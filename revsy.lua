@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.52"
+local SCRIPT_VERSION="v12.53"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2587,19 +2587,29 @@ task.spawn(function()
                 local hum = player.Character:FindFirstChildOfClass("Humanoid")
                 local bp = player:FindFirstChild("Backpack")
                 if hum and bp then
-                    -- v12.44: equip food tool kalo belum
+                    -- v12.53: helper isFoodTool - filter food (skip shovel/sprinkler/dll)
+                    local function isFoodTool(t)
+                        if not t:IsA("Tool") then return false end
+                        if t:FindFirstChild("PetToolLocal") or t:FindFirstChild("PetToolServer") then return false end
+                        local n = t.Name
+                        local gearKW = {"Shovel","Sprinkler","Watering","Trowel","Wrench","Spray","Mirror","Magnifying","Tool","Pot","Ticket","Rod","Staff","Lollipop","Caller","Crate","Basket","Rake"}
+                        for _, kw in ipairs(gearKW) do
+                            if n:find(kw, 1, true) then return false end
+                        end
+                        -- Food = ada [N kg] di nama (buah/sayur)
+                        return n:match("%[[%d%.]+%s*[Kk][Gg]%]") ~= nil
+                    end
+
+                    -- v12.53: cek tool food yg udah equipped
                     local equippedFood = nil
                     for _, item in pairs(player.Character:GetChildren()) do
-                        if item:IsA("Tool") and not item:FindFirstChild("PetToolLocal") and not item:FindFirstChild("PetToolServer") then
-                            equippedFood = item
-                            break
-                        end
+                        if isFoodTool(item) then equippedFood = item break end
                     end
                     if not equippedFood then
                         for _, item in pairs(bp:GetChildren()) do
-                            if item:IsA("Tool") and not item:FindFirstChild("PetToolLocal") and not item:FindFirstChild("PetToolServer") then
+                            if isFoodTool(item) then
                                 pcall(function() hum:EquipTool(item) end)
-                                task.wait(0.05)  -- v12.45: minimal wait
+                                task.wait(0.05)
                                 for _, c in pairs(player.Character:GetChildren()) do
                                     if c:IsA("Tool") and c == item then equippedFood = c break end
                                 end
@@ -2656,7 +2666,7 @@ task.spawn(function()
                 end
             end
         end
-        task.wait(0.1)  -- v12.45: 0.1s antar feed cycle
+        task.wait(0.5)  -- v12.53: 0.5s (anti server-overload, prevent error)
     end
 end)
 
@@ -3560,4 +3570,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.52: getAgeFromUI cache via closure (IIFE, gak nambah top-level locals)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.53: Auto Feed pick FOOD only (skip shovel/gear) + slow loop (anti-server-error)")
