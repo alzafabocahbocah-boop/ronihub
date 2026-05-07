@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.62"
+local SCRIPT_VERSION="v12.63"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2325,13 +2325,12 @@ local autoFeedPet = false
 -- Edit angka 70 di bawah ini buat ubah threshold (0-100):
 -- v12.61: threshold pakai HGR absolute. Feed kalo hunger < N HGR
 -- Edit angka di bawah: pet di-feed pas hunger di bawah ini (default 5000)
-local feedThresholdHGR = 5000
+local feedThresholdHGR = 1000  -- v12.63: feed kalo hunger < 1000 (target: pet jangan turun di bawah 1000)
 -- Hunger cache - 1x scan PlayerGui per 2s (anti-lag)
 local _hungerCache = {}
 local _lastHungerScan = 0
--- v12.62: cooldown per pet (gak spam feed dalam window cache 2s)
-local _lastFedTime = {}
-local FEED_COOLDOWN_SEC = 3
+-- v12.63: track pet yg baru di-feed (clear pas cache refresh, biar pet bisa di-feed lagi kalo hunger msh kurang)
+local _justFed = {}
 local autoCollect = false
 
 local miscBuyInterval = 5
@@ -2665,6 +2664,7 @@ task.spawn(function()
                         -- v12.60: refresh hunger cache tiap 2 detik (1x scan, semua pet sekaligus)
                         if tick() - _lastHungerScan > 2 then
                             _hungerCache = {}
+                            _justFed = {}  -- v12.63: clear, pet bisa di-feed lagi kalo hunger msh kurang
                             pcall(function()
                                 local pg = player:FindFirstChild("PlayerGui")
                                 if pg then
@@ -2705,13 +2705,12 @@ task.spawn(function()
                         end)
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
-                            -- v12.62: feed kalo (hunger nil ATAU hunger < 5000) DAN gak baru di-feed
-                            local lastFed = _lastFedTime[info.uuid] or 0
+                            -- v12.63: feed kalo hunger nil OR hunger < threshold, DAN belum di-feed di window cache ini
                             local needFeed = not info.hgr or info.hgr < feedThresholdHGR
-                            local cooldownDone = (tick() - lastFed) > FEED_COOLDOWN_SEC
-                            if needFeed and cooldownDone then
+                            local notYetFed = not _justFed[info.uuid]
+                            if needFeed and notYetFed then
                                 pcall(function() r:FireServer("Feed", ub) end)
-                                _lastFedTime[info.uuid] = tick()
+                                _justFed[info.uuid] = true
                                 fed = fed + 1
                                 feedTotal = feedTotal + 1
                             else
@@ -3631,4 +3630,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.62: feed sekali doang per pet (cooldown 3s, gak spam-feed pet sama)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.63: threshold 1000 + feed lagi kalo hunger msh kurang setelah cache refresh")
