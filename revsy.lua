@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.64"
+local SCRIPT_VERSION="v12.65"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2323,7 +2323,7 @@ local autoBuyGear = false
 local autoFeedPet = false
 -- v12.58: Hunger threshold (%). Default 70 = feed kalo hunger < 70% max
 -- Edit angka 70 di bawah ini buat ubah threshold (0-100):
-local feedThresholdPct = 70
+local feedThresholdPct = 1000  -- v12.65: HGR absolute (bukan persen) - feed kalo hunger < 1000
 local autoCollect = false
 
 local miscBuyInterval = 5
@@ -2671,7 +2671,7 @@ task.spawn(function()
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
                             -- Feed kalo: hunger nil (fail-safe), atau pct < threshold
-                            if not info.hunger or info.pct < feedThresholdPct then
+                            if not info.hunger or info.hunger < feedThresholdPct then  -- v12.65: pakai HGR absolute
                                 pcall(function() r:FireServer("Feed", ub) end)
                                 fed = fed + 1
                                 feedTotal = feedTotal + 1
@@ -3592,4 +3592,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.64: dari v12.58 stable + cuma favorite filter (NO cache, NO new locals)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.65: + threshold 1000 HGR absolute (cuma 2 line change)")
