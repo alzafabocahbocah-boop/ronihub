@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.61"
+local SCRIPT_VERSION="v12.62"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2329,6 +2329,9 @@ local feedThresholdHGR = 5000
 -- Hunger cache - 1x scan PlayerGui per 2s (anti-lag)
 local _hungerCache = {}
 local _lastHungerScan = 0
+-- v12.62: cooldown per pet (gak spam feed dalam window cache 2s)
+local _lastFedTime = {}
+local FEED_COOLDOWN_SEC = 3
 local autoCollect = false
 
 local miscBuyInterval = 5
@@ -2702,9 +2705,13 @@ task.spawn(function()
                         end)
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
-                            -- v12.61: feed kalo hunger gak ke-detect ATAU hunger < threshold HGR
-                            if not info.hgr or info.hgr < feedThresholdHGR then
+                            -- v12.62: feed kalo (hunger nil ATAU hunger < 5000) DAN gak baru di-feed
+                            local lastFed = _lastFedTime[info.uuid] or 0
+                            local needFeed = not info.hgr or info.hgr < feedThresholdHGR
+                            local cooldownDone = (tick() - lastFed) > FEED_COOLDOWN_SEC
+                            if needFeed and cooldownDone then
                                 pcall(function() r:FireServer("Feed", ub) end)
+                                _lastFedTime[info.uuid] = tick()
                                 fed = fed + 1
                                 feedTotal = feedTotal + 1
                             else
@@ -3624,4 +3631,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.61: threshold pakai HGR absolute (bukan persen) - default 5000")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.62: feed sekali doang per pet (cooldown 3s, gak spam-feed pet sama)")
