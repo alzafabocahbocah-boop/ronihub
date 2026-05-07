@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.57"
+local SCRIPT_VERSION="v12.58"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2321,7 +2321,9 @@ local autoBuyEgg = false
 local autoBuySeed = false
 local autoBuyGear = false
 local autoFeedPet = false
-local feedThresholdPct = 70  -- v12.57: feed kalo hunger < N% max
+-- v12.58: Hunger threshold (%). Default 70 = feed kalo hunger < 70% max
+-- Edit angka 70 di bawah ini buat ubah threshold (0-100):
+local feedThresholdPct = 70
 local autoCollect = false
 
 local miscBuyInterval = 5
@@ -2376,24 +2378,7 @@ do
     miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, function() return autoBuySeed end, function(v) autoBuySeed=v end)
     miscTogRow("Auto Buy Gear", "Beli gear (sprinkler, water can, dll)", 3, function() return autoBuyGear end, function(v) autoBuyGear=v end)
     miscTogRow("Auto Feed Pet", "Kasih makan pet di tim leveling", 4, function() return autoFeedPet end, function(v) autoFeedPet=v end)
-
-    -- v12.57: hunger threshold input
-    local thrRow = mk("Frame",{Size=UDim2.new(1,0,0,42), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=5, Parent=miscScroll})
-    corner(thrRow, 7) stroke(thrRow, C.Dim, 1.2)
-    local thrL = lbl(thrRow, "Feed kalo Hunger <", 14, C.White) thrL.Size = UDim2.new(0.65,0,0,18) thrL.Position = UDim2.new(0,12,0,5)
-    thrL.Font = Enum.Font.GothamBold
-    local thrDl = lbl(thrRow, "Persen 0-100 (default 70)", 12, C.Gray) thrDl.Size = UDim2.new(0.75,0,0,14) thrDl.Position = UDim2.new(0,12,0,23)
-    local thrTb = mk("TextBox",{Size=UDim2.new(0,56,0,26), Position=UDim2.new(1,-66,0.5,-13),
-        BackgroundColor3=C.Panel, TextColor3=C.Teal, Text=tostring(feedThresholdPct).."%",
-        Font=Enum.Font.GothamBold, TextSize=13, ClearTextOnFocus=false, Parent=thrRow})
-    corner(thrTb, 5) stroke(thrTb, C.Teal, 1.2)
-    thrTb.FocusLost:Connect(function()
-        local n = tonumber(thrTb.Text:match("(%d+)"))
-        if n and n >= 0 and n <= 100 then feedThresholdPct = n end
-        thrTb.Text = tostring(feedThresholdPct).."%"
-    end)
-
-    miscTogRow("Auto Collect", "Panen semua buah di kebun", 6, function() return autoCollect end, function(v) autoCollect=v end)
+    miscTogRow("Auto Collect", "Panen semua buah di kebun", 5, function() return autoCollect end, function(v) autoCollect=v end)
 
     -- Status (bottom)
     miscStatusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
@@ -2663,28 +2648,16 @@ task.spawn(function()
                     local skipped = 0
                     local total_uuid = 0
                     if equippedFood then
-                        -- v12.57: build list, sort by hunger ASC (pet paling lapar dulu)
+                        -- v12.58: build list, sort by hunger ASC (pet paling lapar dulu)
                         local petInfos = {}
                         for uuidStr, _ in pairs(allUUIDs) do
                             local hunger = getPetHunger(uuidStr)
+                            -- Default maxHunger 25000 (kebanyakan pet)
                             local maxH = 25000
-                            -- Coba detect maxHunger dari UI (format "X / Y HGR")
-                            pcall(function()
-                                local pg = player:FindFirstChild("PlayerGui")
-                                if pg then
-                                    for _, d in ipairs(pg:GetDescendants()) do
-                                        if d:IsA("TextLabel") and d.Text:find("HGR") then
-                                            local m = tonumber(d.Text:match("/%s*([%d%.]+)%s*HGR"))
-                                            if m and m > 0 then maxH = m break end
-                                        end
-                                    end
-                                end
-                            end)
                             local pct = hunger and ((hunger / maxH) * 100) or 0
                             table.insert(petInfos, {uuid=uuidStr, hunger=hunger, pct=pct})
                             total_uuid = total_uuid + 1
                         end
-                        -- Sort: hunger gak ke-detect (nil) dulu, terus pct ASC
                         table.sort(petInfos, function(a, b)
                             if a.hunger == nil and b.hunger ~= nil then return true end
                             if b.hunger == nil and a.hunger ~= nil then return false end
@@ -2692,7 +2665,7 @@ task.spawn(function()
                         end)
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
-                            -- Feed kalo: hunger gak ke-detect, ATAU pct < threshold
+                            -- Feed kalo: hunger nil (fail-safe), atau pct < threshold
                             if not info.hunger or info.pct < feedThresholdPct then
                                 pcall(function() r:FireServer("Feed", ub) end)
                                 fed = fed + 1
@@ -3614,4 +3587,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.57: hunger threshold % + sort by hunger (pet lapar dulu)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.58: dari v12.56 stable + sort by hunger (no UI change)")
