@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.76"
+local SCRIPT_VERSION="v12.78"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (misc section rewrite from testbed v1.4)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -787,12 +787,13 @@ end
 local upLvlBtn = makeSidebarBtn("UP LVL", 1)
 local invShowBtn = makeSidebarBtn("Inventory Show", 2)
 local miscBtn = makeSidebarBtn("Misc", 3)
+local giftBtn = makeSidebarBtn("Auto Gift", 4)  -- v12.77: pindah dari tab ke sidebar
 
 local content=mk("Frame",{Size=UDim2.new(1,-(SIDEBAR_W+15),1,-34),Position=UDim2.new(0,SIDEBAR_W+10,0,34),BackgroundTransparency=1,Parent=main})
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,2),Parent=tabBar})
 
-local tabNames={"Tim Leveling","Pet ke 100","Swap Skill","Other Setting","Auto Gift"}
+local tabNames={"Tim Leveling","Pet ke 100","Swap Skill","Other Setting"}  -- v12.77: Auto Gift dipindah ke sidebar
 local tabBtns={}
 
 local function makeScroll(yPos,height)
@@ -1006,12 +1007,16 @@ local function switchSection(idx)
     elseif idx == 3 then
         -- Misc
         miscGroup.Visible = true
+    elseif idx == 4 then
+        -- v12.77: Auto Gift (was tab 5, now sidebar 4)
+        if areas[5] then areas[5].Visible = true end
     end
 end
 
 upLvlBtn.MouseButton1Click:Connect(function() switchSection(1) end)
 invShowBtn.MouseButton1Click:Connect(function() switchSection(2) end)
 miscBtn.MouseButton1Click:Connect(function() switchSection(3) end)
+giftBtn.MouseButton1Click:Connect(function() switchSection(4) end)  -- v12.77
 
 for i,name in ipairs(tabNames) do
     local b=btn(tabBar,name,10,C.Card,C.Gray)
@@ -2315,31 +2320,171 @@ end)
 -- ============================================
 -- AUTO ACCEPT HOOKS (FIXED v8.2)
 -- ============================================
--- v12.22: MISC SECTION UI - Auto Buy + Feed + Collect
 -- ============================================
-local autoBuyEgg = false
-local autoBuySeed = false
-local autoBuyGear = false
-local autoFeedPet = false
--- v12.58: Hunger threshold (%). Default 70 = feed kalo hunger < 70% max
--- Edit angka 70 di bawah ini buat ubah threshold (0-100):
-local feedThresholdPct = 1000  -- v12.65: HGR absolute (bukan persen) - feed kalo hunger < 1000
-local autoCollect = false
+-- v12.78: MISC SECTION (Auto Buy/Collect/Feed) - rewrite from testbed v1.4
+-- ============================================
+-- Logic: threshold-based feed, cached prompts collect, smart food selection
+-- Dependencies dari main script (semuanya udah ada di v12.76):
+--   C, mk, lbl, btn, corner, stroke, dbg, RS, player,
+--   miscGroup (frame container utk sidebar 3),
+--   save() function, d (data table), scriptShutdown flag
+-- ============================================
 
+-- ---- State (load dari saved data, fallback default) ----
+local autoBuyEgg = d.autoBuyEgg or false
+local autoBuySeed = d.autoBuySeed or false
+local autoBuyGear = d.autoBuyGear or false
+local autoFeedPet = d.autoFeedPet or false
+local autoCollect = d.autoCollect or false
+local feedThresholdPct = d.feedThresholdPct or 70
 local miscBuyInterval = 5
-local miscFeedInterval = 30
-local miscCollectInterval = 10
 
+-- Hidden defaults (gak di-UI biar bersih, edit di sini kalo perlu tweak)
+local feedCooldown = 5            -- detik antar feed buat pet yg sama
+local feedMaxPerTick = 10         -- max pet yg di-feed per loop iter
+local feedInterval = 1            -- check interval feed (s)
+local collectInterval = 0.5       -- sweep interval collect (s)
+local backpackLimit = 200         -- pause collect kalo fruit >= N (0=off)
+local collectMaxDist = 0          -- 0=no filter, >0=max distance studs
+local collectMatch = "Collect"    -- ActionText pattern
+
+-- Runtime state
+local petFeedState = {}
+local feedTotalPets = 0
+local feedHungry = 0
+local feedTotalFed = 0
+local lastFood = "-"
+local _v78_promptsCache = {}
+local _v78_promptsCacheT = 0
+local _v78_promptsConfigured = setmetatable({}, {__mode = "k"})
+local lastBpFruits = 0
+local lastBpTotal = 0
+local lastPromptCount = 0
+local collectTotalFired = 0
+local buySeedFired = 0
+local buyGearFired = 0
+local buyEggFired = 0
 local miscStatusLbl
+
+-- ---- Helpers (prefix v78 biar gak konflik sama existing helpers di main script) ----
+local function v78_isFruit(t)
+    if not t:IsA("Tool") then return false end
+    if t:FindFirstChild("PetToolLocal") or t:FindFirstChild("PetToolServer") then return false end
+    local n = t.Name
+    local gearKW = {"Shovel","Sprinkler","Watering","Trowel","Wrench","Spray","Mirror","Magnifying","Tool","Pot","Ticket","Rod","Staff","Lollipop","Caller","Crate","Basket","Rake"}
+    for _, kw in ipairs(gearKW) do
+        if n:find(kw, 1, true) then return false end
+    end
+    return n:match("%[[%d%.]+%s*[Kk][Gg]%]") ~= nil
+end
+
+local function v78_isFav(t)
+    for _, attr in ipairs({"Favorited","IsFavorite","Favorite","Loved","IsLoved"}) do
+        local fav = false
+        pcall(function() fav = t:GetAttribute(attr) == true end)
+        if fav then return true end
+    end
+    return false
+end
+
+local function v78_isFood(t)
+    return v78_isFruit(t) and not v78_isFav(t)
+end
+
+local function v78_countBp()
+    local bp = player:FindFirstChild("Backpack")
+    if not bp then return 0, 0 end
+    local fruits, total = 0, 0
+    for _, item in ipairs(bp:GetChildren()) do
+        total = total + 1
+        if v78_isFruit(item) then fruits = fruits + 1 end
+    end
+    return fruits, total
+end
+
+local function v78_getPlacedPets()
+    local pets = {}
+    local pg = player:FindFirstChild("PlayerGui")
+    local apui = pg and pg:FindFirstChild("ActivePetUI")
+    if not apui then return pets end
+    for _, frame in ipairs(apui:GetDescendants()) do
+        local n = frame.Name or ""
+        local clean = n:gsub("[{}]", "")
+        if #clean >= 32 and clean:find("-") and not pets[clean] then
+            local hasAge = false
+            pcall(function()
+                if frame:FindFirstChild("PET_AGE", true) then hasAge = true end
+            end)
+            if hasAge then
+                local hunger, maxHunger
+                for _, dd in ipairs(frame:GetDescendants()) do
+                    if dd:IsA("TextLabel") then
+                        local t = dd.Text or ""
+                        local cur, mx = t:match("([%d%.]+)%s*/%s*([%d%.]+)%s*HGR")
+                        if cur and mx then
+                            hunger = tonumber(cur)
+                            maxHunger = tonumber(mx)
+                            break
+                        end
+                    end
+                end
+                pets[clean] = { hunger = hunger, maxHunger = maxHunger }
+            end
+        end
+    end
+    return pets
+end
+
+local function v78_pickFood()
+    local char = player.Character
+    if not char then return nil end
+    -- Reuse already-equipped food
+    for _, item in ipairs(char:GetChildren()) do
+        if v78_isFood(item) then return item end
+    end
+    -- Equip dari backpack: smallest KG first
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return nil end
+    local bp = player:FindFirstChild("Backpack")
+    if not bp then return nil end
+    local foods = {}
+    for _, item in ipairs(bp:GetChildren()) do
+        if v78_isFood(item) then
+            local kg = tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) or 0
+            table.insert(foods, { tool = item, kg = kg })
+        end
+    end
+    if #foods == 0 then return nil end
+    table.sort(foods, function(a, b) return a.kg < b.kg end)
+    pcall(function() hum:EquipTool(foods[1].tool) end)
+    task.wait(0.1)
+    for _, item in ipairs(char:GetChildren()) do
+        if item == foods[1].tool then return item end
+    end
+    return nil
+end
+
+-- ---- Item lists (hardcoded, dari debug capture) ----
+local SEEDS_v78 = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pumpkin","Apple","Bamboo","Coconut","Cactus","Dragon Fruit","Mango","Grape","Pepper","Mushroom","Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa","Banana","Lily","Bell Pepper","Prickly Pear","Loquat","Feijoa","Cherry","Rose","Lemon"}
+local GEARS_v78 = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"}
+local EGGS_v78 = {"Common Egg","Uncommon Egg","Rare Egg","Legendary Egg","Mythical Egg","Bug Egg","Night Egg","Premium Night Egg","Bee Egg","Anti Bee Egg","Common Summer Egg","Rare Summer Egg","Paradise Egg","Oasis Egg","Dinosaur Egg","Primal Egg","Zen Egg","Gourmet Egg"}
+
+-- ---- Remote refs (proper remote names dari debug, bukan generic discovery) ----
+local _ge78 = RS:FindFirstChild("GameEvents")
+local buySeedRE_v78 = _ge78 and _ge78:FindFirstChild("BuySeedStock")
+local buyGearRE_v78 = _ge78 and _ge78:FindFirstChild("BuyGearStock")
+local buyEggRE_v78 = _ge78 and (_ge78:FindFirstChild("BuyPetEgg") or _ge78:FindFirstChild("BuyEgg") or _ge78:FindFirstChild("BuyEggStock"))
+local feedRE_v78 = _ge78 and _ge78:FindFirstChild("ActivePetService")
+dbg("[misc78] remotes seed="..(buySeedRE_v78 and "OK" or "MISS").." gear="..(buyGearRE_v78 and "OK" or "MISS").." egg="..(buyEggRE_v78 and "OK" or "MISS").." feed="..(feedRE_v78 and "OK" or "MISS"))
+
+-- ---- UI Build ----
 do
-    -- Header (full width inside miscGroup)
     local miscHdr = mk("Frame",{Size=UDim2.new(1,-10,0,30),Position=UDim2.new(0,5,0,4),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=miscGroup})
     corner(miscHdr, 7) stroke(miscHdr, C.Teal, 1.3)
     local hl = lbl(miscHdr, "MISC AUTO TASKS", 14, C.Teal, Enum.TextXAlignment.Center)
     hl.Size = UDim2.new(1,0,1,0)
     hl.Font = Enum.Font.GothamBold
 
-    -- Scroll area buat toggle list
     local miscScroll = mk("ScrollingFrame",{
         Size=UDim2.new(1,-10,1,-72),Position=UDim2.new(0,5,0,38),
         BackgroundTransparency=1,ScrollBarThickness=4,ScrollBarImageColor3=C.Teal,
@@ -2349,7 +2494,6 @@ do
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,5),Parent=miscScroll})
     mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,3),PaddingRight=UDim.new(0,3),Parent=miscScroll})
 
-    -- v12.22: toggle row dgn font lebih gede
     local function miscTogRow(labelTxt, descTxt, lo, getF, setF)
         local row = mk("Frame",{Size=UDim2.new(1,0,0,42), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=miscScroll})
         corner(row, 7) local rowStroke = stroke(row, C.Dim, 1.2)
@@ -2374,13 +2518,32 @@ do
         return row
     end
 
-    miscTogRow("Auto Buy Egg", "Beli egg otomatis di toko", 1, function() return autoBuyEgg end, function(v) autoBuyEgg=v end)
-    miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, function() return autoBuySeed end, function(v) autoBuySeed=v end)
-    miscTogRow("Auto Buy Gear", "Beli gear (sprinkler, water can, dll)", 3, function() return autoBuyGear end, function(v) autoBuyGear=v end)
-    miscTogRow("Auto Feed Pet", "Kasih makan pet di tim leveling", 4, function() return autoFeedPet end, function(v) autoFeedPet=v end)
-    miscTogRow("Auto Collect", "Panen semua buah di kebun", 5, function() return autoCollect end, function(v) autoCollect=v end)
+    -- Buy toggles
+    miscTogRow("Auto Buy Egg", "Beli egg otomatis di toko", 1, function() return autoBuyEgg end, function(v) autoBuyEgg=v d.autoBuyEgg=v save() end)
+    miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, function() return autoBuySeed end, function(v) autoBuySeed=v d.autoBuySeed=v save() end)
+    miscTogRow("Auto Buy Gear", "Beli gear (sprinkler, water can, dll)", 3, function() return autoBuyGear end, function(v) autoBuyGear=v d.autoBuyGear=v save() end)
 
-    -- Status (bottom)
+    -- Feed toggle + threshold input
+    miscTogRow("Auto Feed Pet", "Feed pet kalo hunger di bawah threshold", 4, function() return autoFeedPet end, function(v) autoFeedPet=v d.autoFeedPet=v save() end)
+
+    local thRow = mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=miscScroll})
+    corner(thRow,6) stroke(thRow,C.Dim,1.1)
+    lbl(thRow,"Feed Threshold % (kalo hunger di bawah ini)",11,C.Gray).Size=UDim2.new(0.7,0,1,0)
+    local thBox=mk("TextBox",{Size=UDim2.new(0,50,0,22),Position=UDim2.new(1,-58,0.5,-11),BackgroundColor3=C.Panel,Text=tostring(feedThresholdPct),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=thRow})
+    corner(thBox,5) stroke(thBox,C.Dim,1)
+    thBox:GetPropertyChangedSignal("Text"):Connect(function()
+        local v = tonumber(thBox.Text)
+        if v then
+            feedThresholdPct = math.max(0, math.min(100, v))
+            d.feedThresholdPct = feedThresholdPct
+            save()
+        end
+    end)
+
+    -- Collect (toggle only, no other config visible)
+    miscTogRow("Auto Collect Fruit", "Panen semua buah di kebun (auto-pause kalo bp full)", 6, function() return autoCollect end, function(v) autoCollect=v d.autoCollect=v save() end)
+
+    -- Status bar (bottom)
     miscStatusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
     miscStatusLbl.Size = UDim2.new(1,-10,0,26)
     miscStatusLbl.Position = UDim2.new(0,5,1,-30)
@@ -2390,27 +2553,6 @@ do
     corner(miscStatusLbl, 6) stroke(miscStatusLbl, C.Dim, 1.1)
 end
 
--- Discover remotes
-local miscRemotes = {buyEgg={},buySeed={},buyGear={},feedPet={},collect={}}
-do
-    local ge = RS:FindFirstChild("GameEvents")
-    if ge then
-        for _, c in ipairs(ge:GetDescendants()) do
-            if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
-                local n = c.Name:lower()
-                if n:find("buy") and (n:find("egg") or n:find("pet")) and not n:find("token") then
-                    table.insert(miscRemotes.buyEgg, c)
-                end
-                if n:find("buy") and n:find("seed") then table.insert(miscRemotes.buySeed, c) end
-                if n:find("buy") and n:find("gear") then table.insert(miscRemotes.buyGear, c) end
-if n:find("feed") and n:find("pet") then table.insert(miscRemotes.feedPet, c) end
-                if n:find("collect") or n:find("harvest") then table.insert(miscRemotes.collect, c) end
-            end
-        end
-    end
-    dbg("[misc] remotes: buyEgg="..#miscRemotes.buyEgg.." buySeed="..#miscRemotes.buySeed.." buyGear="..#miscRemotes.buyGear.." feed="..#miscRemotes.feedPet.." collect="..#miscRemotes.collect)
-end
-
 local function setMiscStatus(text, color)
     if miscStatusLbl then
         miscStatusLbl.Text = text
@@ -2418,333 +2560,186 @@ local function setMiscStatus(text, color)
     end
 end
 
-local function fireAllMisc(remotesList)
-    if #remotesList == 0 then return false end
-    local fired = 0
-    for _, r in ipairs(remotesList) do
-        local ok = pcall(function()
-            if r:IsA("RemoteFunction") then r:InvokeServer()
-            else r:FireServer() end
-        end)
-        if ok then fired = fired + 1 end
-    end
-    return fired > 0
-end
-
--- Auto buy loop
+-- ---- Loops ----
+-- Buy Seed
 task.spawn(function()
     while not scriptShutdown do
-        if autoBuyEgg then pcall(fireAllMisc, miscRemotes.buyEgg) setMiscStatus("Buy egg fired", C.Teal) end
-        if autoBuySeed then pcall(fireAllMisc, miscRemotes.buySeed) setMiscStatus("Buy seed fired", C.Teal) end
-        if autoBuyGear then pcall(fireAllMisc, miscRemotes.buyGear) setMiscStatus("Buy gear fired", C.Teal) end
+        if autoBuySeed and buySeedRE_v78 then
+            for _, name in ipairs(SEEDS_v78) do
+                pcall(function() buySeedRE_v78:FireServer("Shop", name) end)
+                buySeedFired = buySeedFired + 1
+            end
+            setMiscStatus("Buy seed: total "..buySeedFired, C.Teal)
+        end
         task.wait(miscBuyInterval)
     end
 end)
 
--- Auto feed pet di tim
+-- Buy Gear
 task.spawn(function()
     while not scriptShutdown do
-        if autoFeedPet and #miscRemotes.feedPet > 0 then
-            local fed = 0
-            for uuidStr, _ in pairs(teamPetUUIDs) do
-                for _, r in ipairs(miscRemotes.feedPet) do
-                    pcall(function()
-                        if r:IsA("RemoteFunction") then r:InvokeServer(uuidStr)
-                        else r:FireServer(uuidStr) end
-                    end)
-                end
-                fed = fed + 1
+        if autoBuyGear and buyGearRE_v78 then
+            for _, name in ipairs(GEARS_v78) do
+                pcall(function() buyGearRE_v78:FireServer(name) end)
+                buyGearFired = buyGearFired + 1
             end
-            if fed > 0 then setMiscStatus("Feed "..fed.." pet team", C.Teal) end
+            setMiscStatus("Buy gear: total "..buyGearFired, C.Teal)
         end
-        task.wait(miscFeedInterval)
+        task.wait(miscBuyInterval)
     end
 end)
 
--- Auto collect
+-- Buy Egg
 task.spawn(function()
     while not scriptShutdown do
-        if autoCollect and #miscRemotes.collect > 0 then
-            for _, r in ipairs(miscRemotes.collect) do
-                pcall(function()
-                    if r:IsA("RemoteFunction") then r:InvokeServer()
-                    else r:FireServer() end
-                end)
+        if autoBuyEgg and buyEggRE_v78 then
+            for _, name in ipairs(EGGS_v78) do
+                local ok = pcall(function() buyEggRE_v78:FireServer(name) end)
+                if not ok then pcall(function() buyEggRE_v78:FireServer("Shop", name) end) end
+                buyEggFired = buyEggFired + 1
             end
-            setMiscStatus("Collect fired", C.Teal)
+            setMiscStatus("Buy egg: total "..buyEggFired, C.Teal)
         end
-        task.wait(miscCollectInterval)
+        task.wait(miscBuyInterval)
     end
 end)
 
--- ============================================
--- ============================================
--- v12.31: ADDITIONAL confirmed-pattern tasks (gak ganggu existing v12.25 tasks)
--- Existing tasks pakai miscRemotes.* (generic discovery, mungkin gak fire bener)
--- Tasks tambahan ini pake remote PERSIS dari debug capture
--- ============================================
-local SEEDS_v32 = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pumpkin","Apple","Bamboo","Coconut","Cactus","Dragon Fruit","Mango","Grape","Pepper","Mushroom","Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa","Banana","Lily","Bell Pepper","Prickly Pear","Loquat","Feijoa","Cherry","Rose","Lemon"}
-local GEARS_v32 = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"}
+-- Feed loop (threshold + per-pet cooldown + smart food + target pause)
+local function v78_feedTick()
+    if not feedRE_v78 then return end
+    local pets = v78_getPlacedPets()
+    local petsCount = 0
+    for _ in pairs(pets) do petsCount = petsCount + 1 end
+    feedTotalPets = petsCount
+    if petsCount == 0 then feedHungry = 0 return end
 
--- v12.32: separate task per fitur biar fire-nya independent + lebih cepet
--- v12.33: BUY SEED non-stop fire (gak ada delay sama sekali)
-task.spawn(function()
-    local total = 0
-    while not scriptShutdown do
-        if autoBuySeed then
-            local ge = RS:FindFirstChild("GameEvents")
-            local r = ge and ge:FindFirstChild("BuySeedStock")
-            if r then
-                for _, name in ipairs(SEEDS_v32) do
-                    pcall(function() r:FireServer("Shop", name) end)
-                    total = total + 1
-                end
-                if setMiscStatus then setMiscStatus("Buy seed total: "..total, C.Teal) end
-            end
+    local now = tick()
+    local hungry = {}
+    for uuid, info in pairs(pets) do
+        if not petFeedState[uuid] then petFeedState[uuid] = { lastFedAt = 0 } end
+        local st = petFeedState[uuid]
+        local shouldFeed = false
+        local pctSort = 999
+        if info.hunger and info.maxHunger and info.maxHunger > 0 then
+            local pct = info.hunger / info.maxHunger * 100
+            if pct < feedThresholdPct then shouldFeed = true pctSort = pct end
+        else
+            -- Hunger unknown -> fallback feed (anti silent-skip)
+            shouldFeed = true pctSort = 50
         end
-        task.wait()  -- v12.33: next frame aja, gak ada wait spesifik
+        if shouldFeed and (now - st.lastFedAt) >= feedCooldown then
+            table.insert(hungry, { uuid = uuid, pct = pctSort, st = st })
+        end
     end
-end)
+    feedHungry = #hungry
+    if #hungry == 0 then return end
+    table.sort(hungry, function(a, b) return a.pct < b.pct end)
 
--- v12.33: BUY GEAR non-stop fire
-task.spawn(function()
-    local total = 0
-    while not scriptShutdown do
-        if autoBuyGear then
-            local ge = RS:FindFirstChild("GameEvents")
-            local r = ge and ge:FindFirstChild("BuyGearStock")
-            if r then
-                for _, name in ipairs(GEARS_v32) do
-                    pcall(function() r:FireServer(name) end)
-                    total = total + 1
-                end
-                if setMiscStatus then setMiscStatus("Buy gear total: "..total, C.Teal) end
-            end
+    local fedNow = math.min(feedMaxPerTick, #hungry)
+    local fedActual = 0
+    for i = 1, fedNow do
+        local h = hungry[i]
+        local food = v78_pickFood()
+        if not food then
+            lastFood = "NO FOOD"
+            break
         end
-        task.wait()  -- next frame
+        lastFood = food.Name:sub(1, 18)
+        pcall(function() feedRE_v78:FireServer("Feed", "{"..h.uuid.."}") end)
+        h.st.lastFedAt = now
+        feedTotalFed = feedTotalFed + 1
+        fedActual = fedActual + 1
+        if i < fedNow then task.wait(0.1) end
     end
-end)
-
--- v12.35: SMART FEED - cek hunger dulu sebelum feed
--- Max hunger 25000. Default feed kalo hunger < 20000 (5000 buat boleh feed)
-local FEED_THRESHOLD = 24000  -- v12.39: lebih agresif (max 25000, margin 1000)
-local feedTotal = 0
-
--- v12.47: cache vars (global to script chunk)
-_cachedFeedUUIDs = nil
-_lastFeedUUIDRefresh = 0
-
--- Helper: cari hunger pet dari berbagai source
-local function getPetHunger(uuidStr)
-    local cleanUUID = uuidStr:gsub("[{}]", "")
-
-    -- Source 1: cek di workspace pets (placed pet model)
-    pcall(function()
-        for _, root in ipairs({workspace}) do
-            for _, d in ipairs(root:GetDescendants()) do
-                if d.Name == cleanUUID or d.Name == "{"..cleanUUID.."}" then
-                    -- Try attribute
-                    local h = d:GetAttribute("Hunger") or d:GetAttribute("hunger")
-                    if h then return h end
-                    -- Try child Value object
-                    local hv = d:FindFirstChild("Hunger") or d:FindFirstChild("HUNGER")
-                    if hv and hv.Value then return hv.Value end
-                end
-            end
-        end
-    end)
-
-    -- Source 2: cek di PlayerGui (Pet detail UI biasa nampilin hunger)
-    local hunger = nil
-    pcall(function()
-        local pg = player:FindFirstChild("PlayerGui")
-        if not pg then return end
-        for _, d in ipairs(pg:GetDescendants()) do
-            if d:IsA("TextLabel") and d.Text:find("HGR") then
-                -- Format: "4656.62 / 25000 HGR"
-                local cur = d.Text:match("([%d%.]+)%s*/%s*[%d%.]+%s*HGR")
-                if cur then
-                    -- Find parent's UUID context
-                    local parent = d.Parent
-                    for _ = 1, 6 do
-                        if not parent then break end
-                        if parent.Name == cleanUUID or parent.Name == "{"..cleanUUID.."}" then
-                            hunger = tonumber(cur)
-                            return
-                        end
-                        parent = parent.Parent
-                    end
-                end
-            end
-        end
-    end)
-    return hunger
+    if fedActual > 0 then
+        setMiscStatus("Feed: "..fedActual.."/"..petsCount.." (food:"..lastFood..", total:"..feedTotalFed..")", C.Teal)
+    end
 end
 
 task.spawn(function()
+    local lastTargetReached = false
     while not scriptShutdown do
         if autoFeedPet then
-            local ge = RS:FindFirstChild("GameEvents")
-            local r = ge and ge:FindFirstChild("ActivePetService")
-            if r and player.Character then
-                local hum = player.Character:FindFirstChildOfClass("Humanoid")
-                local bp = player:FindFirstChild("Backpack")
-                if hum and bp then
-                    -- v12.64: filter food + skip favorite (server reject "cannot feed favorit fruit")
-                    local function isFoodTool(t)
-                        if not t:IsA("Tool") then return false end
-                        if t:FindFirstChild("PetToolLocal") or t:FindFirstChild("PetToolServer") then return false end
-                        -- Skip favorite (any naming convention)
-                        local fav = false
-                        pcall(function() fav = t:GetAttribute("Favorited") end)
-                        if not fav then pcall(function() fav = t:GetAttribute("IsFavorite") end) end
-                        if not fav then pcall(function() fav = t:GetAttribute("Favorite") end) end
-                        if fav then return false end
-                        local n = t.Name
-                        local gearKW = {"Shovel","Sprinkler","Watering","Trowel","Wrench","Spray","Mirror","Magnifying","Tool","Pot","Ticket","Rod","Staff","Lollipop","Caller","Crate","Basket","Rake"}
-                        for _, kw in ipairs(gearKW) do
-                            if n:find(kw, 1, true) then return false end
-                        end
-                        return n:match("%[[%d%.]+%s*[Kk][Gg]%]") ~= nil
-                    end
+            v78_feedTick()
+            local targetReached = (feedTotalPets > 0 and feedHungry == 0)
+            if targetReached and not lastTargetReached then
+                setMiscStatus("Feed PAUSED: target tercapai ("..feedTotalPets.." pet >= "..feedThresholdPct.."%)", C.Gold)
+            elseif not targetReached and lastTargetReached then
+                setMiscStatus("Feed RESUMED: ada pet lapar lagi", C.Green)
+            end
+            lastTargetReached = targetReached
+        else
+            lastTargetReached = false
+        end
+        task.wait(feedInterval)
+    end
+end)
 
-                    -- v12.53: cek tool food yg udah equipped
-                    local equippedFood = nil
-                    for _, item in pairs(player.Character:GetChildren()) do
-                        if isFoodTool(item) then equippedFood = item break end
-                    end
-                    if not equippedFood then
-                        for _, item in pairs(bp:GetChildren()) do
-                            if isFoodTool(item) then
-                                pcall(function() hum:EquipTool(item) end)
-                                task.wait(0.05)
-                                for _, c in pairs(player.Character:GetChildren()) do
-                                    if c:IsA("Tool") and c == item then equippedFood = c break end
-                                end
-                                break
-                            end
-                        end
-                    end
-
-                    -- v12.47: pakai UUID cache (refresh tiap 3s, anti-lag scan PlayerGui)
-                    if not _cachedFeedUUIDs or (tick() - _lastFeedUUIDRefresh) > 3 then
-                        _cachedFeedUUIDs = {}
-                        for k, _ in pairs(teamPetUUIDs) do
-                            local clean = tostring(k):gsub("[{}]", "")
-                            if #clean > 0 then _cachedFeedUUIDs[clean] = "team" end
-                        end
-                        local pg = player:FindFirstChild("PlayerGui")
-                        if pg then
-                            for _, d in ipairs(pg:GetDescendants()) do
-                                local n = d.Name
-                                if n and #n >= 32 and n:find("-") then
-                                    local clean = n:gsub("[{}]", "")
-                                    if clean:match("^[%w%-]+$") then
-                                        _cachedFeedUUIDs[clean] = _cachedFeedUUIDs[clean] or "ui"
-                                    end
-                                end
-                            end
-                        end
-                        _lastFeedUUIDRefresh = tick()
-                    end
-                    local allUUIDs = _cachedFeedUUIDs
-
-                    local fed = 0
-                    local skipped = 0
-                    local total_uuid = 0
-                    if equippedFood then
-                        -- v12.58: build list, sort by hunger ASC (pet paling lapar dulu)
-                        local petInfos = {}
-                        for uuidStr, _ in pairs(allUUIDs) do
-                            local hunger = getPetHunger(uuidStr)
-                            -- Default maxHunger 25000 (kebanyakan pet)
-                            local maxH = 25000
-                            local pct = hunger and ((hunger / maxH) * 100) or 0
-                            table.insert(petInfos, {uuid=uuidStr, hunger=hunger, pct=pct})
-                            total_uuid = total_uuid + 1
-                        end
-                        table.sort(petInfos, function(a, b)
-                            if a.hunger == nil and b.hunger ~= nil then return true end
-                            if b.hunger == nil and a.hunger ~= nil then return false end
-                            return (a.pct or 0) < (b.pct or 0)
-                        end)
-                        for _, info in ipairs(petInfos) do
-                            local ub = "{"..info.uuid.."}"
-                            -- Feed kalo: hunger nil (fail-safe), atau pct < threshold
-                            -- v12.75: feed cycle 30min, tiap pet 1x per cycle
-                            _G._zenxFeedCycleStart = _G._zenxFeedCycleStart or (tick() - 900)  -- v12.76: 15 min
-                            _G._zenxFedThisCycle = _G._zenxFedThisCycle or {}
-                            local elapsed = tick() - _G._zenxFeedCycleStart
-                            local inFeedWindow = elapsed > 900 and elapsed < 920  -- v12.76: 15 min cycle, 20s window
-                            if elapsed >= 920 then
-                                _G._zenxFeedCycleStart = tick() - 900  -- v12.76: 15 min
-                                _G._zenxFedThisCycle = {}  -- reset cycle: fed list clear
-                                inFeedWindow = true
-                            end
-                            if inFeedWindow and not _G._zenxFedThisCycle[info.uuid] then
-                                pcall(function() r:FireServer("Feed", ub) end)
-                                _G._zenxFedThisCycle[info.uuid] = true  -- v12.75: mark fed di cycle ini
-                                fed = fed + 1
-                                feedTotal = feedTotal + 1
-                            else
-                                skipped = skipped + 1
-                            end
-                        end
-                    end
-
-                    if setMiscStatus then
-                        local foodStr = equippedFood and equippedFood.Name:sub(1,12) or "NO FOOD"
-                        setMiscStatus("Feed: "..feedTotal.." | "..foodStr.." | uuid:"..total_uuid.." fed:"..fed, C.Teal)
-                    end
+-- Collect loop (cached prompts 5s TTL + bp pause/resume)
+local function v78_refreshPrompts()
+    _v78_promptsCache = {}
+    pcall(function()
+        for _, dd in ipairs(workspace:GetDescendants()) do
+            if dd:IsA("ProximityPrompt") then
+                local at = dd.ActionText or ""
+                if collectMatch == "" or at:find(collectMatch, 1, true) then
+                    table.insert(_v78_promptsCache, dd)
                 end
             end
         end
-        task.wait(0.5)  -- v12.53: 0.5s (anti server-overload, prevent error)
-    end
-end)
-
--- v12.39: AUTO COLLECT - stop kalo backpack full
-local BACKPACK_LIMIT = 200  -- threshold max items di backpack sebelum stop collect
+    end)
+    _v78_promptsCacheT = tick()
+end
 
 task.spawn(function()
-    local total = 0
+    local lastBpFull = false
     while not scriptShutdown do
         if autoCollect then
-            -- v12.39: cek backpack count dulu
-            local bp = player:FindFirstChild("Backpack")
-            local bpCount = bp and #bp:GetChildren() or 0
-
-            if bpCount >= BACKPACK_LIMIT then
-                if setMiscStatus then setMiscStatus("Collect PAUSE: backpack full ("..bpCount..")", C.Gold) end
-                task.wait(2)  -- check ulang tiap 2 detik
-            else
-                local fired = 0
-                local prompts = 0
-                pcall(function()
-                    for _, d in ipairs(workspace:GetDescendants()) do
-                        if d:IsA("ProximityPrompt") and d.ActionText == "Collect" then
-                            prompts = prompts + 1
-                            pcall(function()
-                                d.MaxActivationDistance = 1000
-                                d.HoldDuration = 0
-                            end)
-                            pcall(function()
-                                if fireproximityprompt then fireproximityprompt(d)
-                                else d:InputHoldBegin() d:InputHoldEnd() end
-                            end)
-                            fired = fired + 1
-                            total = total + 1
-                        end
-                    end
-                end)
-                if setMiscStatus then setMiscStatus("Collect: "..total.." | "..prompts.." prompts | bp:"..bpCount.."/"..BACKPACK_LIMIT, C.Green) end
-                task.wait(0.1)
+            local fruits, total = v78_countBp()
+            lastBpFruits = fruits
+            lastBpTotal = total
+            local bpFull = backpackLimit > 0 and fruits >= backpackLimit
+            if bpFull and not lastBpFull then
+                setMiscStatus("Collect PAUSED: bp full ("..fruits.."/"..backpackLimit..")", C.Gold)
+            elseif not bpFull and lastBpFull then
+                setMiscStatus("Collect RESUMED: bp ok", C.Green)
             end
-        else
-            task.wait(0.5)  -- collect off, sleep lama
+            lastBpFull = bpFull
+
+            if not bpFull then
+                if (tick() - _v78_promptsCacheT) > 5 then v78_refreshPrompts() end
+                local fired = 0
+                for _, dd in ipairs(_v78_promptsCache) do
+                    if dd.Parent then
+                        if not _v78_promptsConfigured[dd] then
+                            pcall(function()
+                                dd.MaxActivationDistance = 1000
+                                dd.HoldDuration = 0
+                            end)
+                            _v78_promptsConfigured[dd] = true
+                        end
+                        pcall(function()
+                            if fireproximityprompt then fireproximityprompt(dd)
+                            else dd:InputHoldBegin() dd:InputHoldEnd() end
+                        end)
+                        fired = fired + 1
+                    end
+                end
+                lastPromptCount = fired
+                collectTotalFired = collectTotalFired + fired
+                if fired > 0 then
+                    setMiscStatus("Collect: +"..fired.." (total "..collectTotalFired..", fruits "..fruits..")", C.Green)
+                end
+            end
         end
+        task.wait(collectInterval)
     end
 end)
+
+-- ============================================
+-- END v12.78 MISC SECTION
+-- ============================================
+
 
 -- Gift: GiftPet (uuid, name, sender) -> AcceptPetGift(true, uuid) (CONFIRMED v12.10)
 -- Trade: SendRequest (tradeID, sender, ts) -> RespondRequest(tradeID, true) (CONFIRMED v12.10)
@@ -3603,4 +3598,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.76: cycle 15 menit (1800 -> 900), tiap pet 1x per cycle")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.78: Misc section rewrite (smart feed threshold, cached collect prompts, hardcoded buy)")
