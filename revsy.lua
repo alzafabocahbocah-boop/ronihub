@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.47"
+local SCRIPT_VERSION="v12.48"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -186,9 +186,42 @@ local function isFavorite(item)
     return false
 end
 local function getAge(item)
-    for _,pat in ipairs({"%[Age%s+(%d+)%]","%[Age(%d+)%]"}) do
+    -- v12.48: cek attribute + child Value DULU (fix Everchanted/mutation pets)
+    -- Source 1: Tool attribute "Age" / "Level"
+    local ok, ageAttr = pcall(function() return item:GetAttribute("Age") end)
+    if ok and ageAttr and tonumber(ageAttr) then return tonumber(ageAttr) end
+    local ok2, lvl = pcall(function() return item:GetAttribute("Level") end)
+    if ok2 and lvl and tonumber(lvl) then return tonumber(lvl) end
+
+    -- Source 2: child IntValue/NumberValue
+    for _, childName in ipairs({"Age","AGE","age","Level","LEVEL","level","PetAge"}) do
+        local c = item:FindFirstChild(childName)
+        if c and c.Value and tonumber(c.Value) then return tonumber(c.Value) end
+    end
+
+    -- Source 3: child Folder/Configuration
+    for _, folderName in ipairs({"Configuration","Stats","Data","PetData","Info"}) do
+        local f = item:FindFirstChild(folderName)
+        if f then
+            for _, childName in ipairs({"Age","Level"}) do
+                local c = f:FindFirstChild(childName)
+                if c and c.Value and tonumber(c.Value) then return tonumber(c.Value) end
+            end
+        end
+    end
+
+    -- Source 4: deep scan descendants
+    for _, d in ipairs(item:GetDescendants()) do
+        if (d:IsA("IntValue") or d:IsA("NumberValue")) and (d.Name == "Age" or d.Name == "Level") then
+            if d.Value and tonumber(d.Value) and tonumber(d.Value) > 0 then return tonumber(d.Value) end
+        end
+    end
+
+    -- Source 5: parse dari nama (fallback original)
+    for _,pat in ipairs({"%[Age%s+(%d+)%]","%[Age(%d+)%]","[Aa][Gg][Ee][^%d]*(%d+)"}) do
         local f=item.Name:match(pat) if f then return tonumber(f) end
-    end return nil
+    end
+    return nil
 end
 local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Name end
 local function getKG(item) return tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) end
@@ -3545,4 +3578,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.47: Add UUID cache to v12.45 (struktur sama, cuma optimize scan)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.48: getAge multi-source (fix Everchanted/mutation detection)")
