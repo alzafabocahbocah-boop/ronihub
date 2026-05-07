@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.59"
+local SCRIPT_VERSION="v12.60"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2321,10 +2321,10 @@ local autoBuyEgg = false
 local autoBuySeed = false
 local autoBuyGear = false
 local autoFeedPet = false
--- v12.59: Hunger threshold (%) + threshold cycle values
+-- v12.58: Hunger threshold (%). Default 70 = feed kalo hunger < 70% max
+-- Edit angka 70 di bawah ini buat ubah threshold (0-100):
 local feedThresholdPct = 70
-local _feedThrCycle = {50, 70, 90}
--- Hunger cache: 1x scan PlayerGui per 2s, bukan per pet (anti-lag)
+-- v12.60: hunger cache - 1x scan PlayerGui per 2s (anti-lag)
 local _hungerCache = {}
 local _lastHungerScan = 0
 local autoCollect = false
@@ -2381,16 +2381,7 @@ do
     miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, function() return autoBuySeed end, function(v) autoBuySeed=v end)
     miscTogRow("Auto Buy Gear", "Beli gear (sprinkler, water can, dll)", 3, function() return autoBuyGear end, function(v) autoBuyGear=v end)
     miscTogRow("Auto Feed Pet", "Kasih makan pet di tim leveling", 4, function() return autoFeedPet end, function(v) autoFeedPet=v end)
-    -- v12.59: hunger threshold cycle row (pakai miscTogRow buat structure yg confirmed work)
-    miscTogRow("Hunger Threshold", "Klik buat cycle (50/70/90 %)", 5,
-        function() return false end,  -- always show "OFF" but Text override below
-        function(_)
-            local i = 1
-            for k, v in ipairs(_feedThrCycle) do if v == feedThresholdPct then i = k break end end
-            i = (i % #_feedThrCycle) + 1
-            feedThresholdPct = _feedThrCycle[i]
-        end)
-    miscTogRow("Auto Collect", "Panen semua buah di kebun", 6, function() return autoCollect end, function(v) autoCollect=v end)
+    miscTogRow("Auto Collect", "Panen semua buah di kebun", 5, function() return autoCollect end, function(v) autoCollect=v end)
 
     -- Status (bottom)
     miscStatusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
@@ -2602,18 +2593,18 @@ task.spawn(function()
                 local hum = player.Character:FindFirstChildOfClass("Humanoid")
                 local bp = player:FindFirstChild("Backpack")
                 if hum and bp then
-                    -- v12.59: filter food + skip favorite fruit
+                    -- v12.60: filter food + skip favorite (server reject "cannot feed favorit fruit")
                     local function isFoodTool(t)
                         if not t:IsA("Tool") then return false end
                         if t:FindFirstChild("PetToolLocal") or t:FindFirstChild("PetToolServer") then return false end
-                        -- v12.59: skip favorite (server reject "you cannot feed favorit fruit")
+                        -- Skip favorite
                         local fav = false
                         pcall(function()
-                            fav = t:GetAttribute("Favorited") or t:GetAttribute("IsFavorite") or t:GetAttribute("Favorite")
+                            fav = t:GetAttribute("Favorited") or t:GetAttribute("IsFavorite") or t:GetAttribute("Favorite") or t:GetAttribute("Favourited")
                         end)
                         if fav then return false end
                         local n = t.Name
-                        if n:lower():find("favorite") or n:lower():find("favorited") then return false end
+                        if n:lower():find("favorite") or n:lower():find("favourited") then return false end
                         local gearKW = {"Shovel","Sprinkler","Watering","Trowel","Wrench","Spray","Mirror","Magnifying","Tool","Pot","Ticket","Rod","Staff","Lollipop","Caller","Crate","Basket","Rake"}
                         for _, kw in ipairs(gearKW) do
                             if n:find(kw, 1, true) then return false end
@@ -2666,7 +2657,7 @@ task.spawn(function()
                     local skipped = 0
                     local total_uuid = 0
                     if equippedFood then
-                        -- v12.59: refresh hunger cache tiap 2 detik (1x scan PlayerGui buat semua pet)
+                        -- v12.60: refresh hunger cache tiap 2 detik (1x scan, semua pet sekaligus)
                         if tick() - _lastHungerScan > 2 then
                             _hungerCache = {}
                             pcall(function()
@@ -2677,7 +2668,6 @@ task.spawn(function()
                                             local cur, mx = d.Text:match("([%d%.]+)%s*/%s*([%d%.]+)%s*HGR")
                                             cur = tonumber(cur) mx = tonumber(mx)
                                             if cur and mx and mx > 0 then
-                                                -- Trace parent chain cari UUID
                                                 local p = d.Parent local depth = 0
                                                 while p and depth < 12 do
                                                     local pn = p.Name:gsub("[{}]", "")
@@ -2695,7 +2685,6 @@ task.spawn(function()
                             _lastHungerScan = tick()
                         end
 
-                        -- Build list + sort by pct ASC (paling lapar dulu)
                         local petInfos = {}
                         for uuidStr, _ in pairs(allUUIDs) do
                             local h = _hungerCache[uuidStr]
@@ -3631,4 +3620,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.59: skip favorite fruit + hunger cache (anti-lag) + UI cycle threshold")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.60: skip favorite fruit + hunger cache (anti-lag) - NO UI change")
