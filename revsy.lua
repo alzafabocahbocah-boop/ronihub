@@ -2340,6 +2340,12 @@ local M78 = {
     feedInterval = 1,
     collectInterval = 0.5,
     backpackLimit = 200,
+    -- v12.79: collect cycle (mirip feed)
+    collectCycleMin = 15,
+    collectDuration = 20,
+    collectMode = "idle",
+    collectNextStartAt = 0,
+    collectEndAt = 0,
     collectMaxDist = 0,
     collectMatch = "Collect",
     -- Runtime state
@@ -2689,77 +2695,69 @@ M78.refreshPrompts = function()
     M78.promptsCacheT = tick()
 end
 
+-- v12.79: Cycle-based collect - tiap collectCycleMin menit, aktif collectDuration detik
 task.spawn(function()
-    local lastBpFull = false
-    local zeroGainStreak = 0
-    local pausedUntil = 0
     while not scriptShutdown do
-        if M78.autoCollect and tick() >= pausedUntil then
-            local fruitsBefore, total = M78.countBp()
-            M78.lastBpFruits = fruitsBefore
-            M78.lastBpTotal = total
-            local bpFull = M78.backpackLimit > 0 and fruitsBefore >= M78.backpackLimit
-            if bpFull and not lastBpFull then
-                M78.setStatus("Collect PAUSED: bp full ("..fruitsBefore.."/"..M78.backpackLimit..")", C.Gold)
-            elseif not bpFull and lastBpFull then
-                M78.setStatus("Collect RESUMED: bp ok", C.Green)
-            end
-            lastBpFull = bpFull
-
-            if not bpFull then
-                if (tick() - M78.promptsCacheT) > 5 then M78.refreshPrompts() end
-                local fired = 0
-                for _, dd in ipairs(M78.promptsCache) do
-                    if dd.Parent then
-                        if not M78.promptsConfigured[dd] then
-                            pcall(function()
-                                dd.MaxActivationDistance = 1000
-                                dd.HoldDuration = 0
-                            end)
-                            M78.promptsConfigured[dd] = true
-                        end
-                        pcall(function()
-                            if fireproximityprompt then fireproximityprompt(dd)
-                            else dd:InputHoldBegin() dd:InputHoldEnd() end
-                        end)
-                        fired = fired + 1
-                    end
-                end
-                M78.lastPromptCount = fired
-
-                -- Cek delta backpack: yg masuk inventory beneran
-                task.wait(0.15)
-                local fruitsAfter = M78.countBp()
-                local gained = math.max(0, fruitsAfter - fruitsBefore)
-                M78.collectTotalFired = M78.collectTotalFired + gained
-
-                if gained > 0 then
-                    zeroGainStreak = 0
-                    M78.setStatus("Collect: +"..gained.." (total "..M78.collectTotalFired..", bp:"..fruitsAfter..")", C.Green)
+        if M78.autoCollect then
+            local now = tick()
+            if M78.collectMode == "idle" then
+                if M78.collectNextStartAt <= 0 or now >= M78.collectNextStartAt then
+                    M78.collectMode = "collecting"
+                    M78.collectEndAt = now + M78.collectDuration
+                    -- Force refresh prompts pas mulai cycle baru
+                    M78.promptsCacheT = 0
+                    M78.setStatus("Collect: cycle MULAI ("..M78.collectDuration.."s)", C.Teal)
                 else
-                    if fired > 0 then
-                        zeroGainStreak = zeroGainStreak + 1
-                        if zeroGainStreak >= 5 then
-                            -- Stuck: prob backpack penuh atau kebun kosong
-                            pausedUntil = tick() + 30
-                            zeroGainStreak = 0
-                            -- Force refresh cache pas resume nanti
-                            M78.promptsCacheT = 0
-                            M78.setStatus("Collect PAUSED 30s: bp penuh / kebun kosong (bp:"..fruitsAfter..")", C.Gold)
-                        elseif zeroGainStreak == 1 then
-                            M78.setStatus("Collect: cek... (bp:"..fruitsAfter..")", C.Gray)
+                    local secLeft = math.ceil(M78.collectNextStartAt - now)
+                    local mins = math.floor(secLeft / 60)
+                    local secs = secLeft % 60
+                    M78.setStatus(string.format("Collect: idle, next %02d:%02d (total:%d)", mins, secs, M78.collectTotalFired), C.Gray)
+                end
+            elseif M78.collectMode == "collecting" then
+                if now >= M78.collectEndAt then
+                    M78.collectMode = "idle"
+                    M78.collectNextStartAt = now + (M78.collectCycleMin * 60)
+                    M78.setStatus(string.format("Collect: SELESAI cycle. Next %dm (total:%d)", M78.collectCycleMin, M78.collectTotalFired), C.Green)
+                else
+                    -- Lagi dalam window, sweep prompts
+                    local fruitsBefore = M78.countBp()
+                    if (tick() - M78.promptsCacheT) > 3 then M78.refreshPrompts() end
+                    local fired = 0
+                    for _, dd in ipairs(M78.promptsCache) do
+                        if dd.Parent then
+                            if not M78.promptsConfigured[dd] then
+                                pcall(function()
+                                    dd.MaxActivationDistance = 1000
+                                    dd.HoldDuration = 0
+                                end)
+                                M78.promptsConfigured[dd] = true
+                            end
+                            pcall(function()
+                                if fireproximityprompt then fireproximityprompt(dd)
+                                else dd:InputHoldBegin() dd:InputHoldEnd() end
+                            end)
+                            fired = fired + 1
                         end
+                    end
+                    M78.lastPromptCount = fired
+
+                    task.wait(0.15)
+                    local fruitsAfter = M78.countBp()
+                    local gained = math.max(0, fruitsAfter - fruitsBefore)
+                    M78.collectTotalFired = M78.collectTotalFired + gained
+                    local secLeft = math.ceil(M78.collectEndAt - now)
+                    if gained > 0 then
+                        M78.setStatus("Collect: +"..gained.." ("..secLeft.."s left, total:"..M78.collectTotalFired..", bp:"..fruitsAfter..")", C.Green)
                     else
-                        -- Gak ada prompts sama sekali → kebun beneran kosong
-                        zeroGainStreak = 0
-                        if (tick() % 10) < 1 then
-                            M78.setStatus("Collect: idle (gak ada plant siap panen)", C.Gray)
-                        end
+                        M78.setStatus("Collect: 0 gained ("..secLeft.."s left, fired:"..fired..")", C.Gray)
                     end
                 end
             end
+        else
+            M78.collectMode = "idle"
+            M78.collectNextStartAt = 0
         end
-        task.wait(M78.collectInterval)
+        task.wait(1)
     end
 end)
 
