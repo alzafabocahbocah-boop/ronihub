@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.49"
+local SCRIPT_VERSION="v12.50"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -186,42 +186,9 @@ local function isFavorite(item)
     return false
 end
 local function getAge(item)
-    -- v12.48: cek attribute + child Value DULU (fix Everchanted/mutation pets)
-    -- Source 1: Tool attribute "Age" / "Level"
-    local ok, ageAttr = pcall(function() return item:GetAttribute("Age") end)
-    if ok and ageAttr and tonumber(ageAttr) then return tonumber(ageAttr) end
-    local ok2, lvl = pcall(function() return item:GetAttribute("Level") end)
-    if ok2 and lvl and tonumber(lvl) then return tonumber(lvl) end
-
-    -- Source 2: child IntValue/NumberValue
-    for _, childName in ipairs({"Age","AGE","age","Level","LEVEL","level","PetAge"}) do
-        local c = item:FindFirstChild(childName)
-        if c and c.Value and tonumber(c.Value) then return tonumber(c.Value) end
-    end
-
-    -- Source 3: child Folder/Configuration
-    for _, folderName in ipairs({"Configuration","Stats","Data","PetData","Info"}) do
-        local f = item:FindFirstChild(folderName)
-        if f then
-            for _, childName in ipairs({"Age","Level"}) do
-                local c = f:FindFirstChild(childName)
-                if c and c.Value and tonumber(c.Value) then return tonumber(c.Value) end
-            end
-        end
-    end
-
-    -- Source 4: deep scan descendants
-    for _, d in ipairs(item:GetDescendants()) do
-        if (d:IsA("IntValue") or d:IsA("NumberValue")) and (d.Name == "Age" or d.Name == "Level") then
-            if d.Value and tonumber(d.Value) and tonumber(d.Value) > 0 then return tonumber(d.Value) end
-        end
-    end
-
-    -- Source 5: parse dari nama (fallback original)
-    for _,pat in ipairs({"%[Age%s+(%d+)%]","%[Age(%d+)%]","[Aa][Gg][Ee][^%d]*(%d+)"}) do
+    for _,pat in ipairs({"%[Age%s+(%d+)%]","%[Age(%d+)%]"}) do
         local f=item.Name:match(pat) if f then return tonumber(f) end
-    end
-    return nil
+    end return nil
 end
 local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Name end
 local function getKG(item) return tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) end
@@ -647,53 +614,29 @@ local function getAgeFromUI(uuid)
     local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
     local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
     if #uuidStr<10 then return nil end
-
-    -- v12.49: scan SEMUA ScreenGui (gak terbatas ActivePetUI)
-    -- Method 1: cari TextLabel bernama PET_AGE/Age/AgeLabel/AgeText dengan parent UUID context
+    -- v12.50: scan SEMUA child PlayerGui (gak limit ke ActivePetUI doang)
+    -- Plus match nama "PET_AGE" ATAU text content "Age: N"
     for _,sg in ipairs(pg:GetChildren()) do
-        if sg:IsA("ScreenGui") or sg:IsA("Frame") or sg:IsA("Folder") then
-            for _,d in ipairs(sg:GetDescendants()) do
-                if d:IsA("TextLabel") then
-                    local nameMatches = (d.Name=="PET_AGE" or d.Name:lower():find("age"))
-                    if nameMatches then
-                        local p=d.Parent
-                        local depth=0
-                        while p and depth<12 do
-                            local pn=p.Name:gsub("^{",""):gsub("}$","")
-                            if pn==uuidStr then
-                                local txt=""
-                                pcall(function() txt=d.Text end)
-                                if txt and #txt>0 then
-                                    local age=tonumber(txt:match("(%d+)"))
-                                    if age and age>0 then return age end
-                                end
-                            end
-                            p=p.Parent
-                            depth=depth+1
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Method 2: scan semua TextLabel yg text-nya match "Age: N" + parent context UUID
-    for _,sg in ipairs(pg:GetChildren()) do
-        if sg:IsA("ScreenGui") or sg:IsA("Frame") then
+        local ok=false
+        pcall(function() ok=sg:IsA("ScreenGui") or sg:IsA("Frame") or sg:IsA("Folder") end)
+        if ok then
             for _,d in ipairs(sg:GetDescendants()) do
                 if d:IsA("TextLabel") then
                     local txt=""
                     pcall(function() txt=d.Text or "" end)
-                    -- Format: "Age: 100" atau "Age 100" atau "Age:100"
-                    local age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
+                    -- Match by name "PET_AGE" OR text content "Age: N"
+                    local age=nil
+                    if d.Name=="PET_AGE" then
+                        age=tonumber(txt:match("(%d+)"))
+                    else
+                        age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
+                    end
                     if age and age>0 and age<=200 then
-                        local p=d.Parent
-                        local depth=0
+                        local p=d.Parent local depth=0
                         while p and depth<12 do
                             local pn=p.Name:gsub("^{",""):gsub("}$","")
                             if pn==uuidStr then return age end
-                            p=p.Parent
-                            depth=depth+1
+                            p=p.Parent depth=depth+1
                         end
                     end
                 end
@@ -701,26 +644,6 @@ local function getAgeFromUI(uuid)
         end
     end
     return nil
-end
-
--- v12.49: ambil age dari panel detail yg lagi kebuka (currently displayed pet)
--- Berguna kalo getAgeFromUI(uuid) gagal — ambil aja angka Age dari panel yg lagi visible
-local function getDisplayedAge()
-    local pg=player:FindFirstChild("PlayerGui") if not pg then return nil end
-    local found = nil
-    for _,sg in ipairs(pg:GetChildren()) do
-        if sg:IsA("ScreenGui") and sg.Enabled then
-            for _,d in ipairs(sg:GetDescendants()) do
-                if d:IsA("TextLabel") and d.Visible then
-                    local txt=""
-                    pcall(function() txt=d.Text or "" end)
-                    local age=tonumber(txt:match("^[Aa][Gg][Ee]%s*[:.%s]+(%d+)"))
-                    if age and age>0 and age<=200 then found=age end
-                end
-            end
-        end
-    end
-    return found
 end
 
 local function getPetTypeFromUI(uuid)
@@ -3631,4 +3554,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.49: getAgeFromUI lebih lenient (scan semua ScreenGui + text match)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.50: getAgeFromUI lebih lenient (minimal change dari v12.47 stable)")
