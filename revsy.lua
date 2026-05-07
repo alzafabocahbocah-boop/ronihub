@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.53"
+local SCRIPT_VERSION="v12.55"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -739,7 +739,7 @@ local function getPetInfo(item)
 end
 
 -- GUI 600x420
-local GUI_W=540 local GUI_H=400
+local GUI_W=440 local GUI_H=340  -- v12.55: lebih kecil (font tetep)
 local sg=Instance.new("ScreenGui")
 sg.Name="ZenxLvlGui" sg.DisplayOrder=999 sg.ResetOnSpawn=false
 local mainParentResult=safeParent(sg)
@@ -2321,6 +2321,7 @@ local autoBuyEgg = false
 local autoBuySeed = false
 local autoBuyGear = false
 local autoFeedPet = false
+local feedThresholdPct = 80  -- v12.54: feed kalo hunger < N% max (default 80%)
 local autoCollect = false
 
 local miscBuyInterval = 5
@@ -2375,7 +2376,26 @@ do
     miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, function() return autoBuySeed end, function(v) autoBuySeed=v end)
     miscTogRow("Auto Buy Gear", "Beli gear (sprinkler, water can, dll)", 3, function() return autoBuyGear end, function(v) autoBuyGear=v end)
     miscTogRow("Auto Feed Pet", "Kasih makan pet di tim leveling", 4, function() return autoFeedPet end, function(v) autoFeedPet=v end)
-    miscTogRow("Auto Collect", "Panen semua buah di kebun", 5, function() return autoCollect end, function(v) autoCollect=v end)
+
+    -- v12.54: hunger threshold input row
+    do
+        local row = mk("Frame",{Size=UDim2.new(1,0,0,42), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=5, Parent=miscScroll})
+        corner(row, 7) stroke(row, C.Dim, 1.2)
+        local l = lbl(row, "Feed kalo Hunger <", 14, C.White) l.Size = UDim2.new(0.65,0,0,18) l.Position = UDim2.new(0,12,0,5)
+        l.Font = Enum.Font.GothamBold
+        local dl = lbl(row, "Persen hunger pet (0-100)", 12, C.Gray) dl.Size = UDim2.new(0.75,0,0,14) dl.Position = UDim2.new(0,12,0,23)
+        local tb = mk("TextBox",{Size=UDim2.new(0,60,0,26), Position=UDim2.new(1,-70,0.5,-13),
+            BackgroundColor3=C.Panel, TextColor3=C.Teal, Text=tostring(feedThresholdPct).."%",
+            Font=Enum.Font.GothamBold, TextSize=13, ClearTextOnFocus=false, Parent=row})
+        corner(tb, 5) stroke(tb, C.Teal, 1.2)
+        tb.FocusLost:Connect(function()
+            local n = tonumber(tb.Text:match("(%d+)"))
+            if n and n >= 0 and n <= 100 then feedThresholdPct = n end
+            tb.Text = tostring(feedThresholdPct).."%"
+        end)
+    end
+
+    miscTogRow("Auto Collect", "Panen semua buah di kebun", 6, function() return autoCollect end, function(v) autoCollect=v end)
 
     -- Status (bottom)
     miscStatusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
@@ -2648,8 +2668,23 @@ task.spawn(function()
                         for uuidStr, _ in pairs(allUUIDs) do
                             total_uuid = total_uuid + 1
                             local ub = "{"..uuidStr.."}"
+                            -- v12.54: cek hunger % vs feedThresholdPct (UI)
                             local hunger = getPetHunger(uuidStr)
-                            if hunger == nil or hunger < FEED_THRESHOLD then
+                            local maxHunger = 25000
+                            pcall(function()
+                                local pg = player:FindFirstChild("PlayerGui")
+                                if pg then
+                                    for _, d in ipairs(pg:GetDescendants()) do
+                                        if d:IsA("TextLabel") and d.Text:find("HGR") then
+                                            local maxN = tonumber(d.Text:match("/%s*([%d%.]+)%s*HGR"))
+                                            if maxN and maxN > 0 then maxHunger = maxN break end
+                                        end
+                                    end
+                                end
+                            end)
+                            local pct = hunger and ((hunger / maxHunger) * 100) or 0
+                            -- Feed kalo: hunger gak ke-detect (fail-safe), atau pct < threshold
+                            if not hunger or pct < feedThresholdPct then
                                 pcall(function() r:FireServer("Feed", ub) end)
                                 fed = fed + 1
                                 feedTotal = feedTotal + 1
@@ -3570,4 +3605,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.53: Auto Feed pick FOOD only (skip shovel/gear) + slow loop (anti-server-error)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.55: GUI lebih kecil (540x400 -> 440x340), font tetep")
