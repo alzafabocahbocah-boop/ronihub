@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.69"
+local SCRIPT_VERSION="v12.70"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2692,6 +2692,7 @@ task.spawn(function()
                                     _G._zenxLastFed[info.uuid] = tick()
                                     fed = fed + 1
                                     feedTotal = feedTotal + 1
+                                    task.wait(0.3)  -- v12.70: kasih waktu server consume tool sebelum fire pet next
                                 else
                                     skipped = skipped + 1
                                 end
@@ -3612,4 +3613,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.69: re-equip food per pet (1 fruit = 1 feed, semua pet ke-feed)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.70: + wait 0.3s antar fire (kasih waktu server consume tool)")
