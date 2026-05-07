@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.60"
+local SCRIPT_VERSION="v12.61"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2323,8 +2323,10 @@ local autoBuyGear = false
 local autoFeedPet = false
 -- v12.58: Hunger threshold (%). Default 70 = feed kalo hunger < 70% max
 -- Edit angka 70 di bawah ini buat ubah threshold (0-100):
-local feedThresholdPct = 70
--- v12.60: hunger cache - 1x scan PlayerGui per 2s (anti-lag)
+-- v12.61: threshold pakai HGR absolute. Feed kalo hunger < N HGR
+-- Edit angka di bawah: pet di-feed pas hunger di bawah ini (default 5000)
+local feedThresholdHGR = 5000
+-- Hunger cache - 1x scan PlayerGui per 2s (anti-lag)
 local _hungerCache = {}
 local _lastHungerScan = 0
 local autoCollect = false
@@ -2688,18 +2690,20 @@ task.spawn(function()
                         local petInfos = {}
                         for uuidStr, _ in pairs(allUUIDs) do
                             local h = _hungerCache[uuidStr]
-                            local pct = h and ((h.cur / h.mx) * 100) or nil
-                            table.insert(petInfos, {uuid=uuidStr, pct=pct})
+                            local hgr = h and h.cur or nil
+                            table.insert(petInfos, {uuid=uuidStr, hgr=hgr})
                             total_uuid = total_uuid + 1
                         end
+                        -- Sort by HGR ASC (paling lapar dulu)
                         table.sort(petInfos, function(a, b)
-                            if a.pct == nil and b.pct ~= nil then return true end
-                            if b.pct == nil and a.pct ~= nil then return false end
-                            return (a.pct or 0) < (b.pct or 0)
+                            if a.hgr == nil and b.hgr ~= nil then return true end
+                            if b.hgr == nil and a.hgr ~= nil then return false end
+                            return (a.hgr or 0) < (b.hgr or 0)
                         end)
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
-                            if not info.pct or info.pct < feedThresholdPct then
+                            -- v12.61: feed kalo hunger gak ke-detect ATAU hunger < threshold HGR
+                            if not info.hgr or info.hgr < feedThresholdHGR then
                                 pcall(function() r:FireServer("Feed", ub) end)
                                 fed = fed + 1
                                 feedTotal = feedTotal + 1
@@ -3620,4 +3624,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.60: skip favorite fruit + hunger cache (anti-lag) - NO UI change")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.61: threshold pakai HGR absolute (bukan persen) - default 5000")
