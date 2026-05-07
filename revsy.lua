@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.72"
+local SCRIPT_VERSION="v12.74"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2534,34 +2534,39 @@ local feedTotal = 0
 _cachedFeedUUIDs = nil
 _lastFeedUUIDRefresh = 0
 
--- v12.72: Helper hunger - cari dari multi-source (workspace, ActivePetUI bar, panel text)
+-- Helper: cari hunger pet dari berbagai source
 local function getPetHunger(uuidStr)
     local cleanUUID = uuidStr:gsub("[{}]", "")
-    local hunger = nil
 
-    -- Source 1 (FIXED): workspace pet model attribute / child
+    -- Source 1: cek di workspace pets (placed pet model)
     pcall(function()
-        for _, d in ipairs(workspace:GetDescendants()) do
-            if d.Name == cleanUUID or d.Name == "{"..cleanUUID.."}" then
-                local h = d:GetAttribute("Hunger") or d:GetAttribute("hunger") or d:GetAttribute("HGR")
-                if h and tonumber(h) then hunger = tonumber(h) return end
-                local hv = d:FindFirstChild("Hunger") or d:FindFirstChild("HUNGER")
-                if hv and hv.Value and tonumber(hv.Value) then hunger = tonumber(hv.Value) return end
+        for _, root in ipairs({workspace}) do
+            for _, d in ipairs(root:GetDescendants()) do
+                if d.Name == cleanUUID or d.Name == "{"..cleanUUID.."}" then
+                    -- Try attribute
+                    local h = d:GetAttribute("Hunger") or d:GetAttribute("hunger")
+                    if h then return h end
+                    -- Try child Value object
+                    local hv = d:FindFirstChild("Hunger") or d:FindFirstChild("HUNGER")
+                    if hv and hv.Value then return hv.Value end
+                end
             end
         end
     end)
-    if hunger then return hunger end
 
-    -- Source 2: PlayerGui TextLabel "X / Y HGR" (detail panel)
+    -- Source 2: cek di PlayerGui (Pet detail UI biasa nampilin hunger)
+    local hunger = nil
     pcall(function()
         local pg = player:FindFirstChild("PlayerGui")
         if not pg then return end
         for _, d in ipairs(pg:GetDescendants()) do
             if d:IsA("TextLabel") and d.Text:find("HGR") then
+                -- Format: "4656.62 / 25000 HGR"
                 local cur = d.Text:match("([%d%.]+)%s*/%s*[%d%.]+%s*HGR")
                 if cur then
+                    -- Find parent's UUID context
                     local parent = d.Parent
-                    for _ = 1, 12 do
+                    for _ = 1, 6 do
                         if not parent then break end
                         if parent.Name == cleanUUID or parent.Name == "{"..cleanUUID.."}" then
                             hunger = tonumber(cur)
@@ -2573,33 +2578,7 @@ local function getPetHunger(uuidStr)
             end
         end
     end)
-    if hunger then return hunger end
-
-    -- Source 3: ActivePetUI hunger bar (Frame Size UDim2 X.Scale = pct dari max)
-    -- Sidebar Active Pets selalu visible, bar yellow size reflect hunger
-    pcall(function()
-        local pg = player:FindFirstChild("PlayerGui")
-        if not pg then return end
-        for _, d in ipairs(pg:GetDescendants()) do
-            -- Cari frame dgn nama mengandung "hunger" / "Hunger" + parent UUID context
-            if (d:IsA("Frame") or d:IsA("ImageLabel")) and d.Name:lower():find("hunger") then
-                local parent = d.Parent
-                for _ = 1, 12 do
-                    if not parent then break end
-                    if parent.Name == cleanUUID or parent.Name == "{"..cleanUUID.."}" then
-                        -- Size scale * 25000 (assume default max) = current hunger
-                        local scale = d.Size.X.Scale
-                        if scale and scale > 0 and scale <= 1 then
-                            hunger = math.floor(scale * 25000)
-                            return
-                        end
-                    end
-                    parent = parent.Parent
-                end
-            end
-        end
-    end)
-    return hunger  -- nil kalo gak ke-detect
+    return hunger
 end
 
 task.spawn(function()
@@ -2691,32 +2670,19 @@ task.spawn(function()
                         end)
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
-                            _G._zenxLastFed = _G._zenxLastFed or {}
-                            local lastFed = _G._zenxLastFed[info.uuid] or 0
-                            if info.hunger and info.hunger < feedThresholdPct and (tick() - lastFed) > 10 then  -- v12.71: skip nil + cd 10s
-                                -- v12.69: re-equip food per pet (1 fruit habis tiap fed)
-                                local hasFood = false
-                                for _, c in pairs(player.Character:GetChildren()) do
-                                    if isFoodTool(c) then hasFood = true break end
-                                end
-                                if not hasFood then
-                                    for _, item in pairs(bp:GetChildren()) do
-                                        if isFoodTool(item) then
-                                            pcall(function() hum:EquipTool(item) end)
-                                            task.wait(0.05)
-                                            hasFood = true break
-                                        end
-                                    end
-                                end
-                                if hasFood then
-                                    pcall(function() r:FireServer("Feed", ub) end)
-                                    _G._zenxLastFed[info.uuid] = tick()
-                                    fed = fed + 1
-                                    feedTotal = feedTotal + 1
-                                    task.wait(0.3)  -- v12.70: kasih waktu server consume tool sebelum fire pet next
-                                else
-                                    skipped = skipped + 1
-                                end
+                            -- Feed kalo: hunger nil (fail-safe), atau pct < threshold
+                            -- v12.74: feed cycle - tiap 30 menit, fire 15 detik
+                            _G._zenxFeedCycleStart = _G._zenxFeedCycleStart or (tick() - 1800)  -- start "expired" biar langsung jalan
+                            local elapsed = tick() - _G._zenxFeedCycleStart
+                            local inFeedWindow = elapsed > 1800 and elapsed < 1815  -- antara 30 menit (1800s) sampe 30:15
+                            if elapsed >= 1815 then
+                                _G._zenxFeedCycleStart = tick() - 1800  -- reset, masuk feed window lagi
+                                inFeedWindow = true
+                            end
+                            if inFeedWindow then
+                                pcall(function() r:FireServer("Feed", ub) end)
+                                fed = fed + 1
+                                feedTotal = feedTotal + 1
                             else
                                 skipped = skipped + 1
                             end
@@ -3634,4 +3600,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.72: hunger multi-source (workspace + ActivePetUI bar) + fix Source 1 bug")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.74: feed cycle - tiap 30 menit fire 15 detik (no hunger detect)")
