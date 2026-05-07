@@ -3282,9 +3282,9 @@ local function pickupAllGardenPets()
         pcall(function() unequipPet(uuid) end)
     end
 
-    -- Single wait for server processing - tightened for speed (was 0.15+0.01N cap 0.5)
+    -- v12.79b: tightened to 0.05+0.003N max 0.15 (was 0.08+0.005N max 0.25)
     if #uuids>0 then
-        task.wait(math.min(0.25, 0.08+#uuids*0.005))
+        task.wait(math.min(0.15, 0.05+#uuids*0.003))
     end
 
     dbg("[pickup] total: "..#uuids.." pet di-pickup dari garden (rapid-fire)")
@@ -3301,13 +3301,13 @@ local function doStart()
 
     statusLbl.Text="Membersihkan garden..." statusLbl.TextColor3=C.Gold
     local totalRemoved=0
-    -- v12.79: 3 attempts -> 2, inter-wait 0.2 -> 0.1
+    -- v12.79b: super-aggressive timings
     for attempt=1,2 do
         local removed=pickupAllGardenPets()
         totalRemoved=totalRemoved+removed
         if removed>0 then
             dbg("[doStart] pickup attempt "..attempt..": "..removed.." pet")
-            task.wait(0.1)
+            task.wait(0.05) -- v12.79b: was 0.1
         else
             if attempt>1 then dbg("[doStart] garden bersih setelah "..(attempt-1).." attempt") end
             break
@@ -3320,15 +3320,15 @@ local function doStart()
     end
 
     statusLbl.Text="Pasang tim leveling..." statusLbl.TextColor3=C.Gold
+    -- v12.79b: rapid-fire equip team (no per-pet wait), single wait at end
     local teamPlaced=0
     for uuid,_ in pairs(teamPetUUIDs) do
-        equipPet(uuid)
+        pcall(function() equipPet(uuid) end)
         teamPlaced=teamPlaced+1
-        task.wait(0.02) -- v12.79: was 0.05
     end
     if teamPlaced>0 then
-        dbg("[doStart] tim "..teamPlaced.." pet di-place")
-        task.wait(0.15) -- v12.79: was 0.3
+        dbg("[doStart] tim "..teamPlaced.." pet di-place (rapid-fire)")
+        task.wait(math.min(0.2, 0.05+teamPlaced*0.015)) -- scaled wait, was fixed 0.15
     end
 
     local queue=getQueue()
