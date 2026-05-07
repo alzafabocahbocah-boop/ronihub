@@ -3282,9 +3282,9 @@ local function pickupAllGardenPets()
         pcall(function() unequipPet(uuid) end)
     end
 
-    -- Single wait for server processing (scaled by count, capped)
+    -- Single wait for server processing - tightened for speed (was 0.15+0.01N cap 0.5)
     if #uuids>0 then
-        task.wait(math.min(0.5, 0.15+#uuids*0.01))
+        task.wait(math.min(0.25, 0.08+#uuids*0.005))
     end
 
     dbg("[pickup] total: "..#uuids.." pet di-pickup dari garden (rapid-fire)")
@@ -3301,12 +3301,13 @@ local function doStart()
 
     statusLbl.Text="Membersihkan garden..." statusLbl.TextColor3=C.Gold
     local totalRemoved=0
-    for attempt=1,3 do
+    -- v12.79: 3 attempts -> 2, inter-wait 0.2 -> 0.1
+    for attempt=1,2 do
         local removed=pickupAllGardenPets()
         totalRemoved=totalRemoved+removed
         if removed>0 then
             dbg("[doStart] pickup attempt "..attempt..": "..removed.." pet")
-            task.wait(0.2) -- v12.79: was math.min(1.5, 0.3+removed*0.05) - too slow
+            task.wait(0.1)
         else
             if attempt>1 then dbg("[doStart] garden bersih setelah "..(attempt-1).." attempt") end
             break
@@ -3323,11 +3324,11 @@ local function doStart()
     for uuid,_ in pairs(teamPetUUIDs) do
         equipPet(uuid)
         teamPlaced=teamPlaced+1
-        task.wait(0.05)
+        task.wait(0.02) -- v12.79: was 0.05
     end
     if teamPlaced>0 then
         dbg("[doStart] tim "..teamPlaced.." pet di-place")
-        task.wait(0.3)
+        task.wait(0.15) -- v12.79: was 0.3
     end
 
     local queue=getQueue()
