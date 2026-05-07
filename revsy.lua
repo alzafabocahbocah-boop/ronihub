@@ -1887,19 +1887,19 @@ local function showPickerModal(opts)
     -- click guard biar klik di dalam box gak nutup modal
     mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,ZIndex=101,Parent=box})
 
-    local titleBar=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Panel,BorderSizePixel=0,ZIndex=102,Parent=box})
+    local titleBar=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Panel,BorderSizePixel=0,ZIndex=102,Parent=box})
     corner(titleBar,7)
-    local titleLbl=lbl(titleBar,opts.title or "Pilih",13,C.Teal,Enum.TextXAlignment.Left)
-    titleLbl.Size=UDim2.new(1,-38,1,0) titleLbl.Position=UDim2.new(0,10,0,0) titleLbl.Font=Enum.Font.GothamBold titleLbl.ZIndex=103
-    local closeBtn=btn(titleBar,"X",13,C.Panel,C.Red)
-    closeBtn.Size=UDim2.new(0,24,0,22) closeBtn.Position=UDim2.new(1,-28,0.5,-11) closeBtn.Font=Enum.Font.GothamBold closeBtn.ZIndex=103
+    local titleLbl=lbl(titleBar,opts.title or "Pilih",15,C.Teal,Enum.TextXAlignment.Left)
+    titleLbl.Size=UDim2.new(1,-42,1,0) titleLbl.Position=UDim2.new(0,12,0,0) titleLbl.Font=Enum.Font.GothamBold titleLbl.ZIndex=103
+    local closeBtn=btn(titleBar,"X",14,C.Panel,C.Red)
+    closeBtn.Size=UDim2.new(0,28,0,24) closeBtn.Position=UDim2.new(1,-32,0.5,-12) closeBtn.Font=Enum.Font.GothamBold closeBtn.ZIndex=103
     closeBtn.MouseButton1Click:Connect(close)
 
-    local searchBox=mk("TextBox",{Size=UDim2.new(1,-16,0,26),Position=UDim2.new(0,8,0,32),BackgroundColor3=C.Panel,Text="",PlaceholderText="Search...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=13,TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,ZIndex=102,Parent=box})
+    local searchBox=mk("TextBox",{Size=UDim2.new(1,-16,0,30),Position=UDim2.new(0,8,0,38),BackgroundColor3=C.Panel,Text="",PlaceholderText="Search...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=14,TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,ZIndex=102,Parent=box})
     corner(searchBox,6) stroke(searchBox,C.Dim,1)
     mk("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),Parent=searchBox})
 
-    local list=mk("ScrollingFrame",{Size=UDim2.new(1,-12,1,-68),Position=UDim2.new(0,6,0,64),BackgroundTransparency=1,ScrollBarThickness=4,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=102,Parent=box})
+    local list=mk("ScrollingFrame",{Size=UDim2.new(1,-12,1,-78),Position=UDim2.new(0,6,0,74),BackgroundTransparency=1,ScrollBarThickness=4,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=102,Parent=box})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=list})
     mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=list})
 
@@ -1912,9 +1912,9 @@ local function showPickerModal(opts)
             if filter=="" or txt:lower():find(filter,1,true) then
                 count=count+1
                 local sel=item.selected
-                local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=count,ZIndex=103,Parent=list})
+                local row=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=count,ZIndex=103,Parent=list})
                 corner(row,5) if sel then stroke(row,C.Teal,1.1) end
-                local nl=lbl(row,txt,12,sel and C.Teal or C.White) nl.Size=UDim2.new(1,-12,1,0) nl.Position=UDim2.new(0,8,0,0) nl.ZIndex=104
+                local nl=lbl(row,txt,14,sel and C.Teal or C.White) nl.Size=UDim2.new(1,-12,1,0) nl.Position=UDim2.new(0,10,0,0) nl.ZIndex=104
                 local cover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,ZIndex=104,Parent=row})
                 local cap=item
                 cover.MouseButton1Click:Connect(function()
@@ -1929,8 +1929,8 @@ local function showPickerModal(opts)
             end
         end
         if count==0 then
-            local e=lbl(list,opts.emptyText or "(kosong)",11,C.Gray,Enum.TextXAlignment.Center)
-            e.Size=UDim2.new(1,-12,0,24) e.LayoutOrder=1 e.ZIndex=103
+            local e=lbl(list,opts.emptyText or "(kosong)",13,C.Gray,Enum.TextXAlignment.Center)
+            e.Size=UDim2.new(1,-12,0,28) e.LayoutOrder=1 e.ZIndex=103
         end
     end
     renderItems("")
@@ -1980,10 +1980,10 @@ local function buildAutoGift()
 
         -- v12.79: Target picker → modal popup
         local function trText() return slot.target == "" and "(klik pilih)" or slot.target end
-        local trRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
+        local trRow=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
         corner(trRow,6) local trStroke=stroke(trRow,C.Dim,1.1)
-        local trLbl=lbl(trRow,"Target: "..trText(),11,C.White) trLbl.Size=UDim2.new(0.85,0,1,0) trLbl.Position=UDim2.new(0,10,0,0)
-        local trIcon=lbl(trRow,">",11,C.Teal,Enum.TextXAlignment.Right) trIcon.Size=UDim2.new(0,20,1,0) trIcon.Position=UDim2.new(1,-24,0,0)
+        local trLbl=lbl(trRow,"Target: "..trText(),13,C.White) trLbl.Size=UDim2.new(0.85,0,1,0) trLbl.Position=UDim2.new(0,10,0,0)
+        local trIcon=lbl(trRow,">",14,C.Teal,Enum.TextXAlignment.Right) trIcon.Size=UDim2.new(0,20,1,0) trIcon.Position=UDim2.new(1,-24,0,0)
         local trCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=trRow})
         trCover.MouseButton1Click:Connect(function()
             local items={{value="",label="(Batalin pilihan)",selected=(slot.target=="")}}
@@ -2016,11 +2016,11 @@ local function buildAutoGift()
         end
 
         -- v12.79: Pet Type picker → modal popup (multi-select)
-        local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=3,Parent=parent})
+        local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=3,Parent=parent})
         corner(pickRow,6) local pickStroke=stroke(pickRow,C.Dim,1.1)
-        local pickLbl=lbl(pickRow,"Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)",11,C.White)
+        local pickLbl=lbl(pickRow,"Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)",13,C.White)
         pickLbl.Size=UDim2.new(0.85,0,1,0) pickLbl.Position=UDim2.new(0,10,0,0)
-        local pickIcon=lbl(pickRow,">",11,C.Teal,Enum.TextXAlignment.Right) pickIcon.Size=UDim2.new(0,20,1,0) pickIcon.Position=UDim2.new(1,-24,0,0)
+        local pickIcon=lbl(pickRow,">",14,C.Teal,Enum.TextXAlignment.Right) pickIcon.Size=UDim2.new(0,20,1,0) pickIcon.Position=UDim2.new(1,-24,0,0)
         local pickCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=pickRow})
         pickCover.MouseButton1Click:Connect(function()
             local types={}
@@ -2062,10 +2062,10 @@ local function buildAutoGift()
             if slot.mutationFilter == "__nomut__" then return "[TANPA MUTASI]" end
             return slot.mutationFilter
         end
-        local mfRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=parent})
+        local mfRow=mk("Frame",{Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=parent})
         corner(mfRow,6) local mfStroke=stroke(mfRow,C.Dim,1.1)
-        local mfLbl=lbl(mfRow,"Mutasi: "..mfText(),11,C.White) mfLbl.Size=UDim2.new(0.85,0,1,0) mfLbl.Position=UDim2.new(0,10,0,0)
-        local mfIcon=lbl(mfRow,">",11,C.Teal,Enum.TextXAlignment.Right) mfIcon.Size=UDim2.new(0,20,1,0) mfIcon.Position=UDim2.new(1,-24,0,0)
+        local mfLbl=lbl(mfRow,"Mutasi: "..mfText(),13,C.White) mfLbl.Size=UDim2.new(0.85,0,1,0) mfLbl.Position=UDim2.new(0,10,0,0)
+        local mfIcon=lbl(mfRow,">",14,C.Teal,Enum.TextXAlignment.Right) mfIcon.Size=UDim2.new(0,20,1,0) mfIcon.Position=UDim2.new(1,-24,0,0)
         local mfCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=mfRow})
         mfCover.MouseButton1Click:Connect(function()
             local items={
