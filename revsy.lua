@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.63"
+local SCRIPT_VERSION="v12.64"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2323,14 +2323,7 @@ local autoBuyGear = false
 local autoFeedPet = false
 -- v12.58: Hunger threshold (%). Default 70 = feed kalo hunger < 70% max
 -- Edit angka 70 di bawah ini buat ubah threshold (0-100):
--- v12.61: threshold pakai HGR absolute. Feed kalo hunger < N HGR
--- Edit angka di bawah: pet di-feed pas hunger di bawah ini (default 5000)
-local feedThresholdHGR = 1000  -- v12.63: feed kalo hunger < 1000 (target: pet jangan turun di bawah 1000)
--- Hunger cache - 1x scan PlayerGui per 2s (anti-lag)
-local _hungerCache = {}
-local _lastHungerScan = 0
--- v12.63: track pet yg baru di-feed (clear pas cache refresh, biar pet bisa di-feed lagi kalo hunger msh kurang)
-local _justFed = {}
+local feedThresholdPct = 70
 local autoCollect = false
 
 local miscBuyInterval = 5
@@ -2597,18 +2590,17 @@ task.spawn(function()
                 local hum = player.Character:FindFirstChildOfClass("Humanoid")
                 local bp = player:FindFirstChild("Backpack")
                 if hum and bp then
-                    -- v12.60: filter food + skip favorite (server reject "cannot feed favorit fruit")
+                    -- v12.64: filter food + skip favorite (server reject "cannot feed favorit fruit")
                     local function isFoodTool(t)
                         if not t:IsA("Tool") then return false end
                         if t:FindFirstChild("PetToolLocal") or t:FindFirstChild("PetToolServer") then return false end
-                        -- Skip favorite
+                        -- Skip favorite (any naming convention)
                         local fav = false
-                        pcall(function()
-                            fav = t:GetAttribute("Favorited") or t:GetAttribute("IsFavorite") or t:GetAttribute("Favorite") or t:GetAttribute("Favourited")
-                        end)
+                        pcall(function() fav = t:GetAttribute("Favorited") end)
+                        if not fav then pcall(function() fav = t:GetAttribute("IsFavorite") end) end
+                        if not fav then pcall(function() fav = t:GetAttribute("Favorite") end) end
                         if fav then return false end
                         local n = t.Name
-                        if n:lower():find("favorite") or n:lower():find("favourited") then return false end
                         local gearKW = {"Shovel","Sprinkler","Watering","Trowel","Wrench","Spray","Mirror","Magnifying","Tool","Pot","Ticket","Rod","Staff","Lollipop","Caller","Crate","Basket","Rake"}
                         for _, kw in ipairs(gearKW) do
                             if n:find(kw, 1, true) then return false end
@@ -2661,56 +2653,26 @@ task.spawn(function()
                     local skipped = 0
                     local total_uuid = 0
                     if equippedFood then
-                        -- v12.60: refresh hunger cache tiap 2 detik (1x scan, semua pet sekaligus)
-                        if tick() - _lastHungerScan > 2 then
-                            _hungerCache = {}
-                            _justFed = {}  -- v12.63: clear, pet bisa di-feed lagi kalo hunger msh kurang
-                            pcall(function()
-                                local pg = player:FindFirstChild("PlayerGui")
-                                if pg then
-                                    for _, d in ipairs(pg:GetDescendants()) do
-                                        if d:IsA("TextLabel") and d.Text:find("HGR") then
-                                            local cur, mx = d.Text:match("([%d%.]+)%s*/%s*([%d%.]+)%s*HGR")
-                                            cur = tonumber(cur) mx = tonumber(mx)
-                                            if cur and mx and mx > 0 then
-                                                local p = d.Parent local depth = 0
-                                                while p and depth < 12 do
-                                                    local pn = p.Name:gsub("[{}]", "")
-                                                    if #pn >= 32 and pn:find("-") then
-                                                        _hungerCache[pn] = {cur=cur, mx=mx}
-                                                        break
-                                                    end
-                                                    p = p.Parent depth = depth + 1
-                                                end
-                                            end
-                                        end
-                                    end
-                                end
-                            end)
-                            _lastHungerScan = tick()
-                        end
-
+                        -- v12.58: build list, sort by hunger ASC (pet paling lapar dulu)
                         local petInfos = {}
                         for uuidStr, _ in pairs(allUUIDs) do
-                            local h = _hungerCache[uuidStr]
-                            local hgr = h and h.cur or nil
-                            table.insert(petInfos, {uuid=uuidStr, hgr=hgr})
+                            local hunger = getPetHunger(uuidStr)
+                            -- Default maxHunger 25000 (kebanyakan pet)
+                            local maxH = 25000
+                            local pct = hunger and ((hunger / maxH) * 100) or 0
+                            table.insert(petInfos, {uuid=uuidStr, hunger=hunger, pct=pct})
                             total_uuid = total_uuid + 1
                         end
-                        -- Sort by HGR ASC (paling lapar dulu)
                         table.sort(petInfos, function(a, b)
-                            if a.hgr == nil and b.hgr ~= nil then return true end
-                            if b.hgr == nil and a.hgr ~= nil then return false end
-                            return (a.hgr or 0) < (b.hgr or 0)
+                            if a.hunger == nil and b.hunger ~= nil then return true end
+                            if b.hunger == nil and a.hunger ~= nil then return false end
+                            return (a.pct or 0) < (b.pct or 0)
                         end)
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
-                            -- v12.63: feed kalo hunger nil OR hunger < threshold, DAN belum di-feed di window cache ini
-                            local needFeed = not info.hgr or info.hgr < feedThresholdHGR
-                            local notYetFed = not _justFed[info.uuid]
-                            if needFeed and notYetFed then
+                            -- Feed kalo: hunger nil (fail-safe), atau pct < threshold
+                            if not info.hunger or info.pct < feedThresholdPct then
                                 pcall(function() r:FireServer("Feed", ub) end)
-                                _justFed[info.uuid] = true
                                 fed = fed + 1
                                 feedTotal = feedTotal + 1
                             else
@@ -3630,4 +3592,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.63: threshold 1000 + feed lagi kalo hunger msh kurang setelah cache refresh")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.64: dari v12.58 stable + cuma favorite filter (NO cache, NO new locals)")
