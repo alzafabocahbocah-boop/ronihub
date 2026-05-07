@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.14 (lebar 300 + auto refresh 5s)"
+local SCRIPT_VERSION = "v3.17 (getAge: cek attribute + child Value)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -133,12 +133,42 @@ local function getKG(item)
     return nil
 end
 local function getAge(item)
+    -- v3.17: cek attribute + child Value DULU (script lain pakai ini buat Everchanted)
+    -- Source 1: Tool attribute "Age"
+    local ok, ageAttr = pcall(function() return item:GetAttribute("Age") end)
+    if ok and ageAttr and tonumber(ageAttr) then return tonumber(ageAttr) end
+    local ok2, lvl = pcall(function() return item:GetAttribute("Level") end)
+    if ok2 and lvl and tonumber(lvl) then return tonumber(lvl) end
+
+    -- Source 2: child IntValue/NumberValue named "Age" or "Level"
+    for _, childName in ipairs({"Age", "AGE", "age", "Level", "LEVEL", "level", "PetAge"}) do
+        local c = item:FindFirstChild(childName)
+        if c and c.Value and tonumber(c.Value) then return tonumber(c.Value) end
+    end
+
+    -- Source 3: child Folder/Configuration with Age inside
+    for _, folderName in ipairs({"Configuration", "Stats", "Data", "PetData", "Info"}) do
+        local f = item:FindFirstChild(folderName)
+        if f then
+            for _, childName in ipairs({"Age", "Level"}) do
+                local c = f:FindFirstChild(childName)
+                if c and c.Value and tonumber(c.Value) then return tonumber(c.Value) end
+            end
+        end
+    end
+
+    -- Source 4: deep scan all descendants for Age IntValue/NumberValue
+    for _, d in ipairs(item:GetDescendants()) do
+        if (d:IsA("IntValue") or d:IsA("NumberValue")) and (d.Name == "Age" or d.Name == "Level") then
+            if d.Value and tonumber(d.Value) and tonumber(d.Value) > 0 then return tonumber(d.Value) end
+        end
+    end
+
+    -- Source 5: parse dari nama (fallback original)
     local n = item.Name
-    -- v3.6: super lenient - "Age" followed by non-digit, then digits (case insensitive)
-    -- handles "[Age 65]", "[Age:65]", "[ Age 65]", "Age65", "AGE 65", etc
     for _, pat in ipairs({
-        "[Aa][Gg][Ee][^%d]*(%d+)",     -- Age + any non-digits + digits
-        "[Aa][Gg][Ee]%s*(%d+)",         -- Age (optional space) digits
+        "[Aa][Gg][Ee][^%d]*(%d+)",
+        "[Aa][Gg][Ee]%s*(%d+)",
     }) do
         local f = n:match(pat) if f then return tonumber(f) end
     end
@@ -205,21 +235,34 @@ local function getMaxKGForPet(name)
     return nil
 end
 
--- v3.6: smart age fallback w/ maxKG cache lookup
+-- v3.15: getEstimatedAge tetep ada (untuk display), tapi kategori pakai getPetBaseKG langsung
 local function getEstimatedAge(item)
     local age = getAge(item) if age then return age end
     local kg = getKG(item) if not kg then return nil end
-    -- Try cache lookup buat back-calc age
     local maxKG = getMaxKGForPet(getPetName(item))
     if maxKG and maxKG > 0 then
-        return math.max(1, math.min(100, math.floor(kg * 11 / maxKG - 10 + 0.5)))
+        return math.max(1, math.min(200, math.floor(kg * 11 / maxKG - 10 + 0.5)))
     end
-    -- Last resort
-    if kg >= 20 then return 100 end
-    return 1
+    return nil  -- v3.15: gak ada cache = age unknown
 end
 
--- v3.0: hitung baseKG dari current KG + age
+-- v3.15: hitung baseKG langsung. Prioritas: age di nama > cache lookup > skip
+local function getPetBaseKG(item)
+    local kg = getKG(item)
+    if not kg then return nil end
+    local age = getAge(item)
+    if age and age >= 1 then
+        return kg * 11 / (age + 10)
+    end
+    -- No age in name -> pakai cached baseKG langsung (sama species pasti sama baseKG)
+    local cached = getMaxKGForPet(getPetName(item))
+    if cached then return cached end
+    -- Fallback terakhir: assume pet baru hatched, baseKG = currentKG
+    -- Tapi kalo kg gede (>20), jangan asumsi (kemungkinan pet leveled)
+    if kg < 20 then return kg end
+    return nil  -- skip categorization
+end
+
 local function calcBaseKG(kg, age)
     if not kg or not age or age < 1 then return nil end
     return kg * 11 / (age + 10)
@@ -228,7 +271,7 @@ end
 -- ============================================
 -- BUILD GUI
 -- ============================================
-local GUI_W = 300 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_COMPACT  -- v3.14: lebar 300 (fix font kepotong)
+local GUI_W = 330 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_COMPACT  -- v3.16: lebar 330
 local sg = mk("ScreenGui",{Name="ZenxInvGui", DisplayOrder=999, ResetOnSpawn=false, Parent=player:WaitForChild("PlayerGui")})
 
 local main = mk("Frame",{
@@ -297,7 +340,7 @@ local catLabels = {}
 for i, cat in ipairs(CATEGORIES) do
     -- v3.12: row 1 (i 1-3): 3 pills, row 2 (i 4-5): 2 pills
     local row = i <= 3 and catRow1 or catRow2
-    local pillW = i <= 3 and 94 or 144  -- v3.14: row1 3x94=282, row2 2x144=288
+    local pillW = i <= 3 and 104 or 159  -- v3.16: row1 3x104=312, row2 2x159=318
     local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=row})
     corner(pill, 5) stroke(pill, C.Dim, 1)
     local pl = lbl(pill, cat.name..": 0", 11, C.Gray, Enum.TextXAlignment.Center)
@@ -361,12 +404,8 @@ local function _doBuildInvShow()
                 sumKG = sumKG + kg
                 kgCount = kgCount + 1
 
-                -- v3.1: categorize by BASE KG (kg di age 1, sesuai game.guide)
-                -- baseKG = kg * 11 / (age + 10)
-                local baseKG = nil
-                if age and age >= 1 then
-                    baseKG = kg * 11 / (age + 10)
-                end
+                -- v3.15: pakai getPetBaseKG (handles cache lookup biar pet age tinggi gak salah kategori)
+                local baseKG = getPetBaseKG(item)
                 if baseKG then
                     local cat = categorize(baseKG)
                     if cat then
