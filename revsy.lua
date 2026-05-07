@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
 local SCRIPT_VERSION="v12.78"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (misc section rewrite from testbed v1.4)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (misc rewrite v1.4 IIFE+M78)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2320,54 +2320,67 @@ end)
 -- ============================================
 -- AUTO ACCEPT HOOKS (FIXED v8.2)
 -- ============================================
+;(function()  -- v12.78 misc IIFE-wrapped (zero main-chunk locals contribution)
+
 -- ============================================
--- v12.78: MISC SECTION (Auto Buy/Collect/Feed) - rewrite from testbed v1.4
--- ============================================
--- Logic: threshold-based feed, cached prompts collect, smart food selection
--- Dependencies dari main script (semuanya udah ada di v12.76):
---   C, mk, lbl, btn, corner, stroke, dbg, RS, player,
---   miscGroup (frame container utk sidebar 3),
---   save() function, d (data table), scriptShutdown flag
+-- v12.78b: MISC SECTION - rewrite from testbed v1.4 (compact: state in single table)
 -- ============================================
 
--- ---- State (load dari saved data, fallback default) ----
-local autoBuyEgg = d.autoBuyEgg or false
-local autoBuySeed = d.autoBuySeed or false
-local autoBuyGear = d.autoBuyGear or false
-local autoFeedPet = d.autoFeedPet or false
-local autoCollect = d.autoCollect or false
-local feedThresholdPct = d.feedThresholdPct or 70
-local miscBuyInterval = 5
+-- All state packed into ONE local table biar gak makan local-count budget
+local M78 = {
+    -- Toggles (loaded dari saved data)
+    autoBuyEgg = d.autoBuyEgg or false,
+    autoBuySeed = d.autoBuySeed or false,
+    autoBuyGear = d.autoBuyGear or false,
+    autoFeedPet = d.autoFeedPet or false,
+    autoCollect = d.autoCollect or false,
+    feedThresholdPct = d.feedThresholdPct or 70,
+    -- Hidden defaults
+    miscBuyInterval = 5,
+    feedCooldown = 5,
+    feedMaxPerTick = 10,
+    feedInterval = 1,
+    collectInterval = 0.5,
+    backpackLimit = 200,
+    collectMaxDist = 0,
+    collectMatch = "Collect",
+    -- Runtime state
+    petFeedState = {},
+    feedTotalPets = 0,
+    feedHungry = 0,
+    feedTotalFed = 0,
+    lastFood = "-",
+    promptsCache = {},
+    promptsCacheT = 0,
+    promptsConfigured = setmetatable({}, {__mode = "k"}),
+    lastBpFruits = 0,
+    lastBpTotal = 0,
+    lastPromptCount = 0,
+    collectTotalFired = 0,
+    buySeedFired = 0,
+    buyGearFired = 0,
+    buyEggFired = 0,
+    statusLbl = nil,
+    -- Item lists
+    SEEDS = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pumpkin","Apple","Bamboo","Coconut","Cactus","Dragon Fruit","Mango","Grape","Pepper","Mushroom","Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa","Banana","Lily","Bell Pepper","Prickly Pear","Loquat","Feijoa","Cherry","Rose","Lemon"},
+    GEARS = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"},
+    EGGS = {"Common Egg","Uncommon Egg","Rare Egg","Legendary Egg","Mythical Egg","Bug Egg","Night Egg","Premium Night Egg","Bee Egg","Anti Bee Egg","Common Summer Egg","Rare Summer Egg","Paradise Egg","Oasis Egg","Dinosaur Egg","Primal Egg","Zen Egg","Gourmet Egg"},
+}
 
--- Hidden defaults (gak di-UI biar bersih, edit di sini kalo perlu tweak)
-local feedCooldown = 5            -- detik antar feed buat pet yg sama
-local feedMaxPerTick = 10         -- max pet yg di-feed per loop iter
-local feedInterval = 1            -- check interval feed (s)
-local collectInterval = 0.5       -- sweep interval collect (s)
-local backpackLimit = 200         -- pause collect kalo fruit >= N (0=off)
-local collectMaxDist = 0          -- 0=no filter, >0=max distance studs
-local collectMatch = "Collect"    -- ActionText pattern
+-- Remote refs into M78 (1 local for table access scope)
+do
+    local ge = RS:FindFirstChild("GameEvents")
+    if ge then
+        M78.buySeedRE = ge:FindFirstChild("BuySeedStock")
+        M78.buyGearRE = ge:FindFirstChild("BuyGearStock")
+        M78.buyEggRE = ge:FindFirstChild("BuyPetEgg") or ge:FindFirstChild("BuyEgg") or ge:FindFirstChild("BuyEggStock")
+        M78.feedRE = ge:FindFirstChild("ActivePetService")
+    end
+    dbg("[misc78] remotes seed="..(M78.buySeedRE and "OK" or "MISS").." gear="..(M78.buyGearRE and "OK" or "MISS").." egg="..(M78.buyEggRE and "OK" or "MISS").." feed="..(M78.feedRE and "OK" or "MISS"))
+end
 
--- Runtime state
-local petFeedState = {}
-local feedTotalPets = 0
-local feedHungry = 0
-local feedTotalFed = 0
-local lastFood = "-"
-local _v78_promptsCache = {}
-local _v78_promptsCacheT = 0
-local _v78_promptsConfigured = setmetatable({}, {__mode = "k"})
-local lastBpFruits = 0
-local lastBpTotal = 0
-local lastPromptCount = 0
-local collectTotalFired = 0
-local buySeedFired = 0
-local buyGearFired = 0
-local buyEggFired = 0
-local miscStatusLbl
-
--- ---- Helpers (prefix v78 biar gak konflik sama existing helpers di main script) ----
-local function v78_isFruit(t)
+-- ---- Helpers (assigned to M78 to avoid creating new locals) ----
+M78.isFruit = function(t)
     if not t:IsA("Tool") then return false end
     if t:FindFirstChild("PetToolLocal") or t:FindFirstChild("PetToolServer") then return false end
     local n = t.Name
@@ -2378,7 +2391,7 @@ local function v78_isFruit(t)
     return n:match("%[[%d%.]+%s*[Kk][Gg]%]") ~= nil
 end
 
-local function v78_isFav(t)
+M78.isFav = function(t)
     for _, attr in ipairs({"Favorited","IsFavorite","Favorite","Loved","IsLoved"}) do
         local fav = false
         pcall(function() fav = t:GetAttribute(attr) == true end)
@@ -2387,22 +2400,22 @@ local function v78_isFav(t)
     return false
 end
 
-local function v78_isFood(t)
-    return v78_isFruit(t) and not v78_isFav(t)
+M78.isFood = function(t)
+    return M78.isFruit(t) and not M78.isFav(t)
 end
 
-local function v78_countBp()
+M78.countBp = function()
     local bp = player:FindFirstChild("Backpack")
     if not bp then return 0, 0 end
     local fruits, total = 0, 0
     for _, item in ipairs(bp:GetChildren()) do
         total = total + 1
-        if v78_isFruit(item) then fruits = fruits + 1 end
+        if M78.isFruit(item) then fruits = fruits + 1 end
     end
     return fruits, total
 end
 
-local function v78_getPlacedPets()
+M78.getPlacedPets = function()
     local pets = {}
     local pg = player:FindFirstChild("PlayerGui")
     local apui = pg and pg:FindFirstChild("ActivePetUI")
@@ -2435,21 +2448,19 @@ local function v78_getPlacedPets()
     return pets
 end
 
-local function v78_pickFood()
+M78.pickFood = function()
     local char = player.Character
     if not char then return nil end
-    -- Reuse already-equipped food
     for _, item in ipairs(char:GetChildren()) do
-        if v78_isFood(item) then return item end
+        if M78.isFood(item) then return item end
     end
-    -- Equip dari backpack: smallest KG first
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return nil end
     local bp = player:FindFirstChild("Backpack")
     if not bp then return nil end
     local foods = {}
     for _, item in ipairs(bp:GetChildren()) do
-        if v78_isFood(item) then
+        if M78.isFood(item) then
             local kg = tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) or 0
             table.insert(foods, { tool = item, kg = kg })
         end
@@ -2464,18 +2475,12 @@ local function v78_pickFood()
     return nil
 end
 
--- ---- Item lists (hardcoded, dari debug capture) ----
-local SEEDS_v78 = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pumpkin","Apple","Bamboo","Coconut","Cactus","Dragon Fruit","Mango","Grape","Pepper","Mushroom","Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa","Banana","Lily","Bell Pepper","Prickly Pear","Loquat","Feijoa","Cherry","Rose","Lemon"}
-local GEARS_v78 = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"}
-local EGGS_v78 = {"Common Egg","Uncommon Egg","Rare Egg","Legendary Egg","Mythical Egg","Bug Egg","Night Egg","Premium Night Egg","Bee Egg","Anti Bee Egg","Common Summer Egg","Rare Summer Egg","Paradise Egg","Oasis Egg","Dinosaur Egg","Primal Egg","Zen Egg","Gourmet Egg"}
-
--- ---- Remote refs (proper remote names dari debug, bukan generic discovery) ----
-local _ge78 = RS:FindFirstChild("GameEvents")
-local buySeedRE_v78 = _ge78 and _ge78:FindFirstChild("BuySeedStock")
-local buyGearRE_v78 = _ge78 and _ge78:FindFirstChild("BuyGearStock")
-local buyEggRE_v78 = _ge78 and (_ge78:FindFirstChild("BuyPetEgg") or _ge78:FindFirstChild("BuyEgg") or _ge78:FindFirstChild("BuyEggStock"))
-local feedRE_v78 = _ge78 and _ge78:FindFirstChild("ActivePetService")
-dbg("[misc78] remotes seed="..(buySeedRE_v78 and "OK" or "MISS").." gear="..(buyGearRE_v78 and "OK" or "MISS").." egg="..(buyEggRE_v78 and "OK" or "MISS").." feed="..(feedRE_v78 and "OK" or "MISS"))
+M78.setStatus = function(text, color)
+    if M78.statusLbl then
+        M78.statusLbl.Text = text
+        M78.statusLbl.TextColor3 = color or C.Teal
+    end
+end
 
 -- ---- UI Build ----
 do
@@ -2494,19 +2499,23 @@ do
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,5),Parent=miscScroll})
     mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,3),PaddingRight=UDim.new(0,3),Parent=miscScroll})
 
-    local function miscTogRow(labelTxt, descTxt, lo, getF, setF)
+    local function miscTogRow(labelTxt, descTxt, lo, key)
         local row = mk("Frame",{Size=UDim2.new(1,0,0,42), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=miscScroll})
-        corner(row, 7) local rowStroke = stroke(row, C.Dim, 1.2)
-        local l = lbl(row, labelTxt, 14, C.White) l.Size = UDim2.new(0.65,0,0,18) l.Position = UDim2.new(0,12,0,5)
+        corner(row, 7)
+        local rowStroke = stroke(row, C.Dim, 1.2)
+        local l = lbl(row, labelTxt, 14, C.White)
+        l.Size = UDim2.new(0.65,0,0,18) l.Position = UDim2.new(0,12,0,5)
         l.Font = Enum.Font.GothamBold
         if descTxt then
-            local dl = lbl(row, descTxt, 12, C.Gray) dl.Size = UDim2.new(0.75,0,0,14) dl.Position = UDim2.new(0,12,0,23)
+            local dl = lbl(row, descTxt, 12, C.Gray)
+            dl.Size = UDim2.new(0.75,0,0,14) dl.Position = UDim2.new(0,12,0,23)
         end
-        local tog = btn(row, "OFF", 13, C.Panel, C.Gray) tog.Size = UDim2.new(0,56,0,26) tog.Position = UDim2.new(1,-66,0.5,-13)
+        local tog = btn(row, "OFF", 13, C.Panel, C.Gray)
+        tog.Size = UDim2.new(0,56,0,26) tog.Position = UDim2.new(1,-66,0.5,-13)
         tog.Font = Enum.Font.GothamBold
         local togStroke = stroke(tog, C.Dim, 1.2)
         local function refresh()
-            local on = getF()
+            local on = M78[key]
             tog.Text = on and "ON" or "OFF"
             tog.BackgroundColor3 = on and C.TDim or C.Panel
             tog.TextColor3 = on and C.Teal or C.Gray
@@ -2514,209 +2523,201 @@ do
             rowStroke.Color = on and C.Teal or C.Dim
         end
         refresh()
-        tog.MouseButton1Click:Connect(function() setF(not getF()) refresh() end)
+        tog.MouseButton1Click:Connect(function()
+            M78[key] = not M78[key]
+            d[key] = M78[key]
+            save()
+            refresh()
+        end)
         return row
     end
 
-    -- Buy toggles
-    miscTogRow("Auto Buy Egg", "Beli egg otomatis di toko", 1, function() return autoBuyEgg end, function(v) autoBuyEgg=v d.autoBuyEgg=v save() end)
-    miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, function() return autoBuySeed end, function(v) autoBuySeed=v d.autoBuySeed=v save() end)
-    miscTogRow("Auto Buy Gear", "Beli gear (sprinkler, water can, dll)", 3, function() return autoBuyGear end, function(v) autoBuyGear=v d.autoBuyGear=v save() end)
-
-    -- Feed toggle + threshold input
-    miscTogRow("Auto Feed Pet", "Feed pet kalo hunger di bawah threshold", 4, function() return autoFeedPet end, function(v) autoFeedPet=v d.autoFeedPet=v save() end)
+    miscTogRow("Auto Buy Egg", "Beli egg otomatis di toko", 1, "autoBuyEgg")
+    miscTogRow("Auto Buy Seed", "Beli seed otomatis di Sam", 2, "autoBuySeed")
+    miscTogRow("Auto Buy Gear", "Beli gear (sprinkler, water can, dll)", 3, "autoBuyGear")
+    miscTogRow("Auto Feed Pet", "Feed pet kalo hunger di bawah threshold", 4, "autoFeedPet")
 
     local thRow = mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=miscScroll})
     corner(thRow,6) stroke(thRow,C.Dim,1.1)
     lbl(thRow,"Feed Threshold % (kalo hunger di bawah ini)",11,C.Gray).Size=UDim2.new(0.7,0,1,0)
-    local thBox=mk("TextBox",{Size=UDim2.new(0,50,0,22),Position=UDim2.new(1,-58,0.5,-11),BackgroundColor3=C.Panel,Text=tostring(feedThresholdPct),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=thRow})
+    local thBox=mk("TextBox",{Size=UDim2.new(0,50,0,22),Position=UDim2.new(1,-58,0.5,-11),BackgroundColor3=C.Panel,Text=tostring(M78.feedThresholdPct),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=thRow})
     corner(thBox,5) stroke(thBox,C.Dim,1)
     thBox:GetPropertyChangedSignal("Text"):Connect(function()
         local v = tonumber(thBox.Text)
         if v then
-            feedThresholdPct = math.max(0, math.min(100, v))
-            d.feedThresholdPct = feedThresholdPct
+            M78.feedThresholdPct = math.max(0, math.min(100, v))
+            d.feedThresholdPct = M78.feedThresholdPct
             save()
         end
     end)
 
-    -- Collect (toggle only, no other config visible)
-    miscTogRow("Auto Collect Fruit", "Panen semua buah di kebun (auto-pause kalo bp full)", 6, function() return autoCollect end, function(v) autoCollect=v d.autoCollect=v save() end)
+    miscTogRow("Auto Collect Fruit", "Panen semua buah di kebun (auto-pause kalo bp full)", 6, "autoCollect")
 
-    -- Status bar (bottom)
-    miscStatusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
-    miscStatusLbl.Size = UDim2.new(1,-10,0,26)
-    miscStatusLbl.Position = UDim2.new(0,5,1,-30)
-    miscStatusLbl.BackgroundColor3 = C.Panel
-    miscStatusLbl.BackgroundTransparency = 0
-    miscStatusLbl.Font = Enum.Font.GothamBold
-    corner(miscStatusLbl, 6) stroke(miscStatusLbl, C.Dim, 1.1)
-end
-
-local function setMiscStatus(text, color)
-    if miscStatusLbl then
-        miscStatusLbl.Text = text
-        miscStatusLbl.TextColor3 = color or C.Teal
-    end
+    M78.statusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
+    M78.statusLbl.Size = UDim2.new(1,-10,0,26)
+    M78.statusLbl.Position = UDim2.new(0,5,1,-30)
+    M78.statusLbl.BackgroundColor3 = C.Panel
+    M78.statusLbl.BackgroundTransparency = 0
+    M78.statusLbl.Font = Enum.Font.GothamBold
+    corner(M78.statusLbl, 6) stroke(M78.statusLbl, C.Dim, 1.1)
 end
 
 -- ---- Loops ----
 -- Buy Seed
 task.spawn(function()
     while not scriptShutdown do
-        if autoBuySeed and buySeedRE_v78 then
-            for _, name in ipairs(SEEDS_v78) do
-                pcall(function() buySeedRE_v78:FireServer("Shop", name) end)
-                buySeedFired = buySeedFired + 1
+        if M78.autoBuySeed and M78.buySeedRE then
+            for _, name in ipairs(M78.SEEDS) do
+                pcall(function() M78.buySeedRE:FireServer("Shop", name) end)
+                M78.buySeedFired = M78.buySeedFired + 1
             end
-            setMiscStatus("Buy seed: total "..buySeedFired, C.Teal)
+            M78.setStatus("Buy seed: total "..M78.buySeedFired, C.Teal)
         end
-        task.wait(miscBuyInterval)
+        task.wait(M78.miscBuyInterval)
     end
 end)
 
 -- Buy Gear
 task.spawn(function()
     while not scriptShutdown do
-        if autoBuyGear and buyGearRE_v78 then
-            for _, name in ipairs(GEARS_v78) do
-                pcall(function() buyGearRE_v78:FireServer(name) end)
-                buyGearFired = buyGearFired + 1
+        if M78.autoBuyGear and M78.buyGearRE then
+            for _, name in ipairs(M78.GEARS) do
+                pcall(function() M78.buyGearRE:FireServer(name) end)
+                M78.buyGearFired = M78.buyGearFired + 1
             end
-            setMiscStatus("Buy gear: total "..buyGearFired, C.Teal)
+            M78.setStatus("Buy gear: total "..M78.buyGearFired, C.Teal)
         end
-        task.wait(miscBuyInterval)
+        task.wait(M78.miscBuyInterval)
     end
 end)
 
 -- Buy Egg
 task.spawn(function()
     while not scriptShutdown do
-        if autoBuyEgg and buyEggRE_v78 then
-            for _, name in ipairs(EGGS_v78) do
-                local ok = pcall(function() buyEggRE_v78:FireServer(name) end)
-                if not ok then pcall(function() buyEggRE_v78:FireServer("Shop", name) end) end
-                buyEggFired = buyEggFired + 1
+        if M78.autoBuyEgg and M78.buyEggRE then
+            for _, name in ipairs(M78.EGGS) do
+                local ok = pcall(function() M78.buyEggRE:FireServer(name) end)
+                if not ok then pcall(function() M78.buyEggRE:FireServer("Shop", name) end) end
+                M78.buyEggFired = M78.buyEggFired + 1
             end
-            setMiscStatus("Buy egg: total "..buyEggFired, C.Teal)
+            M78.setStatus("Buy egg: total "..M78.buyEggFired, C.Teal)
         end
-        task.wait(miscBuyInterval)
+        task.wait(M78.miscBuyInterval)
     end
 end)
 
--- Feed loop (threshold + per-pet cooldown + smart food + target pause)
-local function v78_feedTick()
-    if not feedRE_v78 then return end
-    local pets = v78_getPlacedPets()
+-- Feed loop
+M78.feedTick = function()
+    if not M78.feedRE then return end
+    local pets = M78.getPlacedPets()
     local petsCount = 0
     for _ in pairs(pets) do petsCount = petsCount + 1 end
-    feedTotalPets = petsCount
-    if petsCount == 0 then feedHungry = 0 return end
+    M78.feedTotalPets = petsCount
+    if petsCount == 0 then M78.feedHungry = 0 return end
 
     local now = tick()
     local hungry = {}
     for uuid, info in pairs(pets) do
-        if not petFeedState[uuid] then petFeedState[uuid] = { lastFedAt = 0 } end
-        local st = petFeedState[uuid]
+        if not M78.petFeedState[uuid] then M78.petFeedState[uuid] = { lastFedAt = 0 } end
+        local st = M78.petFeedState[uuid]
         local shouldFeed = false
         local pctSort = 999
         if info.hunger and info.maxHunger and info.maxHunger > 0 then
             local pct = info.hunger / info.maxHunger * 100
-            if pct < feedThresholdPct then shouldFeed = true pctSort = pct end
+            if pct < M78.feedThresholdPct then shouldFeed = true; pctSort = pct end
         else
-            -- Hunger unknown -> fallback feed (anti silent-skip)
-            shouldFeed = true pctSort = 50
+            shouldFeed = true; pctSort = 50
         end
-        if shouldFeed and (now - st.lastFedAt) >= feedCooldown then
+        if shouldFeed and (now - st.lastFedAt) >= M78.feedCooldown then
             table.insert(hungry, { uuid = uuid, pct = pctSort, st = st })
         end
     end
-    feedHungry = #hungry
+    M78.feedHungry = #hungry
     if #hungry == 0 then return end
     table.sort(hungry, function(a, b) return a.pct < b.pct end)
 
-    local fedNow = math.min(feedMaxPerTick, #hungry)
+    local fedNow = math.min(M78.feedMaxPerTick, #hungry)
     local fedActual = 0
     for i = 1, fedNow do
         local h = hungry[i]
-        local food = v78_pickFood()
+        local food = M78.pickFood()
         if not food then
-            lastFood = "NO FOOD"
+            M78.lastFood = "NO FOOD"
             break
         end
-        lastFood = food.Name:sub(1, 18)
-        pcall(function() feedRE_v78:FireServer("Feed", "{"..h.uuid.."}") end)
+        M78.lastFood = food.Name:sub(1, 18)
+        pcall(function() M78.feedRE:FireServer("Feed", "{"..h.uuid.."}") end)
         h.st.lastFedAt = now
-        feedTotalFed = feedTotalFed + 1
+        M78.feedTotalFed = M78.feedTotalFed + 1
         fedActual = fedActual + 1
         if i < fedNow then task.wait(0.1) end
     end
     if fedActual > 0 then
-        setMiscStatus("Feed: "..fedActual.."/"..petsCount.." (food:"..lastFood..", total:"..feedTotalFed..")", C.Teal)
+        M78.setStatus("Feed: "..fedActual.."/"..petsCount.." (food:"..M78.lastFood..", total:"..M78.feedTotalFed..")", C.Teal)
     end
 end
 
 task.spawn(function()
     local lastTargetReached = false
     while not scriptShutdown do
-        if autoFeedPet then
-            v78_feedTick()
-            local targetReached = (feedTotalPets > 0 and feedHungry == 0)
+        if M78.autoFeedPet then
+            M78.feedTick()
+            local targetReached = (M78.feedTotalPets > 0 and M78.feedHungry == 0)
             if targetReached and not lastTargetReached then
-                setMiscStatus("Feed PAUSED: target tercapai ("..feedTotalPets.." pet >= "..feedThresholdPct.."%)", C.Gold)
+                M78.setStatus("Feed PAUSED: target tercapai ("..M78.feedTotalPets.." pet >= "..M78.feedThresholdPct.."%)", C.Gold)
             elseif not targetReached and lastTargetReached then
-                setMiscStatus("Feed RESUMED: ada pet lapar lagi", C.Green)
+                M78.setStatus("Feed RESUMED: ada pet lapar lagi", C.Green)
             end
             lastTargetReached = targetReached
         else
             lastTargetReached = false
         end
-        task.wait(feedInterval)
+        task.wait(M78.feedInterval)
     end
 end)
 
--- Collect loop (cached prompts 5s TTL + bp pause/resume)
-local function v78_refreshPrompts()
-    _v78_promptsCache = {}
+-- Collect loop
+M78.refreshPrompts = function()
+    M78.promptsCache = {}
     pcall(function()
         for _, dd in ipairs(workspace:GetDescendants()) do
             if dd:IsA("ProximityPrompt") then
                 local at = dd.ActionText or ""
-                if collectMatch == "" or at:find(collectMatch, 1, true) then
-                    table.insert(_v78_promptsCache, dd)
+                if M78.collectMatch == "" or at:find(M78.collectMatch, 1, true) then
+                    table.insert(M78.promptsCache, dd)
                 end
             end
         end
     end)
-    _v78_promptsCacheT = tick()
+    M78.promptsCacheT = tick()
 end
 
 task.spawn(function()
     local lastBpFull = false
     while not scriptShutdown do
-        if autoCollect then
-            local fruits, total = v78_countBp()
-            lastBpFruits = fruits
-            lastBpTotal = total
-            local bpFull = backpackLimit > 0 and fruits >= backpackLimit
+        if M78.autoCollect then
+            local fruits, total = M78.countBp()
+            M78.lastBpFruits = fruits
+            M78.lastBpTotal = total
+            local bpFull = M78.backpackLimit > 0 and fruits >= M78.backpackLimit
             if bpFull and not lastBpFull then
-                setMiscStatus("Collect PAUSED: bp full ("..fruits.."/"..backpackLimit..")", C.Gold)
+                M78.setStatus("Collect PAUSED: bp full ("..fruits.."/"..M78.backpackLimit..")", C.Gold)
             elseif not bpFull and lastBpFull then
-                setMiscStatus("Collect RESUMED: bp ok", C.Green)
+                M78.setStatus("Collect RESUMED: bp ok", C.Green)
             end
             lastBpFull = bpFull
 
             if not bpFull then
-                if (tick() - _v78_promptsCacheT) > 5 then v78_refreshPrompts() end
+                if (tick() - M78.promptsCacheT) > 5 then M78.refreshPrompts() end
                 local fired = 0
-                for _, dd in ipairs(_v78_promptsCache) do
+                for _, dd in ipairs(M78.promptsCache) do
                     if dd.Parent then
-                        if not _v78_promptsConfigured[dd] then
+                        if not M78.promptsConfigured[dd] then
                             pcall(function()
                                 dd.MaxActivationDistance = 1000
                                 dd.HoldDuration = 0
                             end)
-                            _v78_promptsConfigured[dd] = true
+                            M78.promptsConfigured[dd] = true
                         end
                         pcall(function()
                             if fireproximityprompt then fireproximityprompt(dd)
@@ -2725,21 +2726,22 @@ task.spawn(function()
                         fired = fired + 1
                     end
                 end
-                lastPromptCount = fired
-                collectTotalFired = collectTotalFired + fired
+                M78.lastPromptCount = fired
+                M78.collectTotalFired = M78.collectTotalFired + fired
                 if fired > 0 then
-                    setMiscStatus("Collect: +"..fired.." (total "..collectTotalFired..", fruits "..fruits..")", C.Green)
+                    M78.setStatus("Collect: +"..fired.." (total "..M78.collectTotalFired..", fruits "..fruits..")", C.Green)
                 end
             end
         end
-        task.wait(collectInterval)
+        task.wait(M78.collectInterval)
     end
 end)
 
 -- ============================================
--- END v12.78 MISC SECTION
+-- END v12.78b MISC SECTION (1 main local: M78)
 -- ============================================
 
+end)()  -- end v12.78 misc IIFE
 
 -- Gift: GiftPet (uuid, name, sender) -> AcceptPetGift(true, uuid) (CONFIRMED v12.10)
 -- Trade: SendRequest (tradeID, sender, ts) -> RespondRequest(tradeID, true) (CONFIRMED v12.10)
@@ -3598,4 +3600,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.78: Misc section rewrite (smart feed threshold, cached collect prompts, hardcoded buy)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.78: Misc rewrite IIFE+M78")
