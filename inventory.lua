@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.21 (probe semua attributes, no UI scan)"
+local SCRIPT_VERSION = "v3.22 (fix maxKG/baseKG mix-up)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -245,9 +245,10 @@ local function getPetBaseKG(item)
     if age and age >= 1 then
         return kg * 11 / (age + 10)
     end
-    -- No age in name -> pakai cached baseKG langsung (sama species pasti sama baseKG)
+    -- v3.22 FIX: cache stores MAX kg (age 100), bukan BASE kg (age 1)
+    -- baseKG = maxKG / 10 (karena formula: baseKG = kg*11/(age+10), maxKG = kg*110/(age+10))
     local cached = getMaxKGForPet(getPetName(item))
-    if cached then return cached end
+    if cached then return cached / 10 end
     -- Fallback terakhir: assume pet baru hatched, baseKG = currentKG
     -- Tapi kalo kg gede (>20), jangan asumsi (kemungkinan pet leveled)
     if kg < 20 then return kg end
