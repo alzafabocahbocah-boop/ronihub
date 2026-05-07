@@ -3246,10 +3246,12 @@ local function pickupAllGardenPets()
         dbg("[pickup] PetsPhysical gak ada di workspace")
         return 0
     end
-    local processed={}
-    local removed=0
-    local function tryPickup(model)
-        if not model or not model:IsA("Model") then return false end
+
+    -- v12.79 OPTIMIZED: collect all UUIDs first (no firing), then rapid-fire batch
+    local uuids={}
+    local seen={}
+    local function extractUUID(model)
+        if not model or not model:IsA("Model") then return end
         local modelName=model.Name
         local uuidNoBrace=nil
         local attrUuid=nil
@@ -3261,33 +3263,32 @@ local function pickupAllGardenPets()
         elseif #modelName>=30 and modelName:match("^[%w%-]+$") then
             uuidNoBrace=modelName
         end
-        if uuidNoBrace and #uuidNoBrace>=20 and not processed[uuidNoBrace] then
-            processed[uuidNoBrace]=true
-            pcall(function() unequipPet(uuidNoBrace) end)
-            removed=removed+1
-            return true
-        end
-        return false
-    end
-    local petMover=petsPhys:FindFirstChild("PetMover")
-    if petMover then
-        for _,m in ipairs(petMover:GetChildren()) do
-            if tryPickup(m) then task.wait(0.05) end
+        if uuidNoBrace and #uuidNoBrace>=20 and not seen[uuidNoBrace] then
+            seen[uuidNoBrace]=true
+            table.insert(uuids,uuidNoBrace)
         end
     end
-    for _,m in ipairs(petsPhys:GetDescendants()) do
-        if tryPickup(m) then task.wait(0.05) end
-    end
-    for _,n in ipairs({"Pets","PlacedPets","ActivePets","PetMover"}) do
+
+    -- Scan: PetsPhysical udah includes PetMover descendants (gak perlu loop terpisah)
+    for _,m in ipairs(petsPhys:GetDescendants()) do extractUUID(m) end
+    -- Fallback containers (jaga-jaga kalo struktur game berubah)
+    for _,n in ipairs({"Pets","PlacedPets","ActivePets"}) do
         local f=workspace:FindFirstChild(n)
-        if f then
-            for _,m in ipairs(f:GetDescendants()) do
-                if tryPickup(m) then task.wait(0.05) end
-            end
-        end
+        if f then for _,m in ipairs(f:GetDescendants()) do extractUUID(m) end end
     end
-    dbg("[pickup] total: "..removed.." pet di-pickup dari garden")
-    return removed
+
+    -- Rapid fire: unequip semua tanpa wait per-pet
+    for _,uuid in ipairs(uuids) do
+        pcall(function() unequipPet(uuid) end)
+    end
+
+    -- Single wait for server processing (scaled by count, capped)
+    if #uuids>0 then
+        task.wait(math.min(0.5, 0.15+#uuids*0.01))
+    end
+
+    dbg("[pickup] total: "..#uuids.." pet di-pickup dari garden (rapid-fire)")
+    return #uuids
 end
 
 local function doStart()
@@ -3305,7 +3306,7 @@ local function doStart()
         totalRemoved=totalRemoved+removed
         if removed>0 then
             dbg("[doStart] pickup attempt "..attempt..": "..removed.." pet")
-            task.wait(math.min(1.5,0.3+removed*0.05))
+            task.wait(0.2) -- v12.79: was math.min(1.5, 0.3+removed*0.05) - too slow
         else
             if attempt>1 then dbg("[doStart] garden bersih setelah "..(attempt-1).." attempt") end
             break
