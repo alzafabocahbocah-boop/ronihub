@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.18 (label dipersingkat)"
+local SCRIPT_VERSION = "v3.19 (getAge + UI scan via UUID)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -132,21 +132,81 @@ local function getKG(item)
     if kg then return tonumber(kg) end
     return nil
 end
+-- v3.19: ambil PET_UUID attribute dari Tool
+local function getPetUUID(item)
+    local ok, uuid = pcall(function() return item:GetAttribute("PET_UUID") end)
+    if ok and uuid then return tostring(uuid) end
+    return nil
+end
+
+-- v3.19: scan PlayerGui buat ambil age via UUID context
+local function getAgeFromUI(uuid)
+    if not uuid then return nil end
+    local pg = player:FindFirstChild("PlayerGui") if not pg then return nil end
+    local uuidStr = tostring(uuid):gsub("^{", ""):gsub("}$", "")
+    if #uuidStr < 10 then return nil end
+
+    -- Method 1: TextLabel bernama PET_AGE/Age + parent UUID context
+    for _, sg in ipairs(pg:GetChildren()) do
+        if sg:IsA("ScreenGui") or sg:IsA("Frame") or sg:IsA("Folder") then
+            for _, d in ipairs(sg:GetDescendants()) do
+                if d:IsA("TextLabel") and (d.Name == "PET_AGE" or d.Name:lower():find("age")) then
+                    local p = d.Parent local depth = 0
+                    while p and depth < 12 do
+                        local pn = p.Name:gsub("^{", ""):gsub("}$", "")
+                        if pn == uuidStr then
+                            local txt = ""
+                            pcall(function() txt = d.Text end)
+                            if txt and #txt > 0 then
+                                local age = tonumber(txt:match("(%d+)"))
+                                if age and age > 0 then return age end
+                            end
+                        end
+                        p = p.Parent depth = depth + 1
+                    end
+                end
+            end
+        end
+    end
+
+    -- Method 2: TextLabel text-nya match "Age: N" + parent UUID context
+    for _, sg in ipairs(pg:GetChildren()) do
+        if sg:IsA("ScreenGui") or sg:IsA("Frame") then
+            for _, d in ipairs(sg:GetDescendants()) do
+                if d:IsA("TextLabel") then
+                    local txt = ""
+                    pcall(function() txt = d.Text or "" end)
+                    local age = tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
+                    if age and age > 0 and age <= 200 then
+                        local p = d.Parent local depth = 0
+                        while p and depth < 12 do
+                            local pn = p.Name:gsub("^{", ""):gsub("}$", "")
+                            if pn == uuidStr then return age end
+                            p = p.Parent depth = depth + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local function getAge(item)
-    -- v3.17: cek attribute + child Value DULU (script lain pakai ini buat Everchanted)
-    -- Source 1: Tool attribute "Age"
+    -- v3.19: cek attribute + child Value + UI scan
+    -- Source 1: Tool attribute
     local ok, ageAttr = pcall(function() return item:GetAttribute("Age") end)
     if ok and ageAttr and tonumber(ageAttr) then return tonumber(ageAttr) end
     local ok2, lvl = pcall(function() return item:GetAttribute("Level") end)
     if ok2 and lvl and tonumber(lvl) then return tonumber(lvl) end
 
-    -- Source 2: child IntValue/NumberValue named "Age" or "Level"
+    -- Source 2: child Value
     for _, childName in ipairs({"Age", "AGE", "age", "Level", "LEVEL", "level", "PetAge"}) do
         local c = item:FindFirstChild(childName)
         if c and c.Value and tonumber(c.Value) then return tonumber(c.Value) end
     end
 
-    -- Source 3: child Folder/Configuration with Age inside
+    -- Source 3: config folder
     for _, folderName in ipairs({"Configuration", "Stats", "Data", "PetData", "Info"}) do
         local f = item:FindFirstChild(folderName)
         if f then
@@ -157,14 +217,21 @@ local function getAge(item)
         end
     end
 
-    -- Source 4: deep scan all descendants for Age IntValue/NumberValue
+    -- Source 4: deep descendant scan
     for _, d in ipairs(item:GetDescendants()) do
         if (d:IsA("IntValue") or d:IsA("NumberValue")) and (d.Name == "Age" or d.Name == "Level") then
             if d.Value and tonumber(d.Value) and tonumber(d.Value) > 0 then return tonumber(d.Value) end
         end
     end
 
-    -- Source 5: parse dari nama (fallback original)
+    -- v3.19 NEW: Source 5 - PlayerGui scan via UUID
+    local uuid = getPetUUID(item)
+    if uuid then
+        local uiAge = getAgeFromUI(uuid)
+        if uiAge then return uiAge end
+    end
+
+    -- Source 6: parse nama (fallback)
     local n = item.Name
     for _, pat in ipairs({
         "[Aa][Gg][Ee][^%d]*(%d+)",
