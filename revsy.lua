@@ -1870,6 +1870,73 @@ end
 -- ============================================
 local accStatusLbl=nil
 local sendStatusLbl=nil
+
+-- v12.79: Modal picker helper — floating popup overlay (replaces inline expanding pickers)
+-- usage: showPickerModal({title=, items={{value=,label=,selected=}}, multi=, onSelect=, emptyText=})
+local function showPickerModal(opts)
+    local backdrop=mk("Frame",{Size=UDim2.new(1,0,1,0),Position=UDim2.new(0,0,0,0),BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=0.45,BorderSizePixel=0,ZIndex=100,Parent=main})
+    local function close()
+        if backdrop and backdrop.Parent then backdrop:Destroy() end
+        if opts.onClose then opts.onClose() end
+    end
+    local backBtn=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,ZIndex=100,Parent=backdrop})
+    backBtn.MouseButton1Click:Connect(close)
+
+    local box=mk("Frame",{Size=UDim2.new(0.85,0,0.78,0),Position=UDim2.new(0.5,0,0.5,0),AnchorPoint=Vector2.new(0.5,0.5),BackgroundColor3=C.BG,BorderSizePixel=0,ZIndex=101,Parent=backdrop})
+    corner(box,8) stroke(box,C.Teal,1.5)
+    -- click guard biar klik di dalam box gak nutup modal
+    mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,ZIndex=101,Parent=box})
+
+    local titleBar=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Panel,BorderSizePixel=0,ZIndex=102,Parent=box})
+    corner(titleBar,7)
+    local titleLbl=lbl(titleBar,opts.title or "Pilih",13,C.Teal,Enum.TextXAlignment.Left)
+    titleLbl.Size=UDim2.new(1,-38,1,0) titleLbl.Position=UDim2.new(0,10,0,0) titleLbl.Font=Enum.Font.GothamBold titleLbl.ZIndex=103
+    local closeBtn=btn(titleBar,"X",13,C.Panel,C.Red)
+    closeBtn.Size=UDim2.new(0,24,0,22) closeBtn.Position=UDim2.new(1,-28,0.5,-11) closeBtn.Font=Enum.Font.GothamBold closeBtn.ZIndex=103
+    closeBtn.MouseButton1Click:Connect(close)
+
+    local searchBox=mk("TextBox",{Size=UDim2.new(1,-16,0,26),Position=UDim2.new(0,8,0,32),BackgroundColor3=C.Panel,Text="",PlaceholderText="Search...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=13,TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,ZIndex=102,Parent=box})
+    corner(searchBox,6) stroke(searchBox,C.Dim,1)
+    mk("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),Parent=searchBox})
+
+    local list=mk("ScrollingFrame",{Size=UDim2.new(1,-12,1,-68),Position=UDim2.new(0,6,0,64),BackgroundTransparency=1,ScrollBarThickness=4,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=102,Parent=box})
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=list})
+    mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=list})
+
+    local function renderItems(filter)
+        for _,c in pairs(list:GetChildren()) do if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end end
+        filter=(filter or ""):lower()
+        local count=0
+        for _,item in ipairs(opts.items or {}) do
+            local txt=item.label or item.value or "?"
+            if filter=="" or txt:lower():find(filter,1,true) then
+                count=count+1
+                local sel=item.selected
+                local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=count,ZIndex=103,Parent=list})
+                corner(row,5) if sel then stroke(row,C.Teal,1.1) end
+                local nl=lbl(row,txt,12,sel and C.Teal or C.White) nl.Size=UDim2.new(1,-12,1,0) nl.Position=UDim2.new(0,8,0,0) nl.ZIndex=104
+                local cover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,ZIndex=104,Parent=row})
+                local cap=item
+                cover.MouseButton1Click:Connect(function()
+                    cap.selected = not cap.selected
+                    if opts.onSelect then opts.onSelect(cap.value, cap.selected) end
+                    if opts.multi then
+                        renderItems(searchBox.Text)
+                    else
+                        close()
+                    end
+                end)
+            end
+        end
+        if count==0 then
+            local e=lbl(list,opts.emptyText or "(kosong)",11,C.Gray,Enum.TextXAlignment.Center)
+            e.Size=UDim2.new(1,-12,0,24) e.LayoutOrder=1 e.ZIndex=103
+        end
+    end
+    renderItems("")
+    searchBox:GetPropertyChangedSignal("Text"):Connect(function() renderItems(searchBox.Text) end)
+end
+
 local function buildAutoGift()
     for _,c in pairs(areas[5]:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextLabel") or c:IsA("TextButton") then c:Destroy() end
@@ -1911,72 +1978,34 @@ local function buildAutoGift()
     local function buildGiftContent(slotIdx,parent)
         local slot=giftSlots[slotIdx]
 
-        -- v8.8: Target inline picker (single select dari list player di server)
+        -- v12.79: Target picker → modal popup
         local function trText() return slot.target == "" and "(klik pilih)" or slot.target end
-        local trOpen=false
         local trRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
         corner(trRow,6) local trStroke=stroke(trRow,C.Dim,1.1)
         local trLbl=lbl(trRow,"Target: "..trText(),11,C.White) trLbl.Size=UDim2.new(0.85,0,1,0) trLbl.Position=UDim2.new(0,10,0,0)
-        local trArrow=lbl(trRow,"v",11,C.Teal,Enum.TextXAlignment.Right) trArrow.Size=UDim2.new(0,20,1,0) trArrow.Position=UDim2.new(1,-24,0,0)
+        local trIcon=lbl(trRow,">",11,C.Teal,Enum.TextXAlignment.Right) trIcon.Size=UDim2.new(0,20,1,0) trIcon.Position=UDim2.new(1,-24,0,0)
         local trCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=trRow})
-        local trPicker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.BG,BorderSizePixel=0,Visible=false,LayoutOrder=2,Parent=parent})
-        corner(trPicker,6) stroke(trPicker,C.Teal,1.2)
-        mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=trPicker})
-        local trScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,120),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,Parent=trPicker})
-        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=trScroll})
-        local function buildPlayerList()
-            for _,c in pairs(trScroll:GetChildren()) do if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end end
-
-            -- v8.9: opsi batalin di paling atas
-            local clrSel = slot.target == ""
-            local clrRow=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=clrSel and C.RDim or C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=trScroll})
-            corner(clrRow,5) if clrSel then stroke(clrRow,C.Red,1.1) else stroke(clrRow,C.Dim,1) end
-            local clrLbl=lbl(clrRow,"(Batalin pilihan)",8,clrSel and C.Red or C.Gray) clrLbl.Size=UDim2.new(1,-12,1,0) clrLbl.Position=UDim2.new(0,8,0,0)
-            local clrCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=clrRow})
-            clrCover.MouseButton1Click:Connect(function()
-                slot.target=""
-                trLbl.Text="Target: (klik pilih)"
-                save()
-                buildPlayerList()
-            end)
-
-            local plist = {}
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= player then table.insert(plist, p.Name) end
+        trCover.MouseButton1Click:Connect(function()
+            local items={{value="",label="(Batalin pilihan)",selected=(slot.target=="")}}
+            local plist={}
+            for _,p in ipairs(Players:GetPlayers()) do
+                if p ~= player then table.insert(plist,p.Name) end
             end
             table.sort(plist)
-            for i, name in ipairs(plist) do
-                local sel = slot.target == name
-                local row=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=i,Parent=trScroll})
-                corner(row,5) if sel then stroke(row,C.Teal,1.1) end
-                local nl=lbl(row,name,8,sel and C.Teal or C.White) nl.Size=UDim2.new(1,-12,1,0) nl.Position=UDim2.new(0,8,0,0)
-                local cn=name
-                local cover2=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=row})
-                cover2.MouseButton1Click:Connect(function()
-                    -- v8.9: klik nama yg sama = batalin (toggle deselect)
-                    if slot.target == cn then
-                        slot.target = ""
-                        trLbl.Text = "Target: (klik pilih)"
-                    else
-                        slot.target = cn
-                        trLbl.Text = "Target: "..cn
-                    end
+            for _,name in ipairs(plist) do
+                table.insert(items,{value=name,label=name,selected=(slot.target==name)})
+            end
+            showPickerModal({
+                title="Pilih Target Player (Gift "..slotIdx..")",
+                items=items, multi=false,
+                emptyText="(belum ada player lain di server)",
+                onSelect=function(value,_)
+                    slot.target=value
+                    trLbl.Text="Target: "..(value=="" and "(klik pilih)" or value)
+                    trStroke.Color=(value=="" and C.Dim or C.Teal)
                     save()
-                    buildPlayerList()
-                end)
-            end
-            if #plist == 0 then
-                local e=lbl(trScroll,"(belum ada player lain di server)",10,C.Red,Enum.TextXAlignment.Center)
-                e.Size=UDim2.new(1,-12,0,22) e.LayoutOrder=1 e.TextWrapped=true
-            end
-        end
-        buildPlayerList()
-        trCover.MouseButton1Click:Connect(function()
-            trOpen=not trOpen
-            trPicker.Visible=trOpen
-            trPicker.Size=trOpen and UDim2.new(1,0,0,128) or UDim2.new(1,0,0,0)
-            trArrow.Text=trOpen and "^" or "v" trStroke.Color=trOpen and C.Teal or C.Dim
-            if trOpen then buildPlayerList() end
+                end,
+            })
         end)
 
         local function countTypes() local n=0 for _ in pairs(slot.petTypes) do n=n+1 end return n end
@@ -1986,21 +2015,14 @@ local function buildAutoGift()
             return n
         end
 
-        local pickerOpen=false
+        -- v12.79: Pet Type picker → modal popup (multi-select)
         local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=3,Parent=parent})
         corner(pickRow,6) local pickStroke=stroke(pickRow,C.Dim,1.1)
         local pickLbl=lbl(pickRow,"Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)",11,C.White)
         pickLbl.Size=UDim2.new(0.85,0,1,0) pickLbl.Position=UDim2.new(0,10,0,0)
-        local pickArrow=lbl(pickRow,"v",11,C.Teal,Enum.TextXAlignment.Right) pickArrow.Size=UDim2.new(0,20,1,0) pickArrow.Position=UDim2.new(1,-24,0,0)
+        local pickIcon=lbl(pickRow,">",11,C.Teal,Enum.TextXAlignment.Right) pickIcon.Size=UDim2.new(0,20,1,0) pickIcon.Position=UDim2.new(1,-24,0,0)
         local pickCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=pickRow})
-        local picker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.BG,BorderSizePixel=0,Visible=false,LayoutOrder=4,Parent=parent})
-        corner(picker,6) stroke(picker,C.Teal,1.2)
-        mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=picker})
-        local typeScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,140),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,Parent=picker})
-        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=typeScroll})
-
-        local function buildTypeList()
-            for _,c in pairs(typeScroll:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+        pickCover.MouseButton1Click:Connect(function()
             local types={}
             local bp=player:FindFirstChild("Backpack")
             if bp then
@@ -2015,86 +2037,57 @@ local function buildAutoGift()
             end
             local sorted={} for b,_ in pairs(types) do table.insert(sorted,b) end
             table.sort(sorted,function(a,b) return types[a].count>types[b].count end)
-            local n=0
+            local items={}
             for _,base in ipairs(sorted) do
-                n=n+1 local data=types[base] local sel=slot.petTypes[base]==true
-                local row=mk("Frame",{Size=UDim2.new(1,0,0,24),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=typeScroll})
-                corner(row,5) if sel then stroke(row,C.Teal,1.1) end
-                local txt=base.." ("..data.count..(data.mut>0 and ", "..data.mut.." mut" or "")..")"
-                local nl=lbl(row,txt,8,sel and C.Teal or C.White) nl.Size=UDim2.new(0.72,0,1,0) nl.Position=UDim2.new(0,8,0,0)
-                local tb=btn(row,sel and "ON" or "OFF",8,sel and C.TDim or C.Panel,sel and C.Teal or C.Gray)
-                tb.Size=UDim2.new(0,44,0,18) tb.Position=UDim2.new(1,-48,0.5,-9)
-                local ts=stroke(tb,sel and C.Teal or C.Dim,1.1)
-                local cb=base
-                tb.MouseButton1Click:Connect(function()
-                    if slot.petTypes[cb] then slot.petTypes[cb]=nil else slot.petTypes[cb]=true end
-                    local now=slot.petTypes[cb]==true
-                    row.BackgroundColor3=now and C.TDim or C.Card
-                    local rs=row:FindFirstChildWhichIsA("UIStroke")
-                    if now then if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.1) end
-                    else if rs then rs:Destroy() end end
-                    nl.TextColor3=now and C.Teal or C.White
-                    tb.Text=now and "ON" or "OFF" tb.BackgroundColor3=now and C.TDim or C.Panel tb.TextColor3=now and C.Teal or C.Gray ts.Color=now and C.Teal or C.Dim
-                    pickLbl.Text="Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)"
-                    save()
-                end)
+                local data=types[base]
+                local labelTxt=base.." ("..data.count..(data.mut>0 and ", "..data.mut.." mut" or "")..")"
+                table.insert(items,{value=base,label=labelTxt,selected=(slot.petTypes[base]==true)})
             end
-            if n==0 then local e=lbl(typeScroll,"Backpack kosong",10,C.Red,Enum.TextXAlignment.Center) e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=1 end
-        end
-        buildTypeList()
-        pickCover.MouseButton1Click:Connect(function()
-            pickerOpen=not pickerOpen
-            picker.Visible=pickerOpen
-            picker.Size=pickerOpen and UDim2.new(1,0,0,148) or UDim2.new(1,0,0,0)
-            pickArrow.Text=pickerOpen and "^" or "v" pickStroke.Color=pickerOpen and C.Teal or C.Dim
-            if pickerOpen then buildTypeList() end
+            showPickerModal({
+                title="Pilih Jenis Pet (Gift "..slotIdx..", multi)",
+                items=items, multi=true,
+                emptyText="Backpack kosong",
+                onSelect=function(value,isSelected)
+                    if isSelected then slot.petTypes[value]=true else slot.petTypes[value]=nil end
+                    pickLbl.Text="Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)"
+                    pickStroke.Color=(countTypes()>0 and C.Teal or C.Dim)
+                    save()
+                end,
+            })
         end)
 
-        -- v8.6: Mutation Filter inline picker (single select, lightweight)
+        -- v12.79: Mutation Filter picker → modal popup
         local function mfText()
             if slot.mutationFilter == "" then return "(Semua mutasi)" end
             if slot.mutationFilter == "__nomut__" then return "[TANPA MUTASI]" end
             return slot.mutationFilter
         end
-        local mfOpen=false
         local mfRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=parent})
         corner(mfRow,6) local mfStroke=stroke(mfRow,C.Dim,1.1)
         local mfLbl=lbl(mfRow,"Mutasi: "..mfText(),11,C.White) mfLbl.Size=UDim2.new(0.85,0,1,0) mfLbl.Position=UDim2.new(0,10,0,0)
-        local mfArrow=lbl(mfRow,"v",11,C.Teal,Enum.TextXAlignment.Right) mfArrow.Size=UDim2.new(0,20,1,0) mfArrow.Position=UDim2.new(1,-24,0,0)
+        local mfIcon=lbl(mfRow,">",11,C.Teal,Enum.TextXAlignment.Right) mfIcon.Size=UDim2.new(0,20,1,0) mfIcon.Position=UDim2.new(1,-24,0,0)
         local mfCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=mfRow})
-        local mfPicker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.BG,BorderSizePixel=0,Visible=false,LayoutOrder=6,Parent=parent})
-        corner(mfPicker,6) stroke(mfPicker,C.Teal,1.2)
-        mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=mfPicker})
-        local mfScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,120),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,Parent=mfPicker})
-        mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=mfScroll})
-        local function buildMutationList()
-            for _,c in pairs(mfScroll:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
-            local list = {{value="",label="(Semua mutasi)"},{value="__nomut__",label="[TANPA MUTASI]"}}
-            for _,prefix in ipairs(MUTATION_PREFIXES) do
-                local clean = prefix:gsub("%s+$","")
-                if clean ~= "" then table.insert(list,{value=clean,label=clean}) end
-            end
-            for i,item in ipairs(list) do
-                local sel = slot.mutationFilter == item.value
-                local row=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=i,Parent=mfScroll})
-                corner(row,5) if sel then stroke(row,C.Teal,1.1) end
-                local nl=lbl(row,item.label,8,sel and C.Teal or C.White) nl.Size=UDim2.new(1,-12,1,0) nl.Position=UDim2.new(0,8,0,0)
-                local cv=item.value
-                local cover2=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=row})
-                cover2.MouseButton1Click:Connect(function()
-                    slot.mutationFilter=cv
-                    mfLbl.Text="Mutasi: "..mfText()
-                    save()
-                    buildMutationList()
-                end)
-            end
-        end
-        buildMutationList()
         mfCover.MouseButton1Click:Connect(function()
-            mfOpen=not mfOpen
-            mfPicker.Visible=mfOpen
-            mfPicker.Size=mfOpen and UDim2.new(1,0,0,128) or UDim2.new(1,0,0,0)
-            mfArrow.Text=mfOpen and "^" or "v" mfStroke.Color=mfOpen and C.Teal or C.Dim
+            local items={
+                {value="",label="(Semua mutasi)",selected=(slot.mutationFilter=="")},
+                {value="__nomut__",label="[TANPA MUTASI]",selected=(slot.mutationFilter=="__nomut__")},
+            }
+            for _,prefix in ipairs(MUTATION_PREFIXES) do
+                local clean=prefix:gsub("%s+$","")
+                if clean ~= "" then
+                    table.insert(items,{value=clean,label=clean,selected=(slot.mutationFilter==clean)})
+                end
+            end
+            showPickerModal({
+                title="Pilih Mutation Filter (Gift "..slotIdx..")",
+                items=items, multi=false,
+                onSelect=function(value,_)
+                    slot.mutationFilter=value
+                    mfLbl.Text="Mutasi: "..mfText()
+                    mfStroke.Color=(value=="" and C.Dim or C.Teal)
+                    save()
+                end,
+            })
         end)
 
         local kgRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=8,Parent=parent})
