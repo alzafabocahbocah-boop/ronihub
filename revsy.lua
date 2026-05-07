@@ -2694,14 +2694,15 @@ end
 
 task.spawn(function()
     local lastBpFull = false
+    local emptyTicks = 0
     while not scriptShutdown do
         if M78.autoCollect then
-            local fruits, total = M78.countBp()
-            M78.lastBpFruits = fruits
+            local fruitsBefore, total = M78.countBp()
+            M78.lastBpFruits = fruitsBefore
             M78.lastBpTotal = total
-            local bpFull = M78.backpackLimit > 0 and fruits >= M78.backpackLimit
+            local bpFull = M78.backpackLimit > 0 and fruitsBefore >= M78.backpackLimit
             if bpFull and not lastBpFull then
-                M78.setStatus("Collect PAUSED: bp full ("..fruits.."/"..M78.backpackLimit..")", C.Gold)
+                M78.setStatus("Collect PAUSED: bp full ("..fruitsBefore.."/"..M78.backpackLimit..")", C.Gold)
             elseif not bpFull and lastBpFull then
                 M78.setStatus("Collect RESUMED: bp ok", C.Green)
             end
@@ -2727,9 +2728,21 @@ task.spawn(function()
                     end
                 end
                 M78.lastPromptCount = fired
-                M78.collectTotalFired = M78.collectTotalFired + fired
-                if fired > 0 then
-                    M78.setStatus("Collect: +"..fired.." (total "..M78.collectTotalFired..", fruits "..fruits..")", C.Green)
+
+                -- Cek delta backpack: yg masuk inventory beneran
+                task.wait(0.15) -- tunggu sebentar biar fruit propagate ke backpack
+                local fruitsAfter = M78.countBp()
+                local gained = math.max(0, fruitsAfter - fruitsBefore)
+                M78.collectTotalFired = M78.collectTotalFired + gained
+
+                if gained > 0 then
+                    emptyTicks = 0
+                    M78.setStatus("Collect: +"..gained.." (total "..M78.collectTotalFired..", bp:"..fruitsAfter..")", C.Green)
+                else
+                    emptyTicks = emptyTicks + 1
+                    if emptyTicks % 10 == 1 then -- update tiap ~10 cycle (5s) biar gak spam
+                        M78.setStatus("Collect: idle (kebun kosong / belum ada yg siap), bp:"..fruitsAfter, C.Gray)
+                    end
                 end
             end
         end
