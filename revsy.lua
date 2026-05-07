@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.75"
+local SCRIPT_VERSION="v12.76"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2672,12 +2672,12 @@ task.spawn(function()
                             local ub = "{"..info.uuid.."}"
                             -- Feed kalo: hunger nil (fail-safe), atau pct < threshold
                             -- v12.75: feed cycle 30min, tiap pet 1x per cycle
-                            _G._zenxFeedCycleStart = _G._zenxFeedCycleStart or (tick() - 1800)
+                            _G._zenxFeedCycleStart = _G._zenxFeedCycleStart or (tick() - 900)  -- v12.76: 15 min
                             _G._zenxFedThisCycle = _G._zenxFedThisCycle or {}
                             local elapsed = tick() - _G._zenxFeedCycleStart
-                            local inFeedWindow = elapsed > 1800 and elapsed < 1815
-                            if elapsed >= 1815 then
-                                _G._zenxFeedCycleStart = tick() - 1800
+                            local inFeedWindow = elapsed > 900 and elapsed < 920  -- v12.76: 15 min cycle, 20s window
+                            if elapsed >= 920 then
+                                _G._zenxFeedCycleStart = tick() - 900  -- v12.76: 15 min
                                 _G._zenxFedThisCycle = {}  -- reset cycle: fed list clear
                                 inFeedWindow = true
                             end
@@ -3603,4 +3603,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.75: feed cycle 30min, tiap pet ke-feed 1x per cycle (gak overfeed)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.76: cycle 15 menit (1800 -> 900), tiap pet 1x per cycle")
