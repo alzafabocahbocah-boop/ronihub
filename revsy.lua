@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.70"
+local SCRIPT_VERSION="v12.71"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2672,7 +2672,7 @@ task.spawn(function()
                             local ub = "{"..info.uuid.."}"
                             _G._zenxLastFed = _G._zenxLastFed or {}
                             local lastFed = _G._zenxLastFed[info.uuid] or 0
-                            if (not info.hunger or info.hunger < feedThresholdPct) and (tick() - lastFed) > 2 then
+                            if info.hunger and info.hunger < feedThresholdPct and (tick() - lastFed) > 10 then  -- v12.71: skip nil + cd 10s
                                 -- v12.69: re-equip food per pet (1 fruit habis tiap fed)
                                 local hasFood = false
                                 for _, c in pairs(player.Character:GetChildren()) do
@@ -3613,4 +3613,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.70: + wait 0.3s antar fire (kasih waktu server consume tool)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.71: cooldown 10s + skip kalo hunger nil (anti spam-feed)")
