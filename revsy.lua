@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.68"
+local SCRIPT_VERSION="v12.69"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2670,14 +2670,31 @@ task.spawn(function()
                         end)
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
-                            -- Feed kalo: hunger nil (fail-safe), atau pct < threshold
                             _G._zenxLastFed = _G._zenxLastFed or {}
                             local lastFed = _G._zenxLastFed[info.uuid] or 0
-                            if (not info.hunger or info.hunger < feedThresholdPct) and (tick() - lastFed) > 2 then  -- v12.68: cooldown 2s via _G
-                                pcall(function() r:FireServer("Feed", ub) end)
-                                _G._zenxLastFed[info.uuid] = tick()
-                                fed = fed + 1
-                                feedTotal = feedTotal + 1
+                            if (not info.hunger or info.hunger < feedThresholdPct) and (tick() - lastFed) > 2 then
+                                -- v12.69: re-equip food per pet (1 fruit habis tiap fed)
+                                local hasFood = false
+                                for _, c in pairs(player.Character:GetChildren()) do
+                                    if isFoodTool(c) then hasFood = true break end
+                                end
+                                if not hasFood then
+                                    for _, item in pairs(bp:GetChildren()) do
+                                        if isFoodTool(item) then
+                                            pcall(function() hum:EquipTool(item) end)
+                                            task.wait(0.05)
+                                            hasFood = true break
+                                        end
+                                    end
+                                end
+                                if hasFood then
+                                    pcall(function() r:FireServer("Feed", ub) end)
+                                    _G._zenxLastFed[info.uuid] = tick()
+                                    fed = fed + 1
+                                    feedTotal = feedTotal + 1
+                                else
+                                    skipped = skipped + 1
+                                end
                             else
                                 skipped = skipped + 1
                             end
@@ -3595,4 +3612,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.68: cooldown 2s pake _G global (no new local, biar GUI gak break)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.69: re-equip food per pet (1 fruit = 1 feed, semua pet ke-feed)")
