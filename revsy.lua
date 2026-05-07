@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.65"
+local SCRIPT_VERSION="v12.67"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2323,7 +2323,8 @@ local autoBuyGear = false
 local autoFeedPet = false
 -- v12.58: Hunger threshold (%). Default 70 = feed kalo hunger < 70% max
 -- Edit angka 70 di bawah ini buat ubah threshold (0-100):
-local feedThresholdPct = 1000  -- v12.65: HGR absolute (bukan persen) - feed kalo hunger < 1000
+local feedThresholdPct = 1000  -- v12.65: HGR absolute - feed kalo hunger < 1000
+local _lastFedTime = {}  -- v12.67: track waktu feed terakhir per pet (anti spam)
 local autoCollect = false
 
 local miscBuyInterval = 5
@@ -2671,8 +2672,10 @@ task.spawn(function()
                         for _, info in ipairs(petInfos) do
                             local ub = "{"..info.uuid.."}"
                             -- Feed kalo: hunger nil (fail-safe), atau pct < threshold
-                            if not info.hunger or info.hunger < feedThresholdPct then  -- v12.65: pakai HGR absolute
+                            local lastFed = _lastFedTime[info.uuid] or 0
+                            if (not info.hunger or info.hunger < feedThresholdPct) and (tick() - lastFed) > 2 then  -- v12.67: cooldown 2s
                                 pcall(function() r:FireServer("Feed", ub) end)
+                                _lastFedTime[info.uuid] = tick()  -- v12.67: record waktu feed
                                 fed = fed + 1
                                 feedTotal = feedTotal + 1
                             else
@@ -3592,4 +3595,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.65: + threshold 1000 HGR absolute (cuma 2 line change)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.67: + per-pet cooldown 2s (gak spam-feed pet sama)")
