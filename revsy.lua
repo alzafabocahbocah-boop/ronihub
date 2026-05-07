@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.71"
+local SCRIPT_VERSION="v12.72"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2534,39 +2534,34 @@ local feedTotal = 0
 _cachedFeedUUIDs = nil
 _lastFeedUUIDRefresh = 0
 
--- Helper: cari hunger pet dari berbagai source
+-- v12.72: Helper hunger - cari dari multi-source (workspace, ActivePetUI bar, panel text)
 local function getPetHunger(uuidStr)
     local cleanUUID = uuidStr:gsub("[{}]", "")
+    local hunger = nil
 
-    -- Source 1: cek di workspace pets (placed pet model)
+    -- Source 1 (FIXED): workspace pet model attribute / child
     pcall(function()
-        for _, root in ipairs({workspace}) do
-            for _, d in ipairs(root:GetDescendants()) do
-                if d.Name == cleanUUID or d.Name == "{"..cleanUUID.."}" then
-                    -- Try attribute
-                    local h = d:GetAttribute("Hunger") or d:GetAttribute("hunger")
-                    if h then return h end
-                    -- Try child Value object
-                    local hv = d:FindFirstChild("Hunger") or d:FindFirstChild("HUNGER")
-                    if hv and hv.Value then return hv.Value end
-                end
+        for _, d in ipairs(workspace:GetDescendants()) do
+            if d.Name == cleanUUID or d.Name == "{"..cleanUUID.."}" then
+                local h = d:GetAttribute("Hunger") or d:GetAttribute("hunger") or d:GetAttribute("HGR")
+                if h and tonumber(h) then hunger = tonumber(h) return end
+                local hv = d:FindFirstChild("Hunger") or d:FindFirstChild("HUNGER")
+                if hv and hv.Value and tonumber(hv.Value) then hunger = tonumber(hv.Value) return end
             end
         end
     end)
+    if hunger then return hunger end
 
-    -- Source 2: cek di PlayerGui (Pet detail UI biasa nampilin hunger)
-    local hunger = nil
+    -- Source 2: PlayerGui TextLabel "X / Y HGR" (detail panel)
     pcall(function()
         local pg = player:FindFirstChild("PlayerGui")
         if not pg then return end
         for _, d in ipairs(pg:GetDescendants()) do
             if d:IsA("TextLabel") and d.Text:find("HGR") then
-                -- Format: "4656.62 / 25000 HGR"
                 local cur = d.Text:match("([%d%.]+)%s*/%s*[%d%.]+%s*HGR")
                 if cur then
-                    -- Find parent's UUID context
                     local parent = d.Parent
-                    for _ = 1, 6 do
+                    for _ = 1, 12 do
                         if not parent then break end
                         if parent.Name == cleanUUID or parent.Name == "{"..cleanUUID.."}" then
                             hunger = tonumber(cur)
@@ -2578,7 +2573,33 @@ local function getPetHunger(uuidStr)
             end
         end
     end)
-    return hunger
+    if hunger then return hunger end
+
+    -- Source 3: ActivePetUI hunger bar (Frame Size UDim2 X.Scale = pct dari max)
+    -- Sidebar Active Pets selalu visible, bar yellow size reflect hunger
+    pcall(function()
+        local pg = player:FindFirstChild("PlayerGui")
+        if not pg then return end
+        for _, d in ipairs(pg:GetDescendants()) do
+            -- Cari frame dgn nama mengandung "hunger" / "Hunger" + parent UUID context
+            if (d:IsA("Frame") or d:IsA("ImageLabel")) and d.Name:lower():find("hunger") then
+                local parent = d.Parent
+                for _ = 1, 12 do
+                    if not parent then break end
+                    if parent.Name == cleanUUID or parent.Name == "{"..cleanUUID.."}" then
+                        -- Size scale * 25000 (assume default max) = current hunger
+                        local scale = d.Size.X.Scale
+                        if scale and scale > 0 and scale <= 1 then
+                            hunger = math.floor(scale * 25000)
+                            return
+                        end
+                    end
+                    parent = parent.Parent
+                end
+            end
+        end
+    end)
+    return hunger  -- nil kalo gak ke-detect
 end
 
 task.spawn(function()
@@ -3613,4 +3634,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.71: cooldown 10s + skip kalo hunger nil (anti spam-feed)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.72: hunger multi-source (workspace + ActivePetUI bar) + fix Source 1 bug")
