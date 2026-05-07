@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.64"
+local SCRIPT_VERSION="v12.58"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (swap mechanic: adaptive + PRECISE accept patterns from debug)")
 
@@ -2590,21 +2590,16 @@ task.spawn(function()
                 local hum = player.Character:FindFirstChildOfClass("Humanoid")
                 local bp = player:FindFirstChild("Backpack")
                 if hum and bp then
-                    -- v12.64: filter food + skip favorite (server reject "cannot feed favorit fruit")
+                    -- v12.53: helper isFoodTool - filter food (skip shovel/sprinkler/dll)
                     local function isFoodTool(t)
                         if not t:IsA("Tool") then return false end
                         if t:FindFirstChild("PetToolLocal") or t:FindFirstChild("PetToolServer") then return false end
-                        -- Skip favorite (any naming convention)
-                        local fav = false
-                        pcall(function() fav = t:GetAttribute("Favorited") end)
-                        if not fav then pcall(function() fav = t:GetAttribute("IsFavorite") end) end
-                        if not fav then pcall(function() fav = t:GetAttribute("Favorite") end) end
-                        if fav then return false end
                         local n = t.Name
                         local gearKW = {"Shovel","Sprinkler","Watering","Trowel","Wrench","Spray","Mirror","Magnifying","Tool","Pot","Ticket","Rod","Staff","Lollipop","Caller","Crate","Basket","Rake"}
                         for _, kw in ipairs(gearKW) do
                             if n:find(kw, 1, true) then return false end
                         end
+                        -- Food = ada [N kg] di nama (buah/sayur)
                         return n:match("%[[%d%.]+%s*[Kk][Gg]%]") ~= nil
                     end
 
@@ -3592,4 +3587,4 @@ end
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.64: dari v12.58 stable + cuma favorite filter (NO cache, NO new locals)")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.58: dari v12.56 stable + sort by hunger (no UI change)")
