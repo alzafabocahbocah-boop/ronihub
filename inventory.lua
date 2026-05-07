@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.13 (start collapsed + lebih sempit)"
+local SCRIPT_VERSION = "v3.14 (lebar 300 + auto refresh 5s)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -228,7 +228,7 @@ end
 -- ============================================
 -- BUILD GUI
 -- ============================================
-local GUI_W = 270 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_COMPACT  -- v3.13: lebih sempit + start collapsed
+local GUI_W = 300 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_COMPACT  -- v3.14: lebar 300 (fix font kepotong)
 local sg = mk("ScreenGui",{Name="ZenxInvGui", DisplayOrder=999, ResetOnSpawn=false, Parent=player:WaitForChild("PlayerGui")})
 
 local main = mk("Frame",{
@@ -297,7 +297,7 @@ local catLabels = {}
 for i, cat in ipairs(CATEGORIES) do
     -- v3.12: row 1 (i 1-3): 3 pills, row 2 (i 4-5): 2 pills
     local row = i <= 3 and catRow1 or catRow2
-    local pillW = i <= 3 and 84 or 130  -- v3.13: row1 3x84=252, row2 2x130=260
+    local pillW = i <= 3 and 94 or 144  -- v3.14: row1 3x94=282, row2 2x144=288
     local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=row})
     corner(pill, 5) stroke(pill, C.Dim, 1)
     local pl = lbl(pill, cat.name..": 0", 11, C.Gray, Enum.TextXAlignment.Center)
@@ -430,6 +430,14 @@ end
 
 invRefreshBtn.MouseButton1Click:Connect(buildInvShow)
 task.spawn(function() task.wait(0.5) buildInvShow() end)
+
+-- v3.14: auto refresh tiap 5 detik
+task.spawn(function()
+    while true do
+        task.wait(5)
+        pcall(buildInvShow)
+    end
+end)
 
 -- ============================================
 -- REJOIN
