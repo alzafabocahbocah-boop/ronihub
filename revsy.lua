@@ -215,9 +215,8 @@ end
 -- ===== SWAP MECHANIC (FRIEND-7 PERSIS) =====
 local function swapPet(uuid)
     local u=fmtUUID(uuid)
-    -- v12.79c: back-to-back fire, no inter-call wait. FIFO order assumed by Roblox network batching.
-    -- Kalo swap gagal trigger cooldown reset → revert ke task.wait(0.01) atau 0.005
     pcall(function() equipRE:FireServer("UnequipPet",u) end)
+    task.wait(0.01) -- v12.79c: revert dari 0 (server butuh ordering)
     pcall(function() equipRE:FireServer("EquipPet",u,nil) end)
 end
 
