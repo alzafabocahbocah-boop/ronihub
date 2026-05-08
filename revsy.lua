@@ -3140,16 +3140,16 @@ startGlobalPoller=function()
                                     swapPet(uuid)
                                     lastSwap[uuid] = tick()
                                 end
-                                nextCheckAt[uuid] = tick() + 0.016 -- v12.79c: floor 1 Heartbeat tick
+                                nextCheckAt[uuid] = tick() + 0.018 -- v12.79d: 20->18ms (tiny bump)
                             elseif t > 2 then
                                 -- v12.79b: t*0.6 max 2 -> t*0.5 max 1.5 (lebih sering re-evaluate)
                                 nextCheckAt[uuid] = tick() + math.min(t * 0.5, 1.5)
                             elseif t > 0.5 then
-                                -- v12.79b: 100ms -> 50ms (responsive)
-                                nextCheckAt[uuid] = tick() + 0.05
+                                -- v12.79d: 50->40ms (tiny bump)
+                                nextCheckAt[uuid] = tick() + 0.04
                             else
-                                -- Hampir 0 - rapid polling 16ms (1 Heartbeat tick floor)
-                                nextCheckAt[uuid] = tick() + 0.016
+                                -- v12.79d: 20->18ms near-zero (tiny bump)
+                                nextCheckAt[uuid] = tick() + 0.018
                             end
                             checkingPet[uuid] = nil
                         end)
@@ -3289,7 +3289,7 @@ local function pickupAllGardenPets()
         pcall(function() unequipPet(uuid) end)
     end
 
-    -- v12.79b super tight: 0.03+0.002N max 0.10
+    -- v12.79b: super tight 0.03+0.002N max 0.10 (per user 'udah gacor')
     if #uuids>0 then
         task.wait(math.min(0.10, 0.03+#uuids*0.002))
     end
@@ -3308,13 +3308,13 @@ local function doStart()
 
     statusLbl.Text="Membersihkan garden..." statusLbl.TextColor3=C.Gold
     local totalRemoved=0
-    -- v12.79b: super-aggressive timings
+    -- v12.79b: super-aggressive (back to this version per user request - 'udah gacor')
     for attempt=1,2 do
         local removed=pickupAllGardenPets()
         totalRemoved=totalRemoved+removed
         if removed>0 then
             dbg("[doStart] pickup attempt "..attempt..": "..removed.." pet")
-            task.wait(0.02) -- v12.79b: was 0.05
+            task.wait(0.02)
         else
             if attempt>1 then dbg("[doStart] garden bersih setelah "..(attempt-1).." attempt") end
             break
