@@ -996,7 +996,6 @@ local function switchSection(idx)
     botBar.Visible = false
     runBtn.Visible = false
     stopBtn.Visible = false
-    donesPanel.Visible = false
     invShowGroup.Visible = false
     miscGroup.Visible = false
 
@@ -1006,7 +1005,6 @@ local function switchSection(idx)
         botBar.Visible = true
         runBtn.Visible = true
         stopBtn.Visible = true
-        donesPanel.Visible = true
         switchTab(currentTab)
     elseif idx == 2 then
         -- Inventory Show
