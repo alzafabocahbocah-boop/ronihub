@@ -186,9 +186,19 @@ local function isFavorite(item)
     return false
 end
 local function getAge(item)
-    for _,pat in ipairs({"%[Age%s+(%d+)%]","%[Age(%d+)%]"}) do
+    -- v12.79f: expanded patterns buat handle mutated pets dengan format beda
+    for _,pat in ipairs({
+        "%[Age%s+(%d+)%]","%[Age(%d+)%]",
+        "%[Lv%s+(%d+)%]","%[Lv(%d+)%]",
+        "%[Level%s+(%d+)%]","%[Level(%d+)%]",
+        "%[Lvl%s+(%d+)%]","%[Lvl(%d+)%]",
+        "Age%s*[:=]%s*(%d+)","Lv%s*[:=]%s*(%d+)","Level%s*[:=]%s*(%d+)",
+    }) do
         local f=item.Name:match(pat) if f then return tonumber(f) end
-    end return nil
+    end
+    -- "MAX" / "MAXED" text
+    if item.Name:match("%[Age%s*MAX%]") or item.Name:match("%[MAX%]") then return 100 end
+    return nil
 end
 local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Name end
 local function getKG(item) return tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) end
@@ -274,7 +284,7 @@ end
 
 local function getPlacedPetAge(placedModel)
     if not placedModel then return nil end
-    -- v12.79e: collect dari SEMUA sumber, return MAX. Biar gak ke-stuck di UI cache stale (age 99 padahal udah 100)
+    -- v12.79f: collect dari SEMUA sumber, return MAX. Aggressive scan untuk mutated pets.
     local ages={}
 
     -- Source 1: model attributes (server-replicated, paling reliable)
@@ -282,17 +292,31 @@ local function getPlacedPetAge(placedModel)
         local v=placedModel:GetAttribute(attr)
         if type(v)=="number" then table.insert(ages,v) end
     end
+    -- Source 1b: scan ALL attributes for any with "age"/"lvl"/"level" in name (case-insensitive)
+    pcall(function()
+        local attrs=placedModel:GetAttributes()
+        for nm,v in pairs(attrs) do
+            if type(v)=="number" and v>=0 and v<=200 then
+                local lname=nm:lower()
+                if lname:find("age",1,true) or lname:find("lvl",1,true) or lname:find("level",1,true) then
+                    table.insert(ages,v)
+                end
+            end
+        end
+    end)
 
-    -- Source 2: descendant IntValue/NumberValue
+    -- Source 2: descendant IntValue/NumberValue (broader name match)
     for _,d in ipairs(placedModel:GetDescendants()) do
         if (d:IsA("IntValue") or d:IsA("NumberValue")) then
-            if d.Name=="Age" or d.Name=="Level" or d.Name=="PetAge" or d.Name=="PetLevel" then
-                table.insert(ages,d.Value)
+            local lname=d.Name:lower()
+            if lname:find("age",1,true) or lname:find("lvl",1,true) or lname:find("level",1,true) then
+                local v=d.Value
+                if type(v)=="number" and v>=0 and v<=200 then table.insert(ages,v) end
             end
         end
     end
 
-    -- Source 3: PET_AGE UI label (last resort - UI bisa stale)
+    -- Source 3: PET_AGE & ALL TextLabels in UI petFrame (broader scan untuk pet mutasi)
     local modelName=placedModel.Name
     local uuidStr=modelName:gsub("^{",""):gsub("}$","")
     if #uuidStr>=20 then
@@ -301,20 +325,30 @@ local function getPlacedPetAge(placedModel)
         if activePetUI then
             local petFrame=activePetUI:FindFirstChild("{"..uuidStr.."}",true) or activePetUI:FindFirstChild(uuidStr,true)
             if petFrame then
-                local ageLbl=petFrame:FindFirstChild("PET_AGE",true)
-                if ageLbl then
-                    local txt=""
-                    pcall(function() txt=ageLbl.Text end)
-                    local age=tonumber((txt or ""):match("(%d+)"))
-                    if not age and (txt or ""):lower():match("max") then age=100 end
-                    if age then table.insert(ages,age) end
+                -- Scan SEMUA TextLabel di petFrame (gak cuma named PET_AGE)
+                for _,d in ipairs(petFrame:GetDescendants()) do
+                    if d:IsA("TextLabel") then
+                        local txt=""
+                        pcall(function() txt=d.Text or "" end)
+                        if txt~="" then
+                            local age=nil
+                            local lname=d.Name:lower()
+                            if d.Name=="PET_AGE" or lname:find("age",1,true) or lname:find("lvl",1,true) or lname:find("level",1,true) then
+                                age=tonumber(txt:match("(%d+)"))
+                            else
+                                age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
+                                if not age then age=tonumber(txt:match("[Ll][Vv]l?[^%d]*(%d+)")) end
+                            end
+                            if not age and txt:lower():match("max") and (d.Name=="PET_AGE" or lname:find("age",1,true)) then age=100 end
+                            if age and age>=0 and age<=200 then table.insert(ages,age) end
+                        end
+                    end
                 end
             end
         end
     end
 
-    -- Source 4: KG dari label/value di placed model -> simple estimate (no maxKG dep biar avoid forward ref)
-    -- Untuk pet Enchanted/special yang Source 1-3 gak ngasih hasil
+    -- Source 4: KG dari label/value di placed model -> simple estimate
     for _,d in ipairs(placedModel:GetDescendants()) do
         if d:IsA("TextLabel") or d:IsA("StringValue") then
             local txt=""
@@ -322,10 +356,9 @@ local function getPlacedPetAge(placedModel)
             if txt~="" then
                 local kg=tonumber(txt:match("%[?([%d%.]+)%s*[Kk][Gg]"))
                 if kg then
-                    -- Simple heuristic: kg>=20 = pet udah maxed (age 100); kg<5 = baby; else 50
                     if kg>=20 then table.insert(ages,100)
                     elseif kg<5 then table.insert(ages,1)
-                    else table.insert(ages,math.floor(kg*5)) end -- rough estimate
+                    else table.insert(ages,math.floor(kg*5)) end
                     break
                 end
             end
