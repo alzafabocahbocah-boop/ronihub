@@ -274,6 +274,25 @@ end
 
 local function getPlacedPetAge(placedModel)
     if not placedModel then return nil end
+    -- v12.79e: collect dari SEMUA sumber, return MAX. Biar gak ke-stuck di UI cache stale (age 99 padahal udah 100)
+    local ages={}
+
+    -- Source 1: model attributes (server-replicated, paling reliable)
+    for _,attr in ipairs({"Age","Level","PetAge","PetLevel","CurrentAge","CurrentLevel","AGE"}) do
+        local v=placedModel:GetAttribute(attr)
+        if type(v)=="number" then table.insert(ages,v) end
+    end
+
+    -- Source 2: descendant IntValue/NumberValue
+    for _,d in ipairs(placedModel:GetDescendants()) do
+        if (d:IsA("IntValue") or d:IsA("NumberValue")) then
+            if d.Name=="Age" or d.Name=="Level" or d.Name=="PetAge" or d.Name=="PetLevel" then
+                table.insert(ages,d.Value)
+            end
+        end
+    end
+
+    -- Source 3: PET_AGE UI label (last resort - UI bisa stale)
     local modelName=placedModel.Name
     local uuidStr=modelName:gsub("^{",""):gsub("}$","")
     if #uuidStr>=20 then
@@ -287,23 +306,17 @@ local function getPlacedPetAge(placedModel)
                     local txt=""
                     pcall(function() txt=ageLbl.Text end)
                     local age=tonumber((txt or ""):match("(%d+)"))
-                    if age then return age end
+                    if not age and (txt or ""):lower():match("max") then age=100 end
+                    if age then table.insert(ages,age) end
                 end
             end
         end
     end
-    for _,attr in ipairs({"Age","Level","PetAge","PetLevel","CurrentAge","CurrentLevel","AGE"}) do
-        local v=placedModel:GetAttribute(attr)
-        if type(v)=="number" then return v end
-    end
-    for _,d in ipairs(placedModel:GetDescendants()) do
-        if (d:IsA("IntValue") or d:IsA("NumberValue")) then
-            if d.Name=="Age" or d.Name=="Level" or d.Name=="PetAge" or d.Name=="PetLevel" then
-                return d.Value
-            end
-        end
-    end
-    return nil
+
+    if #ages==0 then return nil end
+    local maxAge=ages[1]
+    for _,a in ipairs(ages) do if a>maxAge then maxAge=a end end
+    return maxAge
 end
 
 local function findPetInBackpack(uuid)
@@ -1731,15 +1744,15 @@ buildSwapList=function()
         if not swapPerPet[uuid] then swapPerPet[uuid]={enabled=false} end
         local ps=swapPerPet[uuid]
 
-        local row=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=ps.enabled and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=layoutOrder,Parent=parent})
+        local row=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=ps.enabled and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=layoutOrder,Parent=parent})
         corner(row,5) if ps.enabled then stroke(row,C.Teal,1.2) end
         local infoTxt=r.info
         if r.isFav then infoTxt=string.char(0xE2,0x99,0xA5).." "..infoTxt end
-        local pl=lbl(row,infoTxt,9,ps.enabled and C.White or C.Gray) pl.Size=UDim2.new(0.69,0,1,0) pl.Position=UDim2.new(0,8,0,0)
+        local pl=lbl(row,infoTxt,12,ps.enabled and C.White or C.Gray) pl.Size=UDim2.new(0.69,0,1,0) pl.Position=UDim2.new(0,8,0,0)
 
         local cu1=uuid
-        local selTog=btn(row,ps.enabled and "ON" or "OFF",9,ps.enabled and C.TDim or C.Panel,ps.enabled and C.Teal or C.Gray)
-        selTog.Size=UDim2.new(0.26,0,0,20) selTog.Position=UDim2.new(0.72,2,0.5,-10)
+        local selTog=btn(row,ps.enabled and "ON" or "OFF",12,ps.enabled and C.TDim or C.Panel,ps.enabled and C.Teal or C.Gray)
+        selTog.Size=UDim2.new(0.26,0,0,22) selTog.Position=UDim2.new(0.72,2,0.5,-11)
         local selStroke=stroke(selTog,ps.enabled and C.Teal or C.Dim,1.1)
         selTog.MouseButton1Click:Connect(function()
             local p=swapPerPet[cu1] if not p then return end
@@ -1768,9 +1781,9 @@ buildSwapList=function()
     end
 
     local function makeSectionHeader(title,count,enabledCount,layoutOrder,color)
-        local h=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=layoutOrder,Parent=areas[3]})
+        local h=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=layoutOrder,Parent=areas[3]})
         corner(h,5) stroke(h,color or C.Teal,1.2)
-        lbl(h,title.." ("..count.." pet, "..enabledCount.." ON)",9,color or C.Teal).Size=UDim2.new(1,-10,1,0)
+        lbl(h,title.." ("..count.." pet, "..enabledCount.." ON)",12,color or C.Teal).Size=UDim2.new(1,-10,1,0)
     end
 
     local function countEnabled(rows)
@@ -1784,7 +1797,7 @@ buildSwapList=function()
     local lo=3
     makeSectionHeader("Pet Tim Leveling",#timRows,countEnabled(timRows),lo,C.Gold) lo=lo+1
     if #timRows==0 then
-        local e=lbl(areas[3],"Belum ada pet di Tim Leveling. Pilih dulu di tab 1.",10,C.Gray,Enum.TextXAlignment.Center)
+        local e=lbl(areas[3],"Belum ada pet di Tim Leveling. Pilih dulu di tab 1.",12,C.Gray,Enum.TextXAlignment.Center)
         e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=lo lo=lo+1
     else
         for _,r in ipairs(timRows) do
@@ -1798,7 +1811,7 @@ buildSwapList=function()
     makeSectionHeader("Pet Favorit (bukan tim)",#favRows,countEnabled(favRows),lo,C.Teal) lo=lo+1
     if #favRows==0 then
         local msg=favCountTotal==0 and "Belum ada pet di-love. Tekan icon love di pet game dulu." or "Tidak ada pet favorit di luar Tim Leveling"
-        local e=lbl(areas[3],msg,10,C.Gray,Enum.TextXAlignment.Center)
+        local e=lbl(areas[3],msg,12,C.Gray,Enum.TextXAlignment.Center)
         e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=lo e.TextWrapped=true lo=lo+1
     else
         for _,r in ipairs(favRows) do
