@@ -216,7 +216,7 @@ end
 local function swapPet(uuid)
     local u=fmtUUID(uuid)
     pcall(function() equipRE:FireServer("UnequipPet",u) end)
-    task.wait(0.02)
+    task.wait(0.01) -- v12.79b: was 0.02
     pcall(function() equipRE:FireServer("EquipPet",u,nil) end)
 end
 
@@ -625,14 +625,22 @@ local getAgeFromUI = (function()
                         local txt=""
                         pcall(function() txt=d.Text or "" end)
                         local age=nil
-                        if d.Name=="PET_AGE" then age=tonumber(txt:match("(%d+)"))
-                        else age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)")) end
+                        if d.Name=="PET_AGE" then
+                            age=tonumber(txt:match("(%d+)"))
+                            -- v12.79: handle "MAX" / "MAXED" text → treat as age 100
+                            if not age and txt:lower():match("max") then age=100 end
+                        else
+                            age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
+                            if not age and (d.Name=="AgeLabel" or d.Name=="Age") and txt:lower():match("max") then age=100 end
+                        end
                         if age and age>0 and age<=200 then
                             local p=d.Parent local depth=0
                             while p and depth<12 do
                                 local pn=p.Name:gsub("^{",""):gsub("}$","")
                                 if #pn>=32 and pn:find("-") then
-                                    cache[pn]=age break
+                                    -- v12.79: keep the HIGHEST age seen (in case multiple labels per pet, some stale)
+                                    if not cache[pn] or age > cache[pn] then cache[pn]=age end
+                                    break
                                 end
                                 p=p.Parent depth=depth+1
                             end
@@ -645,7 +653,7 @@ local getAgeFromUI = (function()
     end
     return function(uuid)
         if not uuid then return nil end
-        if tick()-lastScan > 3 then pcall(rebuild) end
+        if tick()-lastScan > 1 then pcall(rebuild) end -- v12.79: was 3s, now 1s for faster age 100 detection
         local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
         if #uuidStr<10 then return nil end
         return cache[uuidStr]
@@ -703,20 +711,30 @@ end
 function getAgeFromKG(item)
     if not item then return nil end
     local uuid=getPetUUID(item)
-    if uuid then
-        local uiAge=getAgeFromUI(uuid)
-        if uiAge then return uiAge end
+    local uiAge=nil
+    if uuid then uiAge=getAgeFromUI(uuid) end
+
+    -- v12.79: hitung dari tool juga, jangan cuma UI cache (yg bisa stale di age 100)
+    local toolAge=getAge(item)
+    local kgAge=nil
+    if not toolAge then
+        local kg=getKG(item)
+        if kg then
+            local maxKG=getMaxKGForPet(getPetName(item))
+            if maxKG then
+                kgAge=math.max(1,math.min(100,math.floor(kg*110/maxKG - 10)))
+            elseif kg >= 20 then
+                kgAge=100
+            end
+        end
     end
-    local age=getAge(item) if age then return age end
-    local kg=getKG(item) if not kg then return nil end
-    local maxKG=getMaxKGForPet(getPetName(item))
-    if maxKG then
-        return math.max(1,math.min(100,math.floor(kg*110/maxKG - 10)))
-    end
-    -- v12.13: smart fallback untuk pet mutasi tanpa cache hit
-    -- KG gede (>=20) = pet udah maxed/age tinggi, KG kecil = pet baru
-    if kg >= 20 then return 100 end
-    return 1
+
+    -- Ambil yang TERTINGGI dari semua source biar gak ke-skip age 100
+    local best=nil
+    if uiAge and (not best or uiAge>best) then best=uiAge end
+    if toolAge and (not best or toolAge>best) then best=toolAge end
+    if kgAge and (not best or kgAge>best) then best=kgAge end
+    return best
 end
 
 local function getAgeByUUID(uuid)
@@ -753,7 +771,14 @@ corner(main,10) stroke(main,C.Teal,2)
 local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=main})
 corner(TB,10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5),Position=UDim2.new(0,0,1,-1.5),BackgroundColor3=C.Teal,BorderSizePixel=0,Parent=TB})
-lbl(TB,"ZENX AUTO LEVELING  "..SCRIPT_VERSION,13,C.Teal).Size=UDim2.new(1,-60,1,0)
+local titleLbl=lbl(TB,"ZENX AUTO LEVELING  "..SCRIPT_VERSION,13,C.Teal)
+titleLbl.Size=UDim2.new(0,205,1,0) titleLbl.Position=UDim2.new(0,8,0,0)
+
+-- v12.79: stat "Total Jadi Kurang" pindah dari bottom ke title bar (samping nama)
+local donesLbl = lbl(TB, "Total:0 Jadi:0 Kurang:0", 12, C.Teal, Enum.TextXAlignment.Right)
+donesLbl.Size = UDim2.new(1, -280, 1, 0)
+donesLbl.Position = UDim2.new(0, 215, 0, 0)
+donesLbl.Font = Enum.Font.GothamBold
 
 local minBtn=btn(TB,"-",15,C.Panel,C.Gray)
 minBtn.Size=UDim2.new(0,22,0,22) minBtn.Position=UDim2.new(1,-50,0.5,-11) stroke(minBtn,C.Dim,1.2)
@@ -824,22 +849,6 @@ local runStroke=stroke(runBtn,C.Dim,1.5)
 local stopBtn=btn(content,"STOP",12,C.Panel,C.Gray)
 stopBtn.Size=UDim2.new(0,90,0,26) stopBtn.Position=UDim2.new(0,160,0,BOT_Y)
 local stopStroke=stroke(stopBtn,C.Dim,1.5)
-
--- v10.1: dones counter sebagai stat card prominent di kanan tombol RUN/STOP
-local donesPanel = mk("Frame", {
-    Size = UDim2.new(0, 215, 0, 26),
-    Position = UDim2.new(0, 255, 0, BOT_Y),
-    BackgroundColor3 = C.Panel,
-    BorderSizePixel = 0,
-    Parent = content
-})
-corner(donesPanel, 7)
-stroke(donesPanel, C.Teal, 1.3)
-
-local donesLbl = lbl(donesPanel, "Total:0 Jadi:0 Kurang:0", 12, C.Teal, Enum.TextXAlignment.Center)
-donesLbl.Size = UDim2.new(1, -10, 1, 0)
-donesLbl.Position = UDim2.new(0, 5, 0, 0)
-donesLbl.Font = Enum.Font.GothamBold
 
 
 
@@ -3133,16 +3142,16 @@ startGlobalPoller=function()
                                     swapPet(uuid)
                                     lastSwap[uuid] = tick()
                                 end
-                                nextCheckAt[uuid] = tick() + 0.05
+                                nextCheckAt[uuid] = tick() + 0.02 -- v12.79b: was 0.05
                             elseif t > 2 then
-                                -- v12.15: max sleep 4 -> 2 detik (lebih responsive)
-                                nextCheckAt[uuid] = tick() + math.min(t * 0.6, 2)
+                                -- v12.79b: t*0.6 max 2 -> t*0.5 max 1.5 (lebih sering re-evaluate)
+                                nextCheckAt[uuid] = tick() + math.min(t * 0.5, 1.5)
                             elseif t > 0.5 then
-                                -- Mendekati - polling 100ms
-                                nextCheckAt[uuid] = tick() + 0.1
+                                -- v12.79b: 100ms -> 50ms (responsive)
+                                nextCheckAt[uuid] = tick() + 0.05
                             else
-                                -- Hampir 0 - rapid polling 30ms biar miss ke-deteksi cepet
-                                nextCheckAt[uuid] = tick() + 0.03
+                                -- Hampir 0 - rapid polling 20ms
+                                nextCheckAt[uuid] = tick() + 0.02
                             end
                             checkingPet[uuid] = nil
                         end)
@@ -3282,9 +3291,9 @@ local function pickupAllGardenPets()
         pcall(function() unequipPet(uuid) end)
     end
 
-    -- v12.79b: tightened to 0.05+0.003N max 0.15 (was 0.08+0.005N max 0.25)
+    -- v12.79b super tight: 0.03+0.002N max 0.10
     if #uuids>0 then
-        task.wait(math.min(0.15, 0.05+#uuids*0.003))
+        task.wait(math.min(0.10, 0.03+#uuids*0.002))
     end
 
     dbg("[pickup] total: "..#uuids.." pet di-pickup dari garden (rapid-fire)")
@@ -3307,7 +3316,7 @@ local function doStart()
         totalRemoved=totalRemoved+removed
         if removed>0 then
             dbg("[doStart] pickup attempt "..attempt..": "..removed.." pet")
-            task.wait(0.05) -- v12.79b: was 0.1
+            task.wait(0.02) -- v12.79b: was 0.05
         else
             if attempt>1 then dbg("[doStart] garden bersih setelah "..(attempt-1).." attempt") end
             break
@@ -3320,7 +3329,7 @@ local function doStart()
     end
 
     statusLbl.Text="Pasang tim leveling..." statusLbl.TextColor3=C.Gold
-    -- v12.79b: rapid-fire equip team (no per-pet wait), single wait at end
+    -- v12.79b: rapid-fire equip team
     local teamPlaced=0
     for uuid,_ in pairs(teamPetUUIDs) do
         pcall(function() equipPet(uuid) end)
@@ -3328,7 +3337,7 @@ local function doStart()
     end
     if teamPlaced>0 then
         dbg("[doStart] tim "..teamPlaced.." pet di-place (rapid-fire)")
-        task.wait(math.min(0.2, 0.05+teamPlaced*0.015)) -- scaled wait, was fixed 0.15
+        task.wait(math.min(0.12, 0.03+teamPlaced*0.01)) -- was 0.05+0.015N max 0.2
     end
 
     local queue=getQueue()
@@ -3367,34 +3376,28 @@ local function doStart()
             local doneList={}
             for uuid,_ in pairs(currentLevelingUUIDs) do
                 if not equipTime[uuid] then equipTime[uuid]=tick() end
-                local age=getAgeFromUI(uuid)
-                local source=age and "ui" or nil
-                local item=nil
-                local placed=nil
-                if not age then
-                    item=findPetInBackpack(uuid)
-                    placed=findPlacedPetByUUID(uuid)
-                    if item then
-                        age=getAgeFromKG(item)
-                        if age then source="tool" end
-                    end
-                    if not age and placed then
-                        age=getPlacedPetAge(placed)
-                        if age then source="placed" end
-                    end
-                end
+                -- v12.79: cek SEMUA source tiap iter, ambil MAX. Biar gak ke-trap UI cache stale di age 100.
+                local uiAge=getAgeFromUI(uuid)
+                local item=findPetInBackpack(uuid)
+                local placed=findPlacedPetByUUID(uuid)
+                local toolAge=nil
+                if item then toolAge=getAgeFromKG(item) end
+                local placedAge=nil
+                if placed then placedAge=getPlacedPetAge(placed) end
+
+                local age=nil local source=nil
+                if uiAge and (not age or uiAge>age) then age=uiAge; source="ui" end
+                if toolAge and (not age or toolAge>age) then age=toolAge; source="tool" end
+                if placedAge and (not age or placedAge>age) then age=placedAge; source="placed" end
+
                 if age and age>=toAge then
                     dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done")
                     completedPets[uuid]=true
                     table.insert(doneList,uuid)
                 else
-                    if not age then
-                        if not item then item=findPetInBackpack(uuid) end
-                        if not placed then placed=findPlacedPetByUUID(uuid) end
-                        if (not item) and (not placed) then
-                            dbg("[monitor] "..uuid:sub(1,8).." beneran ilang -> drop")
-                            table.insert(doneList,uuid)
-                        end
+                    if (not item) and (not placed) and not uiAge then
+                        dbg("[monitor] "..uuid:sub(1,8).." beneran ilang -> drop")
+                        table.insert(doneList,uuid)
                     end
                     local elapsed=tick()-equipTime[uuid]
                     if elapsed > SAFETY_TIMEOUT then
