@@ -215,8 +215,9 @@ end
 -- ===== SWAP MECHANIC (FRIEND-7 PERSIS) =====
 local function swapPet(uuid)
     local u=fmtUUID(uuid)
+    -- v12.79c: back-to-back fire, no inter-call wait. FIFO order assumed by Roblox network batching.
+    -- Kalo swap gagal trigger cooldown reset → revert ke task.wait(0.01) atau 0.005
     pcall(function() equipRE:FireServer("UnequipPet",u) end)
-    task.wait(0.01) -- v12.79b: was 0.02
     pcall(function() equipRE:FireServer("EquipPet",u,nil) end)
 end
 
@@ -3140,7 +3141,7 @@ startGlobalPoller=function()
                                     swapPet(uuid)
                                     lastSwap[uuid] = tick()
                                 end
-                                nextCheckAt[uuid] = tick() + 0.02 -- v12.79b: was 0.05
+                                nextCheckAt[uuid] = tick() + 0.016 -- v12.79c: floor 1 Heartbeat tick
                             elseif t > 2 then
                                 -- v12.79b: t*0.6 max 2 -> t*0.5 max 1.5 (lebih sering re-evaluate)
                                 nextCheckAt[uuid] = tick() + math.min(t * 0.5, 1.5)
@@ -3148,8 +3149,8 @@ startGlobalPoller=function()
                                 -- v12.79b: 100ms -> 50ms (responsive)
                                 nextCheckAt[uuid] = tick() + 0.05
                             else
-                                -- Hampir 0 - rapid polling 20ms
-                                nextCheckAt[uuid] = tick() + 0.02
+                                -- Hampir 0 - rapid polling 16ms (1 Heartbeat tick floor)
+                                nextCheckAt[uuid] = tick() + 0.016
                             end
                             checkingPet[uuid] = nil
                         end)
