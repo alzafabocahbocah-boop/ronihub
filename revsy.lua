@@ -313,6 +313,25 @@ local function getPlacedPetAge(placedModel)
         end
     end
 
+    -- Source 4: KG dari label/value di placed model -> simple estimate (no maxKG dep biar avoid forward ref)
+    -- Untuk pet Enchanted/special yang Source 1-3 gak ngasih hasil
+    for _,d in ipairs(placedModel:GetDescendants()) do
+        if d:IsA("TextLabel") or d:IsA("StringValue") then
+            local txt=""
+            pcall(function() txt=(d.Text or d.Value or "") end)
+            if txt~="" then
+                local kg=tonumber(txt:match("%[?([%d%.]+)%s*[Kk][Gg]"))
+                if kg then
+                    -- Simple heuristic: kg>=20 = pet udah maxed (age 100); kg<5 = baby; else 50
+                    if kg>=20 then table.insert(ages,100)
+                    elseif kg<5 then table.insert(ages,1)
+                    else table.insert(ages,math.floor(kg*5)) end -- rough estimate
+                    break
+                end
+            end
+        end
+    end
+
     if #ages==0 then return nil end
     local maxAge=ages[1]
     for _,a in ipairs(ages) do if a>maxAge then maxAge=a end end
@@ -3415,10 +3434,10 @@ local function doStart()
                         dbg("[monitor] "..uuid:sub(1,8).." SAFETY TIMEOUT >10 menit, force drop")
                         table.insert(doneList,uuid)
                     end
-                    if not age and elapsed > 60 then
+                    if not age and elapsed > 15 then
                         local lastRC=lastRecheck[uuid] or 0
-                        if (tick()-lastRC) > 60 then
-                            dbg("[monitor] "..uuid:sub(1,8).." age unknown >60s, fallback recheck")
+                        if (tick()-lastRC) > 20 then
+                            dbg("[monitor] "..uuid:sub(1,8).." age unknown >15s, force recheck")
                             lastRecheck[uuid]=tick()
                             pcall(function() unequipPet(uuid) end)
                             task.wait(0.5)
