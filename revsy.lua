@@ -337,7 +337,11 @@ local function getPlacedPetAge(placedModel)
                                 age=tonumber(txt:match("(%d+)"))
                             else
                                 age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
-                                if not age then age=tonumber(txt:match("[Ll][Vv]l?[^%d]*(%d+)")) end
+                                if not age then age=tonumber(txt:match("[Ll][Vv]l?%.?[^%d]*(%d+)")) end
+                                if not age then
+                                    local n,total=txt:match("(%d+)%s*/%s*(%d+)")
+                                    if n and total and tonumber(total)==100 then age=tonumber(n) end
+                                end
                             end
                             if not age and txt:lower():match("max") and (d.Name=="PET_AGE" or lname:find("age",1,true)) then age=100 end
                             if age and age>=0 and age<=200 then table.insert(ages,age) end
@@ -690,13 +694,22 @@ local getAgeFromUI = (function()
                         local txt=""
                         pcall(function() txt=d.Text or "" end)
                         local age=nil
-                        if d.Name=="PET_AGE" then
+                        local lname=d.Name:lower()
+                        -- v12.79g: check label NAME (not just PET_AGE) + broader text patterns
+                        if d.Name=="PET_AGE" or lname:find("age",1,true) or lname:find("lvl",1,true) or lname:find("level",1,true) then
+                            -- Label namanya age-related → ambil angka pertama
                             age=tonumber(txt:match("(%d+)"))
-                            -- v12.79: handle "MAX" / "MAXED" text → treat as age 100
                             if not age and txt:lower():match("max") then age=100 end
                         else
+                            -- Label name biasa → cari pattern "Age N", "Lv N", "Level N", atau "N/100"
                             age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
-                            if not age and (d.Name=="AgeLabel" or d.Name=="Age") and txt:lower():match("max") then age=100 end
+                            if not age then age=tonumber(txt:match("[Ll][Vv]l?%.?[^%d]*(%d+)")) end
+                            -- Pattern "N/100" (biasa di progress label)
+                            if not age then
+                                local n,total=txt:match("(%d+)%s*/%s*(%d+)")
+                                if n and total and tonumber(total)==100 then age=tonumber(n) end
+                            end
+                            if not age and (lname=="agelabel" or lname=="age") and txt:lower():match("max") then age=100 end
                         end
                         if age and age>0 and age<=200 then
                             local p=d.Parent local depth=0
