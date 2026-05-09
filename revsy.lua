@@ -2374,7 +2374,7 @@ autoSendTask = task.spawn(function()
                                 if not slot.autoSendGift then break end
                                 if sendGiftToPlayer(slot.target,uuid) then okCount=okCount+1 end
                                 sentCount = sentCount + 1
-                                task.wait(0.2)
+                                task.wait(0.1) -- v12.79g: was 0.2
                             end
                             if sendStatusLbl then
                                 sendStatusLbl.Text="Slot "..slotIdx.." gift: "..okCount.."/"..sentCount.." OK"
@@ -2387,10 +2387,10 @@ autoSendTask = task.spawn(function()
                         end
                     end
                 end
-                task.wait(1)
+                task.wait(0.3) -- v12.79g: was 1 (inter-slot wait)
             end
         end
-        task.wait(math.max(5,sendInterval))
+        task.wait(math.max(1.5, sendInterval / 3)) -- v12.79g: was max(5, sendInterval) - gift lebih continuous
     end
 end)
 
