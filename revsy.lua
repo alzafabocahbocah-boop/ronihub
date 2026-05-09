@@ -1243,7 +1243,9 @@ task.spawn(function()
         local total = 0
         local done = 0
         local remaining = 0
+        local allPets = 0  -- v12.79g: all pets count (gak filter target)
         local seenUUIDs = {}
+        local seenAllUUIDs = {} -- separate dedupe set buat allPets
 
         -- Backpack pets
         local bp = player:FindFirstChild("Backpack")
@@ -1253,6 +1255,11 @@ task.spawn(function()
                     local name = getPetName(item)
                     local uuid = getPetUUID(item)
                     local uuidStr = uuid and tostring(uuid) or nil
+                    -- All pets count (no filter, no fav skip)
+                    if not (uuidStr and seenAllUUIDs[uuidStr]) then
+                        if uuidStr then seenAllUUIDs[uuidStr] = true end
+                        allPets = allPets + 1
+                    end
                     if isTargetPet(name) and not isFavorite(item) then
                         if not (uuidStr and seenUUIDs[uuidStr]) then
                             if uuidStr then seenUUIDs[uuidStr] = true end
@@ -1282,6 +1289,11 @@ task.spawn(function()
                             local ageLbl = d:FindFirstChild("PET_AGE", true)
                             if ageLbl then
                                 seenUUIDs[n] = true
+                                -- All pets juga
+                                if not seenAllUUIDs[n] then
+                                    seenAllUUIDs[n] = true
+                                    allPets = allPets + 1
+                                end
                                 -- Get name from UI
                                 local petTypeLbl = d:FindFirstChild("PET_NAME", true) or d:FindFirstChild("PET_TYPE", true)
                                 local petName = petTypeLbl and petTypeLbl.Text or ""
@@ -1304,7 +1316,7 @@ task.spawn(function()
         end
 
         if donesLbl and donesLbl.Parent then
-            donesLbl.Text = "Total:"..total.." Jadi:"..done.." Kurang:"..remaining
+            donesLbl.Text = "All:"..allPets.."  Total:"..total.." Jadi:"..done.." Kurang:"..remaining
             if total == 0 then
                 donesLbl.TextColor3 = C.Gray
             elseif remaining == 0 then
