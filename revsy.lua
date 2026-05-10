@@ -2430,6 +2430,14 @@ autoSendTask = task.spawn(function()
             if scriptShutdown then break end
             local slot=giftSlots[slotIdx]
             if slot and slot.target~="" and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
+                -- v12.79m: pre-check target online; kalo offline, status "nunggu rejoin" + skip slot
+                local targetOnline = findPlayerByName(slot.target)
+                if not targetOnline then
+                    if sendStatusLbl then
+                        sendStatusLbl.Text="Slot "..slotIdx..": nunggu "..slot.target.." rejoin..."
+                        sendStatusLbl.TextColor3=C.Gray
+                    end
+                else
                 local matched=getPetsForSlot(slot)
                 if #matched>0 then
                     if slot.autoUnfav then
@@ -2506,14 +2514,15 @@ autoSendTask = task.spawn(function()
                         end
                     end
                 end
-                task.wait(0.15) -- v12.79h: 0.3 -> 0.15 (faster slot transition)
+                end -- v12.79m: close target-online else
+                task.wait(0.08) -- v12.79n: 0.15 -> 0.08
             end
         end
-        -- v12.79h: adaptive wait - kalo ada gift activity, short wait. Kalo idle (toggle off / no pets), longer wait
+        -- v12.79n: shorter waits buat fast rejoin detection
         if anyActivity then
-            task.wait(0.3)
+            task.wait(0.15)
         else
-            task.wait(0.5) -- responsive untuk toggle ON
+            task.wait(0.2) -- responsive untuk toggle ON / target rejoin
         end
     end
 end)
