@@ -177,12 +177,12 @@ end
 
 local function isPet(item) return item:FindFirstChild("PetToolLocal") or item:FindFirstChild("PetToolServer") end
 local function isFavorite(item)
-    for _,attr in ipairs({"Loved","IsLoved","Heart","Hearted","Liked","IsLiked","IsHeart","Love","HeartIcon","Favorited","Favourited","Favorite","Favourite","IsFavorited","IsFavourited"}) do
+    -- v12.79n: strict check - cuma attribute yg explicit favorite, hapus "d"/"Loved"/"Heart" yg ambigu
+    -- Mutated pets sering punya attribute aneh yg false-positive di check lama
+    for _,attr in ipairs({"Favorited","Favourited","Favorite","Favourite","IsFavorited","IsFavourited"}) do
         local v=item:GetAttribute(attr)
         if v==true then return true end
     end
-    local d=item:GetAttribute("d")
-    if d==true then return true end
     return false
 end
 local function getAge(item)
