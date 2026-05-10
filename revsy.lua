@@ -744,7 +744,7 @@ local getAgeFromUI = (function()
     end
     return function(uuid)
         if not uuid then return nil end
-        if tick()-lastScan > 1 then pcall(rebuild) end -- v12.79: was 3s, now 1s for faster age 100 detection
+        if tick()-lastScan > 2 then pcall(rebuild) end -- v12.79p: 1s -> 2s biar gak stutter scroll
         local uuidStr=tostring(uuid):gsub("^{",""):gsub("}$","")
         if #uuidStr<10 then return nil end
         return cache[uuidStr]
@@ -871,8 +871,8 @@ donesLbl.Size = UDim2.new(1, -280, 1, 0)
 donesLbl.Position = UDim2.new(0, 215, 0, 0)
 donesLbl.Font = Enum.Font.GothamBold
 
-local minBtn=btn(TB,"-",15,C.Panel,C.Gray)
-minBtn.Size=UDim2.new(0,22,0,22) minBtn.Position=UDim2.new(1,-50,0.5,-11) stroke(minBtn,C.Dim,1.2)
+local minBtn=btn(TB,"-",18,C.Panel,C.Gray)
+minBtn.Size=UDim2.new(0,32,0,24) minBtn.Position=UDim2.new(1,-60,0.5,-12) stroke(minBtn,C.Dim,1.2)
 local closeBtn=btn(TB,"X",12,C.RDim,C.Red)
 closeBtn.Size=UDim2.new(0,22,0,22) closeBtn.Position=UDim2.new(1,-24,0.5,-11) stroke(closeBtn,C.Red,1.2)
 
@@ -917,6 +917,7 @@ local function makeScroll(yPos,height)
         Size=UDim2.new(1,-10,0,height),Position=UDim2.new(0,5,0,yPos),
         BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,
         CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,
+        ElasticBehavior=Enum.ElasticBehavior.Never, -- v12.79p: hapus elastic delay
         Visible=false,Parent=content
     })
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=s})
@@ -1354,7 +1355,7 @@ task.spawn(function()
                 donesLbl.TextColor3 = C.Teal
             end
         end
-        task.wait(2)
+        task.wait(4) -- v12.79p: 2s -> 4s biar gak stutter scroll
     end
 end)
 local function getTeamPetInfo(uuid)
@@ -1432,7 +1433,7 @@ buildTimList=function()
     local pickSearch=mk("TextBox",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Card,Text="",PlaceholderText="Cari pet...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=13,TextScaled=false,ClearTextOnFocus=false,LayoutOrder=0,Parent=picker})
     corner(pickSearch,5) stroke(pickSearch,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=pickSearch})
 
-    local petPickScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,150),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=picker})
+    local petPickScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,150),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=picker,ElasticBehavior=Enum.ElasticBehavior.Never})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=petPickScroll})
 
     local updatePreview
@@ -1614,7 +1615,7 @@ local function buildTargetList()
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=typePicker})
     local typeSearch=mk("TextBox",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Card,Text="",PlaceholderText="Cari jenis pet...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=13,TextScaled=false,ClearTextOnFocus=false,LayoutOrder=0,Parent=typePicker})
     corner(typeSearch,5) stroke(typeSearch,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=typeSearch})
-    local typeScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,120),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=typePicker})
+    local typeScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,120),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=typePicker,ElasticBehavior=Enum.ElasticBehavior.Never})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=typeScroll})
 
     local function buildTypePicker(filter)
@@ -2012,7 +2013,7 @@ local function showPickerModal(opts)
     corner(searchBox,6) stroke(searchBox,C.Dim,1)
     mk("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),Parent=searchBox})
 
-    local list=mk("ScrollingFrame",{Size=UDim2.new(1,-12,1,-78),Position=UDim2.new(0,6,0,74),BackgroundTransparency=1,ScrollBarThickness=4,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=102,Parent=box})
+    local list=mk("ScrollingFrame",{Size=UDim2.new(1,-12,1,-78),Position=UDim2.new(0,6,0,74),BackgroundTransparency=1,ScrollBarThickness=4,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=102,Parent=box,ElasticBehavior=Enum.ElasticBehavior.Never})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=list})
     mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=list})
 
@@ -2166,8 +2167,15 @@ local function buildAutoGift()
 
         local function countTypes() local n=0 for _ in pairs(slot.petTypes) do n=n+1 end return n end
         local function countMatching()
+            -- v12.79q: respect kg/age filter biar count match yg keluar di display
             local n=0 local bp=player:FindFirstChild("Backpack")
-            if bp then for _,it in pairs(bp:GetChildren()) do if isPet(it) and slot.petTypes[getBaseName(getPetName(it))] then n=n+1 end end end
+            if bp then for _,it in pairs(bp:GetChildren()) do
+                if isPet(it) and slot.petTypes[getBaseName(getPetName(it))] then
+                    if passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                        n=n+1
+                    end
+                end
+            end end
             return n
         end
 
@@ -2184,10 +2192,13 @@ local function buildAutoGift()
             if bp then
                 for _,it in pairs(bp:GetChildren()) do
                     if isPet(it) then
-                        local name=getPetName(it) local base=getBaseName(name)
-                        if not types[base] then types[base]={count=0,mut=0} end
-                        types[base].count=types[base].count+1
-                        if name~=base then types[base].mut=types[base].mut+1 end
+                        -- v12.79q: respect kg/age filter biar count cocok ama yang ke-gift
+                        if passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                            local name=getPetName(it) local base=getBaseName(name)
+                            if not types[base] then types[base]={count=0,mut=0} end
+                            types[base].count=types[base].count+1
+                            if name~=base then types[base].mut=types[base].mut+1 end
+                        end
                     end
                 end
             end
@@ -2251,14 +2262,23 @@ local function buildAutoGift()
         lbl(kgRow,"KG: -N=bawah, N=atas",11,C.Gray).Size=UDim2.new(0.7,0,1,0)
         local kgBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.kg,PlaceholderText="-60",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=kgRow})
         corner(kgBox,5) stroke(kgBox,C.Dim,1)
-        kgBox:GetPropertyChangedSignal("Text"):Connect(function() slot.kg=kgBox.Text save() end)
+        kgBox:GetPropertyChangedSignal("Text"):Connect(function()
+            slot.kg=kgBox.Text
+            -- v12.79q: refresh pickLbl count karena filter berubah
+            pickLbl.Text="Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)"
+            save()
+        end)
 
         local ageRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=7,Parent=parent})
         corner(ageRow,6) stroke(ageRow,C.Dim,1.1)
         lbl(ageRow,"Age: -N=bawah, N=atas",11,C.Gray).Size=UDim2.new(0.7,0,1,0)
         local ageBox=mk("TextBox",{Size=UDim2.new(0,60,0,20),Position=UDim2.new(1,-66,0.5,-10),BackgroundColor3=C.Panel,Text=slot.age,PlaceholderText="-100",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=ageRow})
         corner(ageBox,5) stroke(ageBox,C.Dim,1)
-        ageBox:GetPropertyChangedSignal("Text"):Connect(function() slot.age=ageBox.Text save() end)
+        ageBox:GetPropertyChangedSignal("Text"):Connect(function()
+            slot.age=ageBox.Text
+            pickLbl.Text="Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)"
+            save()
+        end)
 
         local _,fvTog,fvTS,fvSS=togRow(parent,"Kirim pet di-love juga","Default OFF: skip pet love",9)
         local function setFv(v) fvTog.Text=v and "ON" or "OFF" fvTog.BackgroundColor3=v and C.TDim or C.Panel fvTog.TextColor3=v and C.Teal or C.Gray fvTS.Color=v and C.Teal or C.Dim fvSS.Color=v and C.Teal or C.Dim end
@@ -2715,8 +2735,7 @@ do
         Size=UDim2.new(1,-10,1,-72),Position=UDim2.new(0,5,0,38),
         BackgroundTransparency=1,ScrollBarThickness=4,ScrollBarImageColor3=C.Teal,
         CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,
-        Parent=miscGroup
-    })
+        Parent=miscGroup,ElasticBehavior=Enum.ElasticBehavior.Never})
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,5),Parent=miscScroll})
     mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,3),PaddingRight=UDim.new(0,3),Parent=miscScroll})
 
@@ -3430,6 +3449,11 @@ local function getQueue()
                 end
             end
         end
+    end
+    -- v12.79o: shuffle queue biar pet beda jenis ke-equip mix, gak group per jenis
+    for i=#queue,2,-1 do
+        local j=math.random(i)
+        queue[i],queue[j]=queue[j],queue[i]
     end
     return queue
 end
