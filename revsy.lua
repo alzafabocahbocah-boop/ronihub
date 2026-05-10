@@ -493,33 +493,46 @@ local function sendGiftToPlayer(targetName, petUUID)
     local placed = findPlacedPetByUUID(petUUID)
     if placed then
         unequipPet(petUUID)
-        task.wait(0.15)
+        -- Poll sampe pet masuk backpack (max 0.5s)
+        for i=1,5 do
+            task.wait(0.1)
+            if findPetInBackpack(petUUID) then break end
+        end
     end
     if not findPetInBackpack(petUUID) then
         dbg("[gift] FAIL: pet "..short.." gak di backpack")
         return false
     end
-    -- Try direct pattern dulu (no hold, avoid Steve)
+    -- v12.79i: polling-based detection - cepet kalo sukses, fail-fast kalo gak
+    -- Try direct pattern (sukses biasa: ~100ms)
     pcall(function() giftRE:FireServer("GivePet", targetPlayer, u) end)
-    task.wait(0.4)
-    if not petStillInBackpack(petUUID) then
-        dbg("[gift] OK direct: "..short.." -> "..targetPlayer.Name)
-        return true
+    for i=1,4 do
+        task.wait(0.08)
+        if not petStillInBackpack(petUUID) then
+            dbg("[gift] OK direct: "..short.." -> "..targetPlayer.Name)
+            return true
+        end
     end
+    -- Try reverse
     pcall(function() giftRE:FireServer("GivePet", u, targetPlayer) end)
-    task.wait(0.4)
-    if not petStillInBackpack(petUUID) then
-        dbg("[gift] OK reverse: "..short.." -> "..targetPlayer.Name)
-        return true
+    for i=1,4 do
+        task.wait(0.08)
+        if not petStillInBackpack(petUUID) then
+            dbg("[gift] OK reverse: "..short.." -> "..targetPlayer.Name)
+            return true
+        end
     end
     -- Fallback: hold-as-tool method
     local item = holdPetAsTool(petUUID)
     if item then
-        task.wait(0.15)
+        for i=1,3 do
+            task.wait(0.1)
+            if petInCharacter(petUUID) then break end
+        end
         if petInCharacter(petUUID) then
             pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
-            for i = 1, 5 do
-                task.wait(0.15)
+            for i = 1, 6 do
+                task.wait(0.12)
                 if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
                     dbg("[gift] OK fallback: "..short.." -> "..targetPlayer.Name)
                     return true
@@ -2348,6 +2361,7 @@ autoSendTask = task.spawn(function()
     end
 
     while not scriptShutdown do
+        local anyActivity = false -- v12.79h: track if any gift fired this cycle (adaptive wait)
         for slotIdx=1,3 do
             if scriptShutdown then break end
             local slot=giftSlots[slotIdx]
@@ -2387,23 +2401,30 @@ autoSendTask = task.spawn(function()
                                 if not slot.autoSendGift then break end
                                 if sendGiftToPlayer(slot.target,uuid) then okCount=okCount+1 end
                                 sentCount = sentCount + 1
-                                task.wait(0.1) -- v12.79g: was 0.2
+                                task.wait(0.05) -- v12.79i: 0.25 -> 0.05 (cepet)
                             end
                             if sendStatusLbl then
                                 sendStatusLbl.Text="Slot "..slotIdx.." gift: "..okCount.."/"..sentCount.." OK"
                                 sendStatusLbl.TextColor3=okCount==sentCount and C.Teal or C.Gold
                             end
+                            anyActivity = true
                         end
                         if slot.autoSendTrade then
                             if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": trade "..#sendable.." pet -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
                             sendTradeToPlayer(slot.target, sendable)
+                            anyActivity = true
                         end
                     end
                 end
-                task.wait(0.3) -- v12.79g: was 1 (inter-slot wait)
+                task.wait(0.15) -- v12.79h: 0.3 -> 0.15 (faster slot transition)
             end
         end
-        task.wait(math.max(1.5, sendInterval / 3)) -- v12.79g: was max(5, sendInterval) - gift lebih continuous
+        -- v12.79h: adaptive wait - kalo ada gift activity, short wait. Kalo idle (toggle off / no pets), longer wait
+        if anyActivity then
+            task.wait(0.3)
+        else
+            task.wait(0.5) -- responsive untuk toggle ON
+        end
     end
 end)
 
@@ -3687,6 +3708,20 @@ if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
 do
+    -- v12.79j: auto-on swap untuk SEMUA pet di tim leveling (pas awal exe)
+    local autoEnabledFromTeam = 0
+    for uuid,_ in pairs(teamPetUUIDs) do
+        if not swapPerPet[uuid] or not swapPerPet[uuid].enabled then
+            swapPerPet[uuid] = {enabled = true}
+            autoEnabledFromTeam = autoEnabledFromTeam + 1
+        end
+    end
+    if autoEnabledFromTeam > 0 then
+        dbg("[init] auto-on swap untuk "..autoEnabledFromTeam.." pet tim (forced)")
+        d.swapPerPet = swapPerPet
+        save()
+    end
+
     -- v10.4: auto-equip semua swap pet yg saved ON (sblm nunggu START)
     local enabledList={}
     for uuid,cfg in pairs(swapPerPet) do
