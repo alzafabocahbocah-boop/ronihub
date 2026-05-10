@@ -1210,6 +1210,8 @@ for i=1,3 do
     giftSlots[i].age=giftSlots[i].age or ""
     giftSlots[i].mutationFilter=giftSlots[i].mutationFilter or ""
 end
+-- v12.79l: gift target history (riwayat penerima)
+local giftTargetHistory=d.giftTargetHistory or {}
 local antiAfk=(d.antiAfk~=false)
 local showAllPets=d.showAllPets or false
 local isRunning=false
@@ -1235,6 +1237,7 @@ local function save()
     d.autoAccGift=autoAccGift d.autoAccTrade=autoAccTrade
     d.sendInterval=sendInterval
     d.giftSlots=giftSlots
+    d.giftTargetHistory=giftTargetHistory
     d.antiAfk=antiAfk d.showAllPets=showAllPets d.showAllPetsSwap=showAllPetsSwap
     d.swapPerPet=swapPerPet d.swapPetInfoCache=swapPetInfoCache
     d.teamPetUUIDs=teamPetUUIDs d.teamPetInfoCache=teamPetInfoCache
@@ -2024,9 +2027,19 @@ local function showPickerModal(opts)
                 local sel=item.selected
                 local row=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=sel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=count,ZIndex=103,Parent=list})
                 corner(row,5) if sel then stroke(row,C.Teal,1.1) end
-                local nl=lbl(row,txt,14,sel and C.Teal or C.White) nl.Size=UDim2.new(1,-12,1,0) nl.Position=UDim2.new(0,10,0,0) nl.ZIndex=104
-                local cover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,ZIndex=104,Parent=row})
+
+                -- v12.79l: support removable items - layout: name (left) + delete X (right)
+                local hasDelete = item.removable and opts.onRemove
+                local nameWidth = hasDelete and 1 or 1
+                local nameOffset = hasDelete and -36 or -12
+
+                local nl=lbl(row,txt,14,sel and C.Teal or C.White)
+                nl.Size=UDim2.new(nameWidth, nameOffset, 1, 0)
+                nl.Position=UDim2.new(0,10,0,0)
+                nl.ZIndex=104
+
                 local cap=item
+                local cover=mk("TextButton",{Size=UDim2.new(nameWidth,nameOffset,1,0),Position=UDim2.new(0,0,0,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,ZIndex=104,Parent=row})
                 cover.MouseButton1Click:Connect(function()
                     cap.selected = not cap.selected
                     if opts.onSelect then opts.onSelect(cap.value, cap.selected) end
@@ -2036,6 +2049,18 @@ local function showPickerModal(opts)
                         close()
                     end
                 end)
+
+                if hasDelete then
+                    local delBtn=btn(row,"X",13,C.RDim,C.Red)
+                    delBtn.Size=UDim2.new(0,28,0,24)
+                    delBtn.Position=UDim2.new(1,-32,0.5,-12)
+                    delBtn.ZIndex=104
+                    stroke(delBtn,C.Red,1.1)
+                    delBtn.MouseButton1Click:Connect(function()
+                        opts.onRemove(cap.value)
+                        renderItems(searchBox.Text)
+                    end)
+                end
             end
         end
         if count==0 then
@@ -2097,9 +2122,21 @@ local function buildAutoGift()
         local trCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=trRow})
         trCover.MouseButton1Click:Connect(function()
             local items={{value="",label="(Batalin pilihan)",selected=(slot.target=="")}}
+            -- v12.79l: history items di atas (prefix bintang, with delete button)
+            local inHistorySet={}
+            for _,h in ipairs(giftTargetHistory) do
+                inHistorySet[h]=true
+                table.insert(items,{
+                    value=h,
+                    label=string.char(0xE2,0xAD,0x90).." "..h.." (riwayat)",
+                    selected=(slot.target==h),
+                    removable=true,
+                })
+            end
+            -- Player online di server
             local plist={}
             for _,p in ipairs(Players:GetPlayers()) do
-                if p ~= player then table.insert(plist,p.Name) end
+                if p ~= player and not inHistorySet[p.Name] then table.insert(plist,p.Name) end
             end
             table.sort(plist)
             for _,name in ipairs(plist) do
@@ -2113,6 +2150,15 @@ local function buildAutoGift()
                     slot.target=value
                     trLbl.Text="Target: "..(value=="" and "(klik pilih)" or value)
                     trStroke.Color=(value=="" and C.Dim or C.Teal)
+                    save()
+                end,
+                onRemove=function(value)
+                    -- Remove dari history
+                    for i=#giftTargetHistory,1,-1 do
+                        if giftTargetHistory[i]==value then
+                            table.remove(giftTargetHistory,i)
+                        end
+                    end
                     save()
                 end,
             })
@@ -2360,6 +2406,24 @@ autoSendTask = task.spawn(function()
         return list
     end
 
+    -- v12.79j: cek apakah pet masih match slot config (buat live re-check mid-batch)
+    local function petStillMatches(uuid, slot)
+        if slot.target == "" then return false end
+        local bp = player:FindFirstChild("Backpack")
+        if not bp then return false end
+        for _,item in pairs(bp:GetChildren()) do
+            if isPet(item) then
+                local u = getPetUUID(item)
+                if u and tostring(u) == tostring(uuid) then
+                    local fullName = getPetName(item)
+                    local base = getBaseName(fullName)
+                    return slot.petTypes[base] == true
+                end
+            end
+        end
+        return false -- pet udah gak di backpack
+    end
+
     while not scriptShutdown do
         local anyActivity = false -- v12.79h: track if any gift fired this cycle (adaptive wait)
         for slotIdx=1,3 do
@@ -2392,6 +2456,12 @@ autoSendTask = task.spawn(function()
                         end
                     end
 
+                    -- v12.79k: shuffle sendable biar gift order random (mix antar pet type)
+                    for i=#sendable,2,-1 do
+                        local j=math.random(i)
+                        sendable[i],sendable[j]=sendable[j],sendable[i]
+                    end
+
                     if #sendable>0 then
                         if slot.autoSendGift then
                             if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": gift "..#sendable.." -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
@@ -2399,15 +2469,35 @@ autoSendTask = task.spawn(function()
                             local sentCount=0
                             for _,uuid in ipairs(sendable) do
                                 if not slot.autoSendGift then break end
-                                if sendGiftToPlayer(slot.target,uuid) then okCount=okCount+1 end
-                                sentCount = sentCount + 1
-                                task.wait(0.05) -- v12.79i: 0.25 -> 0.05 (cepet)
+                                -- v12.79j: live re-check - target/petType di-clear → skip pet ini
+                                if slot.target == "" then break end
+                                if not petStillMatches(uuid, slot) then
+                                    sentCount = sentCount + 1
+                                    task.wait(0.02)
+                                else
+                                    if sendGiftToPlayer(slot.target,uuid) then okCount=okCount+1 end
+                                    sentCount = sentCount + 1
+                                    task.wait(0.05)
+                                end
                             end
                             if sendStatusLbl then
                                 sendStatusLbl.Text="Slot "..slotIdx.." gift: "..okCount.."/"..sentCount.." OK"
                                 sendStatusLbl.TextColor3=okCount==sentCount and C.Teal or C.Gold
                             end
                             anyActivity = true
+                            -- v12.79l: save target ke history kalo ada gift sukses
+                            if okCount>0 and slot.target~="" then
+                                local exists=false
+                                for _,h in ipairs(giftTargetHistory) do
+                                    if h==slot.target then exists=true break end
+                                end
+                                if not exists then
+                                    table.insert(giftTargetHistory,1,slot.target) -- newest at top
+                                    -- cap at 20 entries
+                                    while #giftTargetHistory>20 do table.remove(giftTargetHistory) end
+                                    save()
+                                end
+                            end
                         end
                         if slot.autoSendTrade then
                             if sendStatusLbl then sendStatusLbl.Text="Slot "..slotIdx..": trade "..#sendable.." pet -> "..slot.target sendStatusLbl.TextColor3=C.Teal end
