@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.98"
+local SCRIPT_VERSION="v12.99"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Setting Leveling: Jenis Pet, Sampai KG, Jumlah Pet, Equip Target Lvl)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Jenis Pet dropdown picker)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1204,6 +1204,8 @@ miniZBtn.MouseButton1Click:Connect(function() setMinimized(false) end)
 local teamPetUUIDs=d.teamPetUUIDs or {}
 local teamPetInfoCache=d.teamPetInfoCache or {}
 
+-- v12.99: forward declare showPickerModal biar bisa dipake di cfgCard
+local showPickerModal
 local config=d.config or {equipInterval=5,rejoinMinutes=30}
 -- v12.98: ensure new fields exist (backwards compat)
 config.petType = config.petType or ""
@@ -1433,7 +1435,59 @@ buildTimList=function()
         return box
     end
 
-    local jpBox = mkInputRow("Jenis Pet", config.petType, 1, function(v) config.petType = v end, false)
+    -- Jenis Pet - dropdown button yang opens picker modal
+    local jpRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=cfgCard})
+    corner(jpRow,5) stroke(jpRow,C.Dim,1)
+    lbl(jpRow,"Jenis Pet",11,C.Gray).Size=UDim2.new(0.45,0,1,0)
+    local jpBtn=btn(jpRow,(config.petType ~= "" and config.petType) or "Pilih...",11,C.Panel,C.Teal)
+    jpBtn.Size=UDim2.new(0,140,0,20) jpBtn.Position=UDim2.new(1,-146,0.5,-10)
+    jpBtn.TextXAlignment=Enum.TextXAlignment.Center
+    corner(jpBtn,5) stroke(jpBtn,C.Dim,1)
+    jpBtn.MouseButton1Click:Connect(function()
+        -- Scan PetAnimations folder untuk daftar pet types
+        local items = {}
+        local seen = {}
+        pcall(function()
+            local petAnims = RS:FindFirstChild("Assets") and RS.Assets:FindFirstChild("Animations") and RS.Assets.Animations:FindFirstChild("PetAnimations")
+            if petAnims then
+                for _, c in pairs(petAnims:GetChildren()) do
+                    if not seen[c.Name] then
+                        seen[c.Name] = true
+                        table.insert(items, {value=c.Name, label=c.Name, selected=(c.Name == config.petType)})
+                    end
+                end
+            end
+        end)
+        -- Tambah dari bp/placed kalo gak ada di registry
+        pcall(function()
+            local bp = player:FindFirstChild("Backpack")
+            if bp then
+                for _, it in pairs(bp:GetChildren()) do
+                    if isPet and isPet(it) then
+                        local base = getBaseName and getBaseName(getPetName and getPetName(it) or it.Name) or it.Name
+                        if base and base ~= "" and not seen[base] then
+                            seen[base] = true
+                            table.insert(items, {value=base, label=base.." (bp)", selected=(base == config.petType)})
+                        end
+                    end
+                end
+            end
+        end)
+        table.sort(items, function(a,b) return a.label < b.label end)
+        if #items == 0 then
+            table.insert(items, {value="__empty__", label="(no pets discovered)", selected=false})
+        end
+        showPickerModal({
+            title = "Pilih Jenis Pet",
+            items = items, multi = false,
+            onSelect = function(value)
+                if value == "__empty__" then return end
+                config.petType = value
+                save()
+                jpBtn.Text = value
+            end,
+        })
+    end)
     local kgBox = mkInputRow("Sampai KG", config.targetKG, 2, function(v) config.targetKG = math.max(1, v) end, true)
     local pcBox = mkInputRow("Jumlah Pet", config.petCount, 3, function(v) config.petCount = math.max(1, math.min(100, v)) end, true)
     local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 4, function(v) config.equipTargetLvl = math.max(1, v) end, true)
@@ -2037,7 +2091,7 @@ local sendStatusLbl=nil
 
 -- v12.79: Modal picker helper — floating popup overlay (replaces inline expanding pickers)
 -- usage: showPickerModal({title=, items={{value=,label=,selected=}}, multi=, onSelect=, emptyText=})
-local function showPickerModal(opts)
+showPickerModal = function(opts)
     local backdrop=mk("Frame",{Size=UDim2.new(1,0,1,0),Position=UDim2.new(0,0,0,0),BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=0.45,BorderSizePixel=0,ZIndex=100,Parent=main})
     local function close()
         if backdrop and backdrop.Parent then backdrop:Destroy() end
