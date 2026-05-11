@@ -2238,11 +2238,24 @@ local function buildAutoGift()
                 {value="",label="(Semua mutasi)",selected=(slot.mutationFilter=="")},
                 {value="__nomut__",label="[TANPA MUTASI]",selected=(slot.mutationFilter=="__nomut__")},
             }
+            -- v12.79: dedup picker - prefer spaced version untuk multi-word (Christmas Rally > ChristmasRally)
+            local seenNorm = {}
+            local canonicals = {}
             for _,prefix in ipairs(MUTATION_PREFIXES) do
-                local clean=prefix:gsub("%s+$","")
+                local clean = prefix:gsub("%s+$","")
                 if clean ~= "" then
-                    table.insert(items,{value=clean,label=clean,selected=(slot.mutationFilter==clean)})
+                    local norm = clean:gsub("%s+",""):lower()
+                    local idx = seenNorm[norm]
+                    if not idx then
+                        seenNorm[norm] = #canonicals + 1
+                        table.insert(canonicals, clean)
+                    elseif clean:find(" ") and not canonicals[idx]:find(" ") then
+                        canonicals[idx] = clean  -- replace with spaced version
+                    end
                 end
+            end
+            for _, clean in ipairs(canonicals) do
+                table.insert(items,{value=clean,label=clean,selected=(slot.mutationFilter==clean)})
             end
             showPickerModal({
                 title="Pilih Mutation Filter (Gift "..slotIdx..")",
@@ -2413,7 +2426,16 @@ autoSendTask = task.spawn(function()
                         local mfPass
                         if mf == "" then mfPass = true
                         elseif mf == "__nomut__" then mfPass = (base == fullName)
-                        else mfPass = fullName:find(mf, 1, true) ~= nil end
+                        else
+                            -- v12.79: try both formats - "Christmas Rally" matches "ChristmasRally..." too
+                            mfPass = fullName:find(mf, 1, true) ~= nil
+                            if not mfPass then
+                                local mfAlt = mf:gsub("%s+","")  -- no spaces
+                                if mfAlt ~= mf then
+                                    mfPass = fullName:find(mfAlt, 1, true) ~= nil
+                                end
+                            end
+                        end
                         if mfPass and passKgFilter(item,slot.kg) and passAgeFilter(item,slot.age) then
                             local uuid=getPetUUID(item)
                             if uuid then table.insert(list,{uuid=tostring(uuid),fav=isFavorite(item)}) end
