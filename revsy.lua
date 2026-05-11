@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.83"
+local SCRIPT_VERSION="v12.84"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (fix: strip [kg] suffix di placed pet name biar match filter)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (multi-source placed pet name + diagnostic status)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -3226,6 +3226,28 @@ task.spawn(function()
     end
 end)
 
+-- v12.84: Multi-source placed pet name lookup (UI + workspace model attributes/labels)
+M78.getPlacedPetName = function(uuid)
+    -- Source 1: ActivePetUI scan (PET_NAME TextLabel)
+    local n = getPetNameFromUI(uuid)
+    if n and #n > 0 then return n, "ui" end
+    -- Source 2: workspace placed model attributes
+    local m = findPlacedPetByUUID(uuid)
+    if m then
+        for _, attr in ipairs({"PetName","PET_NAME","PET_TYPE","PetType","Type","Name"}) do
+            local v = m:GetAttribute(attr)
+            if type(v) == "string" and #v > 0 and not v:find("-") then return v, "attr_"..attr end
+        end
+        -- Source 3: walk descendants for any TextLabel with pet-name pattern
+        for _, c in pairs(m:GetDescendants()) do
+            if (c.Name == "PET_NAME" or c.Name == "PET_TYPE") and c:IsA("TextLabel") then
+                if c.Text and #c.Text > 0 then return c.Text, "model_"..c.Name end
+            end
+        end
+    end
+    return nil, "not_found"
+end
+
 -- v12.79m: Auto Boost loop - keep Pet Toy equipped + filter by selected pet types
 task.spawn(function()
     while not scriptShutdown do
@@ -3245,15 +3267,13 @@ task.spawn(function()
                     local placed = M78.getPlacedPets()
                     for uuid, _ in pairs(placed) do
                         placedCount = placedCount + 1
-                        local nm = getPetNameFromUI(uuid)
+                        local nm, src = M78.getPlacedPetName(uuid)
                         if nm and #nm > 0 then
                             -- v12.83: strip [X kg] suffix dulu sebelum getBaseName
-                            -- karena PET_NAME di UI bisa berformat "Mimic Octopus [12 kg]"
                             local cleanName = nm:match("^(.-)%s*%[") or nm
                             local base = getBaseName(cleanName)
                             placedBaseSet[base] = true
                             if #placedNames < 3 then table.insert(placedNames, cleanName) end
-                            -- Cek match filter
                             if M78.boostPetTypes[base] then
                                 if #matchingNames < 3 then table.insert(matchingNames, cleanName) end
                             end
@@ -3286,12 +3306,20 @@ task.spawn(function()
                 end
 
                 if not shouldEquip then
-                    -- Unequip toy kalo lagi ke-equip & gak ada pet yang match filter
                     if equipped then
                         pcall(function() hum:UnequipTools() end)
                     end
                     if filterCount > 0 then
-                        M78.setStatus("Boost: filter "..filterCount.." type, no match | placed:"..placedCount, C.Gray)
+                        -- v12.84: show detected names buat debug filter mismatch
+                        local detected = ""
+                        local cnt = 0
+                        for n in pairs(placedBaseSet) do
+                            detected = detected..(detected==""and"" or",")..n
+                            cnt = cnt + 1
+                            if cnt >= 3 then break end
+                        end
+                        if detected == "" then detected = "(empty - name extraction fail)" end
+                        M78.setStatus("Boost: no match | filter:"..filterCount.." placed:"..placedCount.." got:"..detected, C.Gold)
                     else
                         M78.setStatus("Boost: no placed pet", C.Gold)
                     end
