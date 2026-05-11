@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.94"
+local SCRIPT_VERSION="v12.95"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (warna kuning-amber, sidebar non-bold)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (warna kuning cerah kayak NODE HUB)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -145,8 +145,8 @@ local C={
     White=Color3.fromRGB(225,225,225),Gray=Color3.fromRGB(120,120,120),Dim=Color3.fromRGB(55,55,55),
     Green=Color3.fromRGB(70,190,90),Red=Color3.fromRGB(200,60,60),RDim=Color3.fromRGB(35,10,10),
     Gold=Color3.fromRGB(220,160,0),Blue=Color3.fromRGB(80,150,255),
-    -- v12.94: warna ganti dari hijau-teal ke kuning agak orenan abu (warm amber)
-    Teal=Color3.fromRGB(220,170,80),TDim=Color3.fromRGB(38,30,15),
+    -- v12.95: warna kuning cerah kayak NODE HUB
+    Teal=Color3.fromRGB(255,215,80),TDim=Color3.fromRGB(45,35,12),
 }
 
 local function mk(cls,props)
@@ -885,7 +885,6 @@ local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSiz
 corner(TB,10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5),Position=UDim2.new(0,0,1,-1.5),BackgroundColor3=C.Teal,BorderSizePixel=0,Parent=TB})
 local titleLbl=lbl(TB,"ZENX ELEPHANT 60KG  "..SCRIPT_VERSION,13,C.Teal)
-titleLbl.Font = Enum.Font.Gotham
 titleLbl.Size=UDim2.new(0,205,1,0) titleLbl.Position=UDim2.new(0,8,0,0)
 
 -- v12.79: stat "Total Jadi Kurang" pindah dari bottom ke title bar (samping nama)
@@ -919,8 +918,6 @@ local function makeSidebarBtn(name, idx)
     b.Size = UDim2.new(1, 0, 0, 44)
     b.LayoutOrder = idx
     b.TextWrapped = true
-    -- v12.94: cukup warna, jangan tebel - pakai Gotham regular
-    b.Font = Enum.Font.Gotham
     stroke(b, C.Dim, 1.1)
     sectionBtns[idx] = b
     return b
@@ -4503,4 +4500,4 @@ end)()
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxElephant60kg "..SCRIPT_VERSION.." loaded! v12.94: warna amber + sidebar non-bold")
+print("ZenxElephant60kg "..SCRIPT_VERSION.." loaded! v12.95: warna kuning cerah NODE HUB style")
