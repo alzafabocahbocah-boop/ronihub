@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.82"
+local SCRIPT_VERSION="v12.83"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (boost multi-select sizes + ALL_PETS pet picker)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (fix: strip [kg] suffix di placed pet name biar match filter)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2995,7 +2995,9 @@ do
             for uuid, _ in pairs(placed) do
                 local nm = getPetNameFromUI(uuid)
                 if nm then
-                    local base = getBaseName(nm)
+                    -- v12.83: strip [kg] suffix dulu
+                    local cleanName = nm:match("^(.-)%s*%[") or nm
+                    local base = getBaseName(cleanName)
                     if base and base ~= "" and not seen[base] then
                         seen[base] = true
                         table.insert(items, {value=base, label=base.." (placed)", selected=(M78.boostPetTypes[base]==true)})
@@ -3245,12 +3247,15 @@ task.spawn(function()
                         placedCount = placedCount + 1
                         local nm = getPetNameFromUI(uuid)
                         if nm and #nm > 0 then
-                            local base = getBaseName(nm)
+                            -- v12.83: strip [X kg] suffix dulu sebelum getBaseName
+                            -- karena PET_NAME di UI bisa berformat "Mimic Octopus [12 kg]"
+                            local cleanName = nm:match("^(.-)%s*%[") or nm
+                            local base = getBaseName(cleanName)
                             placedBaseSet[base] = true
-                            if #placedNames < 3 then table.insert(placedNames, nm) end
+                            if #placedNames < 3 then table.insert(placedNames, cleanName) end
                             -- Cek match filter
                             if M78.boostPetTypes[base] then
-                                if #matchingNames < 3 then table.insert(matchingNames, nm) end
+                                if #matchingNames < 3 then table.insert(matchingNames, cleanName) end
                             end
                         end
                     end
