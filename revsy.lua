@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.85"
+local SCRIPT_VERSION="v12.87"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (fix: prefer PET_TYPE over PET_NAME - nickname issue)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (firesignal Tool.Equipped + toy inspector + more boost remote patterns)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2710,8 +2710,10 @@ do
         M78.buyGearRE = ge:FindFirstChild("BuyGearStock")
         M78.buyEggRE = ge:FindFirstChild("BuyPetEgg") or ge:FindFirstChild("BuyEgg") or ge:FindFirstChild("BuyEggStock")
         M78.feedRE = ge:FindFirstChild("ActivePetService")
+        -- v12.86: Pet boost remote untuk apply toy boost ke pet
+        M78.petBoostRE = ge:FindFirstChild("PetBoostService")
     end
-    dbg("[misc78] remotes seed="..(M78.buySeedRE and "OK" or "MISS").." gear="..(M78.buyGearRE and "OK" or "MISS").." egg="..(M78.buyEggRE and "OK" or "MISS").." feed="..(M78.feedRE and "OK" or "MISS"))
+    dbg("[misc78] remotes seed="..(M78.buySeedRE and "OK" or "MISS").." gear="..(M78.buyGearRE and "OK" or "MISS").." egg="..(M78.buyEggRE and "OK" or "MISS").." feed="..(M78.feedRE and "OK" or "MISS").." petBoost="..(M78.petBoostRE and "OK" or "MISS"))
 end
 
 -- ---- Helpers (assigned to M78 to avoid creating new locals) ----
@@ -3276,20 +3278,22 @@ task.spawn(function()
                 local placedNames = {}        -- for display
                 local placedBaseSet = {}      -- for filter check
                 local placedCount = 0
-                local matchingNames = {}      -- pets yang match filter
+                local matchingNames = {}      -- pets yang match filter (display names)
+                local matchingUUIDs = {}      -- v12.86: pets yang match filter (UUIDs untuk fire boost)
                 pcall(function()
                     local placed = M78.getPlacedPets()
                     for uuid, _ in pairs(placed) do
                         placedCount = placedCount + 1
                         local nm, src = M78.getPlacedPetName(uuid)
                         if nm and #nm > 0 then
-                            -- v12.83: strip [X kg] suffix dulu sebelum getBaseName
                             local cleanName = nm:match("^(.-)%s*%[") or nm
                             local base = getBaseName(cleanName)
                             placedBaseSet[base] = true
                             if #placedNames < 3 then table.insert(placedNames, cleanName) end
                             if M78.boostPetTypes[base] then
                                 if #matchingNames < 3 then table.insert(matchingNames, cleanName) end
+                                -- v12.86: track matching UUIDs untuk fire boost
+                                table.insert(matchingUUIDs, uuid)
                             end
                         end
                     end
@@ -3349,7 +3353,53 @@ task.spawn(function()
 
                     if equipped then
                         local size = equipped.Name:match("^(%S+)%s+Pet Toy") or "?"
-                        M78.setStatus("Boost: "..size.." equipped"..listStr, C.Teal)
+                        -- v12.87: fire Tool.Equipped signal supaya local-script di toy ke-trigger
+                        -- (PEACOCK equip might not fire client-side Equipped event)
+                        pcall(function() if firesignal then firesignal(equipped.Equipped) end end)
+                        pcall(function() if firesignal then firesignal(equipped.Activated) end end)
+                        pcall(function()
+                            if getconnections then
+                                for _, conn in pairs(getconnections(equipped.Equipped)) do
+                                    pcall(function() conn:Fire() end)
+                                end
+                            end
+                        end)
+                        pcall(function()
+                            if getconnections then
+                                for _, conn in pairs(getconnections(equipped.Activated)) do
+                                    pcall(function() conn:Fire() end)
+                                end
+                            end
+                        end)
+                        -- v12.86: USE toy ke matching pets (gak cukup di-equip doang)
+                        local boostFires = 0
+                        -- Method A: Tool:Activate() (simulate click while holding)
+                        pcall(function() equipped:Activate() end)
+                        -- Method B: fire PetBoostService remote dengan pet UUID
+                        if M78.petBoostRE then
+                            local toyName = equipped.Name
+                            local targets = (#matchingUUIDs > 0) and matchingUUIDs or {}
+                            -- Kalo filter empty, fire ke semua placed pets
+                            if filterCount == 0 then
+                                targets = {}
+                                pcall(function()
+                                    for u, _ in pairs(M78.getPlacedPets()) do
+                                        table.insert(targets, u)
+                                    end
+                                end)
+                            end
+                            for _, u in ipairs(targets) do
+                                local uuidBracket = "{"..tostring(u):gsub("^{",""):gsub("}$","").."}"
+                                pcall(function() M78.petBoostRE:FireServer("UseToy", uuidBracket) end)
+                                pcall(function() M78.petBoostRE:FireServer(uuidBracket, toyName) end)
+                                pcall(function() M78.petBoostRE:FireServer(toyName, uuidBracket) end)
+                                pcall(function() M78.petBoostRE:FireServer(uuidBracket) end)
+                                pcall(function() M78.petBoostRE:FireServer("Boost", uuidBracket) end)
+                                boostFires = boostFires + 1
+                                task.wait(0.05)
+                            end
+                        end
+                        M78.setStatus("Boost: "..size.." used→"..boostFires..listStr, C.Teal)
                     else
                         -- v12.82: multi-select size - try di urutan Large > Medium > Small (atau apa yang dipilih)
                         local sizePref = {}
@@ -3382,6 +3432,17 @@ task.spawn(function()
                                 pcall(function() found.Parent = char end)
                             end
                             task.wait(0.1)
+                            -- v12.87: one-time inspection log isi toy
+                            if not M78.toyInspected then
+                                M78.toyInspected = true
+                                pcall(function()
+                                    dbg("[boost] === TOY INSPECT: "..found.Name.." ===")
+                                    for _, c in pairs(found:GetDescendants()) do
+                                        dbg("[boost] toy child: "..c.ClassName.." | "..c.Name)
+                                    end
+                                    dbg("[boost] === END TOY INSPECT ===")
+                                end)
+                            end
                             local nowEquipped = (found.Parent == char)
                             M78.setStatus("Boost: "..(nowEquipped and "EQUIP" or "FAIL").." "..(found.Name:match("^(%S+)") or "?")..listStr,
                                           nowEquipped and C.Teal or C.Gold)
