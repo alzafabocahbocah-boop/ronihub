@@ -2585,6 +2585,10 @@ local M78 = {
     autoBuyGear = d.autoBuyGear or false,
     autoFeedPet = d.autoFeedPet or false,
     autoCollect = d.autoCollect or false,
+    -- v12.79m: Auto Boost - keep Pet Toy equipped untuk passive XP boost
+    autoBoost = d.autoBoost or false,
+    boostToySize = d.boostToySize or "Medium", -- Small / Medium / Large / Any
+    boostPetTypes = d.boostPetTypes or {}, -- v12.79o: pet types yang trigger boost (empty = semua)
     feedThresholdPct = d.feedThresholdPct or 70, -- legacy, gak dipake lagi tp tetep di-load biar gak break
     feedCycleMin = d.feedCycleMin or 15,
     feedDuration = 20,
@@ -2882,6 +2886,98 @@ do
 
     miscTogRow("Auto Collect Fruit", "Panen semua buah di kebun (auto-pause kalo bp full)", 6, "autoCollect")
 
+    -- v12.79m: Auto Boost - keep Pet Toy equipped untuk passive XP boost
+    miscTogRow("Auto Boost (Pet Toy)", "Hold Pet Toy biar dapet passive XP boost", 7, "autoBoost")
+
+    -- Toy size picker
+    local sizeRow = mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=8,Parent=miscScroll})
+    corner(sizeRow,6) local sizeStroke = stroke(sizeRow,C.Dim,1.1)
+    lbl(sizeRow,"Toy size: "..M78.boostToySize,12,C.White).Size=UDim2.new(0.65,0,1,0)
+    local sizeBtn = btn(sizeRow, "Ganti", 11, C.TDim, C.Teal)
+    sizeBtn.Size = UDim2.new(0,60,0,22) sizeBtn.Position = UDim2.new(1,-68,0.5,-11)
+    stroke(sizeBtn, C.Teal, 1)
+    sizeBtn.MouseButton1Click:Connect(function()
+        local sizes = {"Small","Medium","Large","Any"}
+        local items = {}
+        for _, s in ipairs(sizes) do
+            table.insert(items, {value=s, label=s, selected=(M78.boostToySize==s)})
+        end
+        showPickerModal({
+            title = "Pilih Toy Size",
+            items = items, multi = false,
+            onSelect = function(value, _)
+                M78.boostToySize = value
+                d.boostToySize = value
+                save()
+                local lbl = sizeRow:FindFirstChildOfClass("TextLabel")
+                if lbl then lbl.Text = "Toy size: "..value end
+            end,
+        })
+    end)
+
+    -- v12.79o: Pet type filter picker
+    local function countBoostTypes()
+        local n = 0
+        for _ in pairs(M78.boostPetTypes) do n = n + 1 end
+        return n
+    end
+    local petRow = mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=9,Parent=miscScroll})
+    corner(petRow,6) stroke(petRow,C.Dim,1.1)
+    local function petRowText()
+        local n = countBoostTypes()
+        return n == 0 and "Pet filter: (semua placed pet)" or ("Pet filter: "..n.." type")
+    end
+    local petLbl = lbl(petRow, petRowText(), 12, C.White)
+    petLbl.Size = UDim2.new(0.65,0,1,0)
+    local petBtn = btn(petRow, "Pilih", 11, C.TDim, C.Teal)
+    petBtn.Size = UDim2.new(0,60,0,22) petBtn.Position = UDim2.new(1,-68,0.5,-11)
+    stroke(petBtn, C.Teal, 1)
+    petBtn.MouseButton1Click:Connect(function()
+        -- Build picker items dari pet di backpack + placed
+        local items = {}
+        local seen = {}
+        local bp = player:FindFirstChild("Backpack")
+        if bp then
+            for _, it in pairs(bp:GetChildren()) do
+                if isPet(it) then
+                    local base = getBaseName(getPetName(it))
+                    if base and base ~= "" and not seen[base] then
+                        seen[base] = true
+                        table.insert(items, {value=base, label=base, selected=(M78.boostPetTypes[base]==true)})
+                    end
+                end
+            end
+        end
+        pcall(function()
+            local placed = M78.getPlacedPets()
+            for uuid, _ in pairs(placed) do
+                local nm = getPetNameFromUI(uuid)
+                if nm then
+                    local base = getBaseName(nm)
+                    if base and base ~= "" and not seen[base] then
+                        seen[base] = true
+                        table.insert(items, {value=base, label=base.." (placed)", selected=(M78.boostPetTypes[base]==true)})
+                    end
+                end
+            end
+        end)
+        table.sort(items, function(a,b) return a.label < b.label end)
+        if #items == 0 then
+            table.insert(items, {value="__empty__", label="(no pet in bp/placed)", selected=false})
+        end
+        showPickerModal({
+            title = "Pilih pet yang trigger boost (multi)",
+            items = items, multi = true,
+            onSelect = function(value, isSelected)
+                if value == "__empty__" then return end
+                if isSelected then M78.boostPetTypes[value] = true else M78.boostPetTypes[value] = nil end
+                d.boostPetTypes = M78.boostPetTypes
+                save()
+                petLbl.Text = petRowText()
+            end,
+        })
+    end)
+
     M78.statusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
     M78.statusLbl.Size = UDim2.new(1,-10,0,26)
     M78.statusLbl.Position = UDim2.new(0,5,1,-30)
@@ -3083,6 +3179,116 @@ task.spawn(function()
             M78.collectNextStartAt = 0
         end
         task.wait(1)
+    end
+end)
+
+-- v12.79m: Auto Boost loop - keep Pet Toy equipped + filter by selected pet types
+task.spawn(function()
+    while not scriptShutdown do
+        if M78.autoBoost then
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local bp = player:FindFirstChild("Backpack")
+            if not (char and hum and bp) then
+                M78.setStatus("Boost: no char/bp", C.Gold)
+            else
+                -- Get list of placed pets + their base names
+                local placedNames = {}        -- for display
+                local placedBaseSet = {}      -- for filter check
+                local placedCount = 0
+                local matchingNames = {}      -- pets yang match filter
+                pcall(function()
+                    local placed = M78.getPlacedPets()
+                    for uuid, _ in pairs(placed) do
+                        placedCount = placedCount + 1
+                        local nm = getPetNameFromUI(uuid)
+                        if nm and #nm > 0 then
+                            local base = getBaseName(nm)
+                            placedBaseSet[base] = true
+                            if #placedNames < 3 then table.insert(placedNames, nm) end
+                            -- Cek match filter
+                            if M78.boostPetTypes[base] then
+                                if #matchingNames < 3 then table.insert(matchingNames, nm) end
+                            end
+                        end
+                    end
+                end)
+
+                -- Determine apakah boost SHOULD aktif:
+                -- - Kalo filter empty (no selection) → always aktif (kayak sebelumnya)
+                -- - Kalo filter ada → aktif kalo ada placed pet yang match
+                local filterCount = 0
+                for _ in pairs(M78.boostPetTypes) do filterCount = filterCount + 1 end
+                local shouldEquip = true
+                local matchCount = #matchingNames
+                if filterCount > 0 then
+                    shouldEquip = false
+                    -- Check if any selected type is placed
+                    for petType, _ in pairs(M78.boostPetTypes) do
+                        if placedBaseSet[petType] then shouldEquip = true break end
+                    end
+                end
+
+                -- Cek toy yang equipped
+                local equipped = nil
+                for _, t in pairs(char:GetChildren()) do
+                    if t:IsA("Tool") and t.Name:find("Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
+                        equipped = t
+                        break
+                    end
+                end
+
+                if not shouldEquip then
+                    -- Unequip toy kalo lagi ke-equip & gak ada pet yang match filter
+                    if equipped then
+                        pcall(function() hum:UnequipTools() end)
+                    end
+                    if filterCount > 0 then
+                        M78.setStatus("Boost: filter "..filterCount.." type, no match | placed:"..placedCount, C.Gray)
+                    else
+                        M78.setStatus("Boost: no placed pet", C.Gold)
+                    end
+                else
+                    -- shouldEquip = true → keep toy equipped
+                    local listStr
+                    if filterCount > 0 then
+                        listStr = " | match "..matchCount..": "..table.concat(matchingNames, ", ")
+                    else
+                        listStr = " | "..placedCount.." pet: "..table.concat(placedNames, ", ")
+                        if placedCount > #placedNames then listStr = listStr.." +"..(placedCount-#placedNames) end
+                    end
+
+                    if equipped then
+                        local size = equipped.Name:match("^(%S+)%s+Pet Toy") or "?"
+                        M78.setStatus("Boost: "..size.." equipped"..listStr, C.Teal)
+                    else
+                        local pref = M78.boostToySize or "Medium"
+                        local found = nil
+                        if pref ~= "Any" then
+                            for _, t in pairs(bp:GetChildren()) do
+                                if t:IsA("Tool") and t.Name:find(pref.." Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
+                                    found = t break
+                                end
+                            end
+                        end
+                        if not found then
+                            for _, t in pairs(bp:GetChildren()) do
+                                if t:IsA("Tool") and t.Name:find("Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
+                                    found = t break
+                                end
+                            end
+                        end
+                        if found then
+                            pcall(function() hum:EquipTool(found) end)
+                            M78.setStatus("Boost: equipping "..(found.Name:match("^(%S+)") or "?")..listStr, C.Teal)
+                        else
+                            M78.setStatus("Boost: NO Pet Toy di bp"..listStr, C.Gold)
+                        end
+                    end
+                end
+            end
+        end
+        task.wait(2)
     end
 end)
 
