@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.78"
+local SCRIPT_VERSION="v12.79"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (misc rewrite v1.4 IIFE+M78)")
 
@@ -624,29 +624,27 @@ local function passAgeFilter(item,filterStr)
     return true
 end
 
+-- v12.79: MUTATION_PREFIXES verified dari PetMutationRegistry + GetPetMutationNames (50 real mutations)
+-- Excluding "Normal" (default state, never prefix). Include space variant for PascalCase multi-word.
 local MUTATION_PREFIXES={
-    "Everchanted ","Enchanted ","Shiny ","Rainbow ","Wet ",
-    "Chocolate ","Zombified ","Disco ","Gold ","Frozen ",
-    "Lunar ","Plasma ","Angelic ","Corrupt ","Crystal ",
-    "Verdant ","Blazing ","Icy ","Storm ","Shadow ",
-    "Celestial ","Infernal ","Ancient ","Mythic ","Divine ",
-    "Venom ","Mimic ","Cosmic ","Galactic ","Stellar ",
-    "Toxic ","Radiant ","Mystic ","Phantom ","Spectral ",
-    "Eldritch ","Primal ","Ethereal ","Astral ","Chromatic ",
-    "Prismatic ","Volcanic ","Glacial ","Tempest ","Solar ",
-    -- v12.19: tambahan mutation baru
-    "Nightmare ","Dreadbound ","Ghostly ","Diamond ","Bearded ",
-    "Glimmering ","Sparkling ","Inverted ","Bloodlust ","Dawn ",
-    "Twilight ","Eclipse ","Aurora ","Frostbite ","Inferno ",
-    "Emerald ","Ruby ","Sapphire ","Amethyst ","Obsidian ",
-    "Crimson ","Azure ","Emerald ","Topaz ","Onyx ",
-    "Demonic ","Holy ","Cursed ","Blessed ","Chaotic ",
-    "Pristine ","Pure ","Tainted ","Corrupted ","Hallowed ",
-    "Hellfire ","Starlight ","Moonlight ","Sunlight ","Voidborn ",
-    "Skybound ","Earthbound ","Seabound ","Cloudborn ","Nightborn ",
-    "GIANT ","Mega ","Mini ","Tiny ","Huge ",
-    "Royal ","Imperial ","Noble ","Common ","Rare ",
-    "Epic ","Legendary ","Mythical ","Exotic ","Festive ",
+    -- Single-word mutations (sorted alphabetical)
+    "Alienated ","Aromatic ","Ascended ","Aurora ","Blossoming ",
+    "Corrupted ","Crocodile ","Dreadbound ","Everchanted ","Fiery ",
+    "Forger ","Fried ","Frozen ","Giraffe ","Glimmering ",
+    "Golden ","Inverted ","JUMBO ","Lion ","Luminous ",
+    "Mega ","Nightmare ","Nocturnal ","Nutty ","Oxpecker ",
+    "Peppermint ","Radiant ","Rainbow ","Rhino ","Rideable ",
+    "Shiny ","Shocked ","Silver ","Soulflame ","Spectral ",
+    "Tethered ","Tiny ","Tranquil ","UFO ","Venom ","Windy ",
+    -- Multi-word PascalCase (original + spaced version)
+    "ChristmasRally ","Christmas Rally ",
+    "GiantBean ","Giant Bean ",
+    "GiantGolem ","Giant Golem ",
+    "HyperHunger ","Hyper Hunger ",
+    "IronSkin ","Iron Skin ",
+    "JollyDecorator ","Jolly Decorator ",
+    "MerryNursery ","Merry Nursery ",
+    "SpiritSparkle ","Spirit Sparkle ",
 }
 function getBaseName(name)
     local result=name
@@ -1183,6 +1181,7 @@ end
 
 minBtn.MouseButton1Click:Connect(function() setMinimized(not minimized) end)
 miniZBtn.MouseButton1Click:Connect(function() setMinimized(false) end)
+
 
 local teamPetUUIDs=d.teamPetUUIDs or {}
 local teamPetInfoCache=d.teamPetInfoCache or {}
@@ -2602,11 +2601,61 @@ local M78 = {
     buyGearFired = 0,
     buyEggFired = 0,
     statusLbl = nil,
-    -- Item lists
+    -- Item lists - hardcoded fallback (v12.79: full lists via dynamic loader below)
     SEEDS = {"Carrot","Strawberry","Blueberry","Tomato","Watermelon","Pumpkin","Apple","Bamboo","Coconut","Cactus","Dragon Fruit","Mango","Grape","Pepper","Mushroom","Beanstalk","Pineapple","Peach","Sugar Apple","Cocoa","Banana","Lily","Bell Pepper","Prickly Pear","Loquat","Feijoa","Cherry","Rose","Lemon"},
     GEARS = {"Watering Can","Trowel","Recall Wrench","Basic Sprinkler","Advanced Sprinkler","Godly Sprinkler","Master Sprinkler","Magnifying Glass","Tanning Mirror","Cleaning Spray","Favorite Tool","Harvest Tool","Friendship Pot","Trading Ticket","Lightning Rod","Star Caller","Night Staff","Chocolate Sprinkler","Honey Sprinkler","Nectar Staff","Levelup Lollipop"},
     EGGS = {"Common Egg","Uncommon Egg","Rare Egg","Legendary Egg","Mythical Egg","Bug Egg","Night Egg","Premium Night Egg","Bee Egg","Anti Bee Egg","Common Summer Egg","Rare Summer Egg","Paradise Egg","Oasis Egg","Dinosaur Egg","Primal Egg","Zen Egg","Gourmet Egg"},
 }
+
+-- v12.79: Dynamic loader untuk SEEDS & GEARS - ambil dari game module data
+-- Falls back to hardcoded list kalo modul gak ke-access
+do
+    local function loadFromModule(parent, modName, filter)
+        local mod = parent and parent:FindFirstChild(modName)
+        if not mod or not mod:IsA("ModuleScript") then return nil end
+        local ok, m = pcall(require, mod)
+        if not ok or type(m) ~= "table" then return nil end
+        local list = {}
+        local seen = {}
+        for k, v in pairs(m) do
+            local name
+            if type(k) == "string" then name = k
+            elseif type(v) == "table" and type(v.Name) == "string" then name = v.Name end
+            if name and #name > 1 and #name < 60 and not seen[name] then
+                -- Exclude utility/config keys
+                if not name:find("Time$") and not name:find("^Get") 
+                   and not name:find("Required") and not name:find("ForPremium")
+                   and not name:find("^_") and name ~= "Packs"
+                   and not name:find("Display") and not name:find("Config") then
+                    if not filter or filter(name) then
+                        seen[name] = true
+                        table.insert(list, name)
+                    end
+                end
+            end
+        end
+        return #list > 0 and list or nil
+    end
+    local data = RS:FindFirstChild("Data")
+    if data then
+        -- Load SEEDS from SeedData (524 entries)
+        local seeds = loadFromModule(data, "SeedData")
+        if seeds then
+            M78.SEEDS = seeds
+            dbg("[misc78] SEEDS loaded dynamically: "..#seeds.." items")
+        else
+            dbg("[misc78] SEEDS dynamic load fail, using hardcoded fallback ("..#M78.SEEDS..")")
+        end
+        -- Load GEARS from GearData (206 entries)
+        local gears = loadFromModule(data, "GearData")
+        if gears then
+            M78.GEARS = gears
+            dbg("[misc78] GEARS loaded dynamically: "..#gears.." items")
+        else
+            dbg("[misc78] GEARS dynamic load fail, using hardcoded fallback ("..#M78.GEARS..")")
+        end
+    end
+end
 
 -- Remote refs into M78 (1 local for table access scope)
 do
@@ -2621,14 +2670,30 @@ do
 end
 
 -- ---- Helpers (assigned to M78 to avoid creating new locals) ----
+-- v12.79: Build hash set dari GEARS untuk exact-match (lebih akurat dari keyword scan)
+M78.buildGearSet = function()
+    local set = {}
+    for _, n in ipairs(M78.GEARS) do
+        set[n:lower()] = true
+    end
+    M78.gearSet = set
+    return set
+end
+M78.buildGearSet()
+
 M78.isFruit = function(t)
     if not t:IsA("Tool") then return false end
     if t:FindFirstChild("PetToolLocal") or t:FindFirstChild("PetToolServer") then return false end
     local n = t.Name
-    local gearKW = {"Shovel","Sprinkler","Watering","Trowel","Wrench","Spray","Mirror","Magnifying","Tool","Pot","Ticket","Rod","Staff","Lollipop","Caller","Crate","Basket","Rake"}
+    -- v12.79: strip [X.XKg] suffix, exact-match terhadap gear set (206 entries)
+    local baseName = n:gsub("%s*%[[%d%.]+%s*[Kk][Gg]%]%s*$", "")
+    if M78.gearSet and M78.gearSet[baseName:lower()] then return false end
+    -- Keyword fallback (defensif, kalo ada gear baru belum di set)
+    local gearKW = {"Shovel","Sprinkler","Watering","Trowel","Wrench","Spray","Mirror","Magnifying","Tool","Pot","Ticket","Rod","Staff","Lollipop","Caller","Crate","Basket","Rake","Shard","Egg","Coal","Jar","Lantern","Fang","Bell","Compass","Booster","Whistle","Skates","Wand","Hammer","Horn","Chew","Treat","Bowl","Snowball"}
     for _, kw in ipairs(gearKW) do
         if n:find(kw, 1, true) then return false end
     end
+    -- Must have [KG] pattern (fruits punya weight, gears gak)
     return n:match("%[[%d%.]+%s*[Kk][Gg]%]") ~= nil
 end
 
@@ -2812,6 +2877,7 @@ task.spawn(function()
             for _, name in ipairs(M78.SEEDS) do
                 pcall(function() M78.buySeedRE:FireServer("Shop", name) end)
                 M78.buySeedFired = M78.buySeedFired + 1
+                task.wait(0.04)  -- v12.79: throttle untuk hindari spam flag (~25 req/s)
             end
             M78.setStatus("Buy seed: total "..M78.buySeedFired, C.Teal)
         end
@@ -2826,6 +2892,7 @@ task.spawn(function()
             for _, name in ipairs(M78.GEARS) do
                 pcall(function() M78.buyGearRE:FireServer(name) end)
                 M78.buyGearFired = M78.buyGearFired + 1
+                task.wait(0.04)  -- v12.79: throttle untuk hindari spam flag
             end
             M78.setStatus("Buy gear: total "..M78.buyGearFired, C.Teal)
         end
@@ -3830,7 +3897,7 @@ task.wait(1)
 if autoRejoin then startAR() end
 if autoStartEnabled then doStart() end
 
-do
+;(function()
     -- v12.79j: auto-on swap untuk SEMUA pet di tim leveling (pas awal exe)
     local autoEnabledFromTeam = 0
     for uuid,_ in pairs(teamPetUUIDs) do
@@ -3861,16 +3928,16 @@ do
         startGlobalPoller()
         startSwapKeeper()
     end
-end
+end)()
 
-do
+;(function()
     local hasTeam=false
     for _ in pairs(teamPetUUIDs) do hasTeam=true break end
     if hasTeam then
         dbg("[init] auto-start teamKeeper (team only)")
         startTeamKeeper()
     end
-end
+end)()
 
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
