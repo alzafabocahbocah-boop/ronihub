@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.84"
+local SCRIPT_VERSION="v12.85"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (multi-source placed pet name + diagnostic status)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (fix: prefer PET_TYPE over PET_NAME - nickname issue)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -3226,22 +3226,36 @@ task.spawn(function()
     end
 end)
 
--- v12.84: Multi-source placed pet name lookup (UI + workspace model attributes/labels)
+-- v12.85: Multi-source placed pet name lookup
+-- PRIORITIZE PET_TYPE (species name) over PET_NAME (might be player nickname like "Fyn")
 M78.getPlacedPetName = function(uuid)
-    -- Source 1: ActivePetUI scan (PET_NAME TextLabel)
+    -- Source 1a: PET_TYPE in ActivePetUI (species - most reliable for matching)
+    local t = getPetTypeFromUI(uuid)
+    if t and #t > 0 then return t, "type_ui" end
+    -- Source 1b: PET_NAME in UI (fallback - might be nickname)
     local n = getPetNameFromUI(uuid)
-    if n and #n > 0 then return n, "ui" end
-    -- Source 2: workspace placed model attributes
+    if n and #n > 0 then return n, "name_ui" end
+    -- Source 2: workspace placed model - prefer TYPE attributes
     local m = findPlacedPetByUUID(uuid)
     if m then
-        for _, attr in ipairs({"PetName","PET_NAME","PET_TYPE","PetType","Type","Name"}) do
+        for _, attr in ipairs({"PET_TYPE","PetType","Type","PetSpecies","Species"}) do
+            local v = m:GetAttribute(attr)
+            if type(v) == "string" and #v > 0 then return v, "attr_"..attr end
+        end
+        -- Fallback to name attributes
+        for _, attr in ipairs({"PetName","PET_NAME","Name"}) do
             local v = m:GetAttribute(attr)
             if type(v) == "string" and #v > 0 and not v:find("-") then return v, "attr_"..attr end
         end
-        -- Source 3: walk descendants for any TextLabel with pet-name pattern
+        -- Scan descendants: prefer PET_TYPE first
         for _, c in pairs(m:GetDescendants()) do
-            if (c.Name == "PET_NAME" or c.Name == "PET_TYPE") and c:IsA("TextLabel") then
-                if c.Text and #c.Text > 0 then return c.Text, "model_"..c.Name end
+            if c.Name == "PET_TYPE" and c:IsA("TextLabel") and c.Text and #c.Text > 0 then
+                return c.Text, "model_PET_TYPE"
+            end
+        end
+        for _, c in pairs(m:GetDescendants()) do
+            if c.Name == "PET_NAME" and c:IsA("TextLabel") and c.Text and #c.Text > 0 then
+                return c.Text, "model_PET_NAME"
             end
         end
     end
