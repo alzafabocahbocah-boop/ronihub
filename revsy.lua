@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.88"
+local SCRIPT_VERSION="v12.89"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (track toy count delta - bukti boost beneran tick)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (fix: pause auto-boost saat gift + unequip toy before gift)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -484,8 +484,13 @@ local function sendGiftToPlayer(targetName, petUUID)
         dbg("[gift] FAIL: player gak ada di server")
         return false
     end
+    -- v12.89: lock untuk pause auto-boost selama gift jalan
+    if M78 then M78.giftInProgress = true end
+    local function unlock() if M78 then M78.giftInProgress = false end end
+
     if not petUUID then
         pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
+        unlock()
         return true
     end
     local u = fmtUUID(petUUID)
@@ -493,7 +498,6 @@ local function sendGiftToPlayer(targetName, petUUID)
     local placed = findPlacedPetByUUID(petUUID)
     if placed then
         unequipPet(petUUID)
-        -- Poll sampe pet masuk backpack (max 0.5s)
         for i=1,5 do
             task.wait(0.1)
             if findPetInBackpack(petUUID) then break end
@@ -501,28 +505,39 @@ local function sendGiftToPlayer(targetName, petUUID)
     end
     if not findPetInBackpack(petUUID) then
         dbg("[gift] FAIL: pet "..short.." gak di backpack")
+        unlock()
         return false
     end
-    -- v12.79i: polling-based detection - cepet kalo sukses, fail-fast kalo gak
-    -- Try direct pattern (sukses biasa: ~100ms)
+    -- v12.89: unequip toy dulu kalo auto-boost lagi pegang
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        for _, t in pairs(char:GetChildren()) do
+            if t:IsA("Tool") and t.Name:find("Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
+                pcall(function() hum:UnequipTools() end)
+                task.wait(0.1)
+                break
+            end
+        end
+    end
     pcall(function() giftRE:FireServer("GivePet", targetPlayer, u) end)
     for i=1,4 do
         task.wait(0.08)
         if not petStillInBackpack(petUUID) then
             dbg("[gift] OK direct: "..short.." -> "..targetPlayer.Name)
+            unlock()
             return true
         end
     end
-    -- Try reverse
     pcall(function() giftRE:FireServer("GivePet", u, targetPlayer) end)
     for i=1,4 do
         task.wait(0.08)
         if not petStillInBackpack(petUUID) then
             dbg("[gift] OK reverse: "..short.." -> "..targetPlayer.Name)
+            unlock()
             return true
         end
     end
-    -- Fallback: hold-as-tool method
     local item = holdPetAsTool(petUUID)
     if item then
         for i=1,3 do
@@ -535,14 +550,16 @@ local function sendGiftToPlayer(targetName, petUUID)
                 task.wait(0.12)
                 if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
                     dbg("[gift] OK fallback: "..short.." -> "..targetPlayer.Name)
+                    unlock()
                     return true
                 end
             end
-            local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-            if hum then pcall(function() hum:UnequipTools() end) end
+            local hum2 = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+            if hum2 then pcall(function() hum2:UnequipTools() end) end
         end
     end
     dbg("[gift] FAIL: "..short)
+    unlock()
     return false
 end
 
@@ -3267,7 +3284,7 @@ end
 -- v12.79m: Auto Boost loop - keep Pet Toy equipped + filter by selected pet types
 task.spawn(function()
     while not scriptShutdown do
-        if M78.autoBoost then
+        if M78.autoBoost and not M78.giftInProgress then
             local char = player.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             local bp = player:FindFirstChild("Backpack")
