@@ -1,6 +1,6 @@
 -- ============= ZENX LVL DEBUG =============
 local SCRIPT_VERSION="v12.92"
-print("==== [ZenxAutoElephantRainbow] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
+print("==== [ZenxAutoElephantRainbow] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====") 
 warn("[ZenxAutoElephantRainbow] versi: "..SCRIPT_VERSION.." (boost+gift+collect = module-based, smooth)")
 
 local RS = game:GetService("ReplicatedStorage")
