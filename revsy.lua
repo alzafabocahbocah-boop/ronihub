@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
 local SCRIPT_VERSION="v12.92"
-print("==== [ZenxAutoElephantRainbow] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxAutoElephantRainbow] versi: "..SCRIPT_VERSION.." (boost+gift+collect = module-based, smooth)")
+print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (boost+gift+collect = module-based, smooth)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -883,7 +883,7 @@ corner(main,10) stroke(main,C.Teal,2)
 local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=main})
 corner(TB,10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5),Position=UDim2.new(0,0,1,-1.5),BackgroundColor3=C.Teal,BorderSizePixel=0,Parent=TB})
-local titleLbl=lbl(TB,"ZENX AUTO ELEPHANT RAINBOW  "..SCRIPT_VERSION,13,C.Teal)
+local titleLbl=lbl(TB,"ZENX AUTO LEVELING  "..SCRIPT_VERSION,13,C.Teal)
 titleLbl.Size=UDim2.new(0,205,1,0) titleLbl.Position=UDim2.new(0,8,0,0)
 
 -- v12.79: stat "Total Jadi Kurang" pindah dari bottom ke title bar (samping nama)
@@ -921,7 +921,7 @@ local function makeSidebarBtn(name, idx)
     sectionBtns[idx] = b
     return b
 end
-local upLvlBtn = makeSidebarBtn("UP KG", 1)
+local upLvlBtn = makeSidebarBtn("UP LVL", 1)
 local invShowBtn = makeSidebarBtn("Inventory Show", 2)
 local miscBtn = makeSidebarBtn("Misc", 3)
 local giftBtn = makeSidebarBtn("Auto Gift", 4)  -- v12.77: pindah dari tab ke sidebar
