@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.94"
-print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (warna kuning-amber, sidebar non-bold)")
+local SCRIPT_VERSION="v12.92"
+print("==== [ZenxAutoElephantRainbow] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
+warn("[ZenxAutoElephantRainbow] versi: "..SCRIPT_VERSION.." (boost+gift+collect = module-based, smooth)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -145,8 +145,7 @@ local C={
     White=Color3.fromRGB(225,225,225),Gray=Color3.fromRGB(120,120,120),Dim=Color3.fromRGB(55,55,55),
     Green=Color3.fromRGB(70,190,90),Red=Color3.fromRGB(200,60,60),RDim=Color3.fromRGB(35,10,10),
     Gold=Color3.fromRGB(220,160,0),Blue=Color3.fromRGB(80,150,255),
-    -- v12.94: warna ganti dari hijau-teal ke kuning agak orenan abu (warm amber)
-    Teal=Color3.fromRGB(220,170,80),TDim=Color3.fromRGB(38,30,15),
+    Teal=Color3.fromRGB(40,200,160),TDim=Color3.fromRGB(8,30,24),
 }
 
 local function mk(cls,props)
@@ -884,8 +883,7 @@ corner(main,10) stroke(main,C.Teal,2)
 local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=main})
 corner(TB,10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5),Position=UDim2.new(0,0,1,-1.5),BackgroundColor3=C.Teal,BorderSizePixel=0,Parent=TB})
-local titleLbl=lbl(TB,"ZENX ELEPHANT 60KG  "..SCRIPT_VERSION,13,C.Teal)
-titleLbl.Font = Enum.Font.Gotham
+local titleLbl=lbl(TB,"ZENX AUTO ELEPHANT RAINBOW  "..SCRIPT_VERSION,13,C.Teal)
 titleLbl.Size=UDim2.new(0,205,1,0) titleLbl.Position=UDim2.new(0,8,0,0)
 
 -- v12.79: stat "Total Jadi Kurang" pindah dari bottom ke title bar (samping nama)
@@ -919,16 +917,14 @@ local function makeSidebarBtn(name, idx)
     b.Size = UDim2.new(1, 0, 0, 44)
     b.LayoutOrder = idx
     b.TextWrapped = true
-    -- v12.94: cukup warna, jangan tebel - pakai Gotham regular
-    b.Font = Enum.Font.Gotham
     stroke(b, C.Dim, 1.1)
     sectionBtns[idx] = b
     return b
 end
 local upLvlBtn = makeSidebarBtn("UP KG", 1)
--- v12.93: Inventory Show dihapus
-local miscBtn = makeSidebarBtn("Misc", 2)
-local giftBtn = makeSidebarBtn("Auto Gift", 3)
+local invShowBtn = makeSidebarBtn("Inventory Show", 2)
+local miscBtn = makeSidebarBtn("Misc", 3)
+local giftBtn = makeSidebarBtn("Auto Gift", 4)  -- v12.77: pindah dari tab ke sidebar
 
 local content=mk("Frame",{Size=UDim2.new(1,-(SIDEBAR_W+15),1,-34),Position=UDim2.new(0,SIDEBAR_W+10,0,34),BackgroundTransparency=1,Parent=main})
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
@@ -1098,7 +1094,7 @@ end
 
 invRefreshBtn.MouseButton1Click:Connect(buildInvShow)
 
--- Section switching (UP KG vs Misc vs Auto Gift)
+-- Section switching (UP LVL vs Inventory Show)
 local currentSection = 1
 local function switchSection(idx)
     currentSection = idx
@@ -1113,28 +1109,34 @@ local function switchSection(idx)
     botBar.Visible = false
     runBtn.Visible = false
     stopBtn.Visible = false
-    if invShowGroup then invShowGroup.Visible = false end
+    invShowGroup.Visible = false
     miscGroup.Visible = false
 
     if idx == 1 then
-        -- UP KG
+        -- UP LVL
         tabBar.Visible = true
         botBar.Visible = true
         runBtn.Visible = true
         stopBtn.Visible = true
         switchTab(currentTab)
     elseif idx == 2 then
-        -- Misc (was 3)
-        miscGroup.Visible = true
+        -- Inventory Show
+        invShowGroup.Visible = true
+        invHeaderLbl.TextColor3 = C.Teal
+        buildInvShow()
     elseif idx == 3 then
-        -- Auto Gift (was 4)
+        -- Misc
+        miscGroup.Visible = true
+    elseif idx == 4 then
+        -- v12.77: Auto Gift (was tab 5, now sidebar 4)
         if areas[5] then areas[5].Visible = true end
     end
 end
 
 upLvlBtn.MouseButton1Click:Connect(function() switchSection(1) end)
-miscBtn.MouseButton1Click:Connect(function() switchSection(2) end)
-giftBtn.MouseButton1Click:Connect(function() switchSection(3) end)
+invShowBtn.MouseButton1Click:Connect(function() switchSection(2) end)
+miscBtn.MouseButton1Click:Connect(function() switchSection(3) end)
+giftBtn.MouseButton1Click:Connect(function() switchSection(4) end)  -- v12.77
 
 for i,name in ipairs(tabNames) do
     local b=btn(tabBar,name,10,C.Card,C.Gray)
@@ -4503,4 +4505,4 @@ end)()
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxElephant60kg "..SCRIPT_VERSION.." loaded! v12.94: warna amber + sidebar non-bold")
+print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.92: Gift+Collect upgrade module-based (PetGiftingService, CollectController)")
