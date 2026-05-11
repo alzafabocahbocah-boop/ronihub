@@ -1,12 +1,13 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.89"
+local SCRIPT_VERSION="v12.92"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (fix: pause auto-boost saat gift + unequip toy before gift)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (boost+gift+collect = module-based, smooth)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HS = game:GetService("HttpService")
 local TS = game:GetService("TeleportService")
+local CS = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui",10)
 print("[ZenxLvl] step 1 OK - services loaded")
@@ -475,10 +476,6 @@ local function petInCharacter(uuid)
 end
 
 local function sendGiftToPlayer(targetName, petUUID)
-    if not giftRE then
-        dbg("[gift] FAIL: PetGiftingService remote gak ketemu")
-        return false
-    end
     local targetPlayer = findPlayerByName(targetName)
     if not targetPlayer then
         dbg("[gift] FAIL: player gak ada di server")
@@ -488,27 +485,26 @@ local function sendGiftToPlayer(targetName, petUUID)
     if M78 then M78.giftInProgress = true end
     local function unlock() if M78 then M78.giftInProgress = false end end
 
-    if not petUUID then
-        pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
-        unlock()
-        return true
-    end
-    local u = fmtUUID(petUUID)
-    local short = tostring(petUUID):sub(1,8)
-    local placed = findPlacedPetByUUID(petUUID)
-    if placed then
-        unequipPet(petUUID)
-        for i=1,5 do
-            task.wait(0.1)
-            if findPetInBackpack(petUUID) then break end
+    local short = petUUID and tostring(petUUID):sub(1,8) or "any"
+
+    -- v12.92: ensure pet di backpack (kalo placed, unequip dulu)
+    if petUUID then
+        local placed = findPlacedPetByUUID(petUUID)
+        if placed then
+            unequipPet(petUUID)
+            for i=1,5 do
+                task.wait(0.1)
+                if findPetInBackpack(petUUID) then break end
+            end
+        end
+        if not findPetInBackpack(petUUID) then
+            dbg("[gift] FAIL: pet "..short.." gak di backpack")
+            unlock()
+            return false
         end
     end
-    if not findPetInBackpack(petUUID) then
-        dbg("[gift] FAIL: pet "..short.." gak di backpack")
-        unlock()
-        return false
-    end
-    -- v12.89: unequip toy dulu kalo auto-boost lagi pegang
+
+    -- v12.92: unequip toy dulu kalo auto-boost lagi pegang
     local char = player.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if hum then
@@ -520,44 +516,54 @@ local function sendGiftToPlayer(targetName, petUUID)
             end
         end
     end
-    pcall(function() giftRE:FireServer("GivePet", targetPlayer, u) end)
-    for i=1,4 do
-        task.wait(0.08)
-        if not petStillInBackpack(petUUID) then
-            dbg("[gift] OK direct: "..short.." -> "..targetPlayer.Name)
-            unlock()
-            return true
-        end
-    end
-    pcall(function() giftRE:FireServer("GivePet", u, targetPlayer) end)
-    for i=1,4 do
-        task.wait(0.08)
-        if not petStillInBackpack(petUUID) then
-            dbg("[gift] OK reverse: "..short.." -> "..targetPlayer.Name)
-            unlock()
-            return true
-        end
-    end
-    local item = holdPetAsTool(petUUID)
-    if item then
-        for i=1,3 do
+
+    -- v12.92: equip pet sebagai tool (GivePet pakai currently-held)
+    if petUUID then
+        local petItem = findPetInBackpack(petUUID)
+        if petItem and hum then
+            pcall(function() hum:UnequipTools() end)
             task.wait(0.1)
-            if petInCharacter(petUUID) then break end
-        end
-        if petInCharacter(petUUID) then
-            pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
-            for i = 1, 6 do
-                task.wait(0.12)
-                if not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
-                    dbg("[gift] OK fallback: "..short.." -> "..targetPlayer.Name)
-                    unlock()
-                    return true
-                end
-            end
-            local hum2 = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-            if hum2 then pcall(function() hum2:UnequipTools() end) end
+            pcall(function() hum:EquipTool(petItem) end)
+            task.wait(0.2)
         end
     end
+
+    -- v12.92: PRIMARY - call PetGiftingService.GivePet(target) via module
+    if M78 and M78.PetGiftingService and M78.PetGiftingService.GivePet then
+        pcall(function() M78.PetGiftingService.GivePet(targetPlayer) end)
+        for i=1,6 do
+            task.wait(0.1)
+            if petUUID and not petStillInBackpack(petUUID) and not petInCharacter(petUUID) then
+                dbg("[gift] OK module: "..short.." -> "..targetPlayer.Name)
+                unlock()
+                return true
+            end
+        end
+    end
+
+    -- v12.92: FALLBACK - remote fire pattern lama
+    if giftRE then
+        local u = petUUID and fmtUUID(petUUID) or nil
+        pcall(function() giftRE:FireServer("GivePet", targetPlayer, u) end)
+        for i=1,4 do
+            task.wait(0.08)
+            if petUUID and not petStillInBackpack(petUUID) then
+                dbg("[gift] OK direct: "..short.." -> "..targetPlayer.Name)
+                unlock()
+                return true
+            end
+        end
+        pcall(function() giftRE:FireServer("GivePet", targetPlayer) end)
+        for i=1,4 do
+            task.wait(0.08)
+            if petUUID and not petStillInBackpack(petUUID) then
+                dbg("[gift] OK fallback: "..short.." -> "..targetPlayer.Name)
+                unlock()
+                return true
+            end
+        end
+    end
+
     dbg("[gift] FAIL: "..short)
     unlock()
     return false
@@ -2607,6 +2613,9 @@ local M78 = {
     -- v12.82: boostToySizes = multi-select set { Small=true, Medium=true, Large=true }
     boostToySizes = d.boostToySizes or { Medium = true },
     boostPetTypes = d.boostPetTypes or {}, -- pet types yang trigger boost (empty = semua)
+    -- v12.91: Auto Boost - active mode via Action.Activate (full automatic)
+    boostCycleSec = d.boostCycleSec or 30,
+    boostCycleReset = false,
     feedThresholdPct = d.feedThresholdPct or 70, -- legacy, gak dipake lagi tp tetep di-load biar gak break
     feedCycleMin = d.feedCycleMin or 15,
     feedDuration = 20,
@@ -2730,8 +2739,130 @@ do
         -- v12.86: Pet boost remote untuk apply toy boost ke pet
         M78.petBoostRE = ge:FindFirstChild("PetBoostService")
     end
-    dbg("[misc78] remotes seed="..(M78.buySeedRE and "OK" or "MISS").." gear="..(M78.buyGearRE and "OK" or "MISS").." egg="..(M78.buyEggRE and "OK" or "MISS").." feed="..(M78.feedRE and "OK" or "MISS").." petBoost="..(M78.petBoostRE and "OK" or "MISS"))
+    -- v12.91: PetActionUserInterfaceService module - dipakai buat ekstrak Action.Activate
+    pcall(function()
+        local mods = RS:FindFirstChild("Modules")
+        if mods then
+            local petServ = mods:FindFirstChild("PetServices")
+            if petServ then
+                local pasScript = petServ:FindFirstChild("PetActionUserInterfaceService")
+                if pasScript then
+                    M78.PAS_SCRIPT = pasScript
+                    M78.PAS = require(pasScript)
+                end
+                -- v12.92: PetGiftingService - direct gift via module
+                local giftScript = petServ:FindFirstChild("PetGiftingService")
+                if giftScript then
+                    M78.PetGiftingService = require(giftScript)
+                end
+            end
+            -- v12.92: CollectController - direct fruit collect
+            local cc = mods:FindFirstChild("CollectController")
+            if cc then
+                M78.CollectController = require(cc)
+            end
+        end
+    end)
+    dbg("[misc78] remotes seed="..(M78.buySeedRE and "OK" or "MISS").." gear="..(M78.buyGearRE and "OK" or "MISS").." egg="..(M78.buyEggRE and "OK" or "MISS").." feed="..(M78.feedRE and "OK" or "MISS").." petBoost="..(M78.petBoostRE and "OK" or "MISS").." PAS="..(M78.PAS and "OK" or "MISS").." Gift="..(M78.PetGiftingService and "OK" or "MISS").." Collect="..(M78.CollectController and "OK" or "MISS"))
 end
+
+-- v12.91: extract Action.Activate dari popup SENSOR upvalue
+M78.boostAction = nil
+M78.getBoostAction = function()
+    if M78.boostAction and type(M78.boostAction.Activate) == "function" then
+        return M78.boostAction
+    end
+    if not getconnections then return nil end
+    -- Try from currently-open popup first
+    local pUI = player.PlayerGui:FindFirstChild("PetUI")
+    if pUI then
+        local aUI = pUI:FindFirstChild("PetActionUI")
+        if aUI then
+            local oh = aUI:FindFirstChild("OPTION_HOLDER")
+            if oh then
+                local feed = oh:FindFirstChild("Feed")
+                if feed and feed:FindFirstChild("Inner") then
+                    local sensor = feed.Inner:FindFirstChild("SENSOR")
+                    if sensor then
+                        local conns = getconnections(sensor.MouseButton1Down)
+                        for _, c in ipairs(conns) do
+                            local fn = c.Function or c.fn
+                            if fn then
+                                local ok, src = pcall(debug.info, fn, "s")
+                                if ok and src and src:find("PetActionUserInterface") then
+                                    local act = debug.getupvalue(fn, 1)
+                                    if type(act) == "table" and type(act.Activate) == "function" then
+                                        M78.boostAction = act
+                                        return act
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- If no popup, open one with first pet to extract
+    if not M78.PAS then return nil end
+    local firstPet = nil
+    for _, p in pairs(workspace:GetDescendants()) do
+        if (p:IsA("BasePart") or p:IsA("Model")) and p:GetAttribute("UUID") then
+            firstPet = p
+            break
+        end
+    end
+    if not firstPet then return nil end
+    pcall(function() M78.PAS.SetTarget(firstPet) end)
+    task.wait(0.3)
+    pcall(function() M78.PAS.Toggle() end)
+    task.wait(0.5)
+    -- Try extract again
+    local pUI2 = player.PlayerGui:FindFirstChild("PetUI")
+    if pUI2 then
+        local aUI2 = pUI2:FindFirstChild("PetActionUI")
+        if aUI2 then
+            local oh2 = aUI2:FindFirstChild("OPTION_HOLDER")
+            if oh2 then
+                local feed2 = oh2:FindFirstChild("Feed")
+                if feed2 and feed2:FindFirstChild("Inner") then
+                    local sensor2 = feed2.Inner:FindFirstChild("SENSOR")
+                    if sensor2 then
+                        local conns2 = getconnections(sensor2.MouseButton1Down)
+                        for _, c in ipairs(conns2) do
+                            local fn = c.Function or c.fn
+                            if fn then
+                                local ok, src = pcall(debug.info, fn, "s")
+                                if ok and src and src:find("PetActionUserInterface") then
+                                    local act = debug.getupvalue(fn, 1)
+                                    if type(act) == "table" and type(act.Activate) == "function" then
+                                        M78.boostAction = act
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    pcall(function() M78.PAS.Close() end)
+    return M78.boostAction
+end
+
+-- v12.91: cari semua pet Part di workspace via attribute UUID
+M78.findPetParts = function()
+    local pets = {}
+    for _, p in pairs(workspace:GetDescendants()) do
+        if (p:IsA("BasePart") or p:IsA("Model")) then
+            local uuid = p:GetAttribute("UUID")
+            if uuid then pets[#pets + 1] = {part = p, uuid = uuid} end
+        end
+    end
+    return pets
+end
+
+
 
 -- ---- Helpers (assigned to M78 to avoid creating new locals) ----
 -- v12.79: Build hash set dari GEARS untuk exact-match (lebih akurat dari keyword scan)
@@ -2962,6 +3093,8 @@ do
                 d.boostToySizes = M78.boostToySizes
                 save()
                 sizeLbl.Text = sizeRowText()
+                -- v12.91: signal cycle reset agar pilihan baru langsung ke-apply
+                M78.boostCycleReset = true
             end,
         })
     end)
@@ -3039,6 +3172,31 @@ do
                 petLbl.Text = petRowText()
             end,
         })
+    end)
+
+    -- v12.91: Boost cycle time (detik) - typeable input
+    local cycRow = mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=10,Parent=miscScroll})
+    corner(cycRow,6) stroke(cycRow,C.Dim,1.1)
+    local cycLbl = lbl(cycRow, "Boost cycle (detik):", 12, C.White)
+    cycLbl.Size = UDim2.new(0.55,0,1,0)
+    local cycBox = mk("TextBox",{
+        Size=UDim2.new(0,60,0,22),Position=UDim2.new(1,-68,0.5,-11),
+        BackgroundColor3=C.Panel,Text=tostring(M78.boostCycleSec),
+        TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=13,
+        TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,
+        Parent=cycRow
+    })
+    stroke(cycBox, C.Teal, 1)
+    cycBox.FocusLost:Connect(function()
+        local v = tonumber(cycBox.Text)
+        if v and v >= 1 and v <= 600 then
+            M78.boostCycleSec = v
+            d.boostCycleSec = v
+            save()
+            M78.boostCycleReset = true
+        else
+            cycBox.Text = tostring(M78.boostCycleSec)
+        end
     end)
 
     M78.statusLbl = lbl(miscGroup, "Misc: idle", 13, C.Gray, Enum.TextXAlignment.Center)
@@ -3179,6 +3337,30 @@ M78.refreshPrompts = function()
     M78.promptsCacheT = tick()
 end
 
+-- v12.92: Direct collect via CollectController.Collect(fruit) - no MaxDistance hack
+M78.collectAllFruits = function()
+    if not M78.CollectController or not M78.CollectController.Collect then return 0 end
+    local fired = 0
+    -- Find harvestable fruits via CollectionService
+    local found = {}
+    pcall(function()
+        for _, tag in ipairs(CS:GetAllTags()) do
+            local lower = tag:lower()
+            if lower:find("harvestable") or lower:find("fruit") then
+                for _, inst in ipairs(CS:GetTagged(tag)) do
+                    found[inst] = true
+                end
+            end
+        end
+    end)
+    for fruit, _ in pairs(found) do
+        pcall(function() M78.CollectController.Collect(fruit) end)
+        fired = fired + 1
+        if fired % 10 == 0 then task.wait(0.05) end  -- yield tiap 10
+    end
+    return fired
+end
+
 -- v12.79: Cycle-based collect - tiap collectCycleMin menit, aktif collectDuration detik
 task.spawn(function()
     while not scriptShutdown do
@@ -3188,7 +3370,6 @@ task.spawn(function()
                 if M78.collectNextStartAt <= 0 or now >= M78.collectNextStartAt then
                     M78.collectMode = "collecting"
                     M78.collectEndAt = now + M78.collectDuration
-                    -- Force refresh prompts pas mulai cycle baru
                     M78.promptsCacheT = 0
                     M78.setStatus("Collect: cycle MULAI ("..M78.collectDuration.."s)", C.Teal)
                 else
@@ -3203,24 +3384,30 @@ task.spawn(function()
                     M78.collectNextStartAt = now + (M78.collectCycleMin * 60)
                     M78.setStatus(string.format("Collect: SELESAI cycle. Next %dm (total:%d)", M78.collectCycleMin, M78.collectTotalFired), C.Green)
                 else
-                    -- Lagi dalam window, sweep prompts
+                    -- v12.92: try CollectController.Collect first, fallback ke ProximityPrompt
                     local fruitsBefore = M78.countBp()
-                    if (tick() - M78.promptsCacheT) > 3 then M78.refreshPrompts() end
                     local fired = 0
-                    for _, dd in ipairs(M78.promptsCache) do
-                        if dd.Parent then
-                            if not M78.promptsConfigured[dd] then
+                    if M78.CollectController then
+                        fired = M78.collectAllFruits()
+                    end
+                    -- Fallback: ProximityPrompt method
+                    if fired == 0 then
+                        if (tick() - M78.promptsCacheT) > 3 then M78.refreshPrompts() end
+                        for _, dd in ipairs(M78.promptsCache) do
+                            if dd.Parent then
+                                if not M78.promptsConfigured[dd] then
+                                    pcall(function()
+                                        dd.MaxActivationDistance = 1000
+                                        dd.HoldDuration = 0
+                                    end)
+                                    M78.promptsConfigured[dd] = true
+                                end
                                 pcall(function()
-                                    dd.MaxActivationDistance = 1000
-                                    dd.HoldDuration = 0
+                                    if fireproximityprompt then fireproximityprompt(dd)
+                                    else dd:InputHoldBegin() dd:InputHoldEnd() end
                                 end)
-                                M78.promptsConfigured[dd] = true
+                                fired = fired + 1
                             end
-                            pcall(function()
-                                if fireproximityprompt then fireproximityprompt(dd)
-                                else dd:InputHoldBegin() dd:InputHoldEnd() end
-                            end)
-                            fired = fired + 1
                         end
                     end
                     M78.lastPromptCount = fired
@@ -3281,7 +3468,8 @@ M78.getPlacedPetName = function(uuid)
     return nil, "not_found"
 end
 
--- v12.79m: Auto Boost loop - keep Pet Toy equipped + filter by selected pet types
+-- v12.91: Auto Boost loop - ACTIVE mode via Action.Activate (full automatic)
+-- Auto-pause kalo autoGift jalan (giftInProgress = true)
 task.spawn(function()
     while not scriptShutdown do
         if M78.autoBoost and not M78.giftInProgress then
@@ -3290,198 +3478,152 @@ task.spawn(function()
             local bp = player:FindFirstChild("Backpack")
             if not (char and hum and bp) then
                 M78.setStatus("Boost: no char/bp", C.Gold)
+                task.wait(2)
             else
-                -- Get list of placed pets + their base names
-                local placedNames = {}        -- for display
-                local placedBaseSet = {}      -- for filter check
+                -- Get list of placed pets + their base names (filter check)
+                local placedBaseSet = {}
                 local placedCount = 0
-                local matchingNames = {}      -- pets yang match filter (display names)
-                local matchingUUIDs = {}      -- v12.86: pets yang match filter (UUIDs untuk fire boost)
+                local matchingUUIDs = {}
                 pcall(function()
                     local placed = M78.getPlacedPets()
                     for uuid, _ in pairs(placed) do
                         placedCount = placedCount + 1
-                        local nm, src = M78.getPlacedPetName(uuid)
+                        local nm = M78.getPlacedPetName(uuid)
                         if nm and #nm > 0 then
                             local cleanName = nm:match("^(.-)%s*%[") or nm
                             local base = getBaseName(cleanName)
                             placedBaseSet[base] = true
-                            if #placedNames < 3 then table.insert(placedNames, cleanName) end
                             if M78.boostPetTypes[base] then
-                                if #matchingNames < 3 then table.insert(matchingNames, cleanName) end
-                                -- v12.86: track matching UUIDs untuk fire boost
                                 table.insert(matchingUUIDs, uuid)
                             end
                         end
                     end
                 end)
 
-                -- Determine apakah boost SHOULD aktif:
-                -- - Kalo filter empty (no selection) → always aktif (kayak sebelumnya)
-                -- - Kalo filter ada → aktif kalo ada placed pet yang match
                 local filterCount = 0
                 for _ in pairs(M78.boostPetTypes) do filterCount = filterCount + 1 end
-                local shouldEquip = true
-                local matchCount = #matchingNames
+                local shouldRun = true
                 if filterCount > 0 then
-                    shouldEquip = false
-                    -- Check if any selected type is placed
+                    shouldRun = false
                     for petType, _ in pairs(M78.boostPetTypes) do
-                        if placedBaseSet[petType] then shouldEquip = true break end
+                        if placedBaseSet[petType] then shouldRun = true break end
                     end
                 end
 
-                -- Cek toy yang equipped
-                local equipped = nil
-                for _, t in pairs(char:GetChildren()) do
-                    if t:IsA("Tool") and t.Name:find("Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
-                        equipped = t
-                        break
-                    end
-                end
-
-                if not shouldEquip then
-                    if equipped then
-                        pcall(function() hum:UnequipTools() end)
-                    end
-                    if filterCount > 0 then
-                        -- v12.84: show detected names buat debug filter mismatch
-                        local detected = ""
-                        local cnt = 0
-                        for n in pairs(placedBaseSet) do
-                            detected = detected..(detected==""and"" or",")..n
-                            cnt = cnt + 1
-                            if cnt >= 3 then break end
-                        end
-                        if detected == "" then detected = "(empty - name extraction fail)" end
-                        M78.setStatus("Boost: no match | filter:"..filterCount.." placed:"..placedCount.." got:"..detected, C.Gold)
-                    else
-                        M78.setStatus("Boost: no placed pet", C.Gold)
-                    end
-                else
-                    -- shouldEquip = true → keep toy equipped
-                    local listStr
-                    if filterCount > 0 then
-                        listStr = " | match "..matchCount..": "..table.concat(matchingNames, ", ")
-                    else
-                        listStr = " | "..placedCount.." pet: "..table.concat(placedNames, ", ")
-                        if placedCount > #placedNames then listStr = listStr.." +"..(placedCount-#placedNames) end
-                    end
-
-                    if equipped then
-                        local size = equipped.Name:match("^(%S+)%s+Pet Toy") or "?"
-                        -- v12.88: track 'e' attribute (uses count) to verify boost beneran tick
-                        local curCount = equipped:GetAttribute("e")
-                        if not M78.boostInitialCount then
-                            M78.boostInitialCount = curCount
-                            M78.boostStartTime = tick()
-                        end
-                        local consumed = 0
-                        local elapsed = 0
-                        if M78.boostInitialCount and curCount then
-                            consumed = M78.boostInitialCount - curCount
-                            elapsed = math.floor(tick() - M78.boostStartTime)
-                        end
-                        -- v12.87: fire Tool.Equipped signal supaya local-script di toy ke-trigger
-                        pcall(function() if firesignal then firesignal(equipped.Equipped) end end)
-                        pcall(function() if firesignal then firesignal(equipped.Activated) end end)
-                        pcall(function()
-                            if getconnections then
-                                for _, conn in pairs(getconnections(equipped.Equipped)) do
-                                    pcall(function() conn:Fire() end)
-                                end
-                            end
-                        end)
-                        pcall(function()
-                            if getconnections then
-                                for _, conn in pairs(getconnections(equipped.Activated)) do
-                                    pcall(function() conn:Fire() end)
-                                end
-                            end
-                        end)
-                        -- v12.86: USE toy ke matching pets (gak cukup di-equip doang)
-                        local boostFires = 0
-                        pcall(function() equipped:Activate() end)
-                        if M78.petBoostRE then
-                            local toyName = equipped.Name
-                            local targets = (#matchingUUIDs > 0) and matchingUUIDs or {}
-                            if filterCount == 0 then
-                                targets = {}
-                                pcall(function()
-                                    for u, _ in pairs(M78.getPlacedPets()) do
-                                        table.insert(targets, u)
-                                    end
-                                end)
-                            end
-                            for _, u in ipairs(targets) do
-                                local uuidBracket = "{"..tostring(u):gsub("^{",""):gsub("}$","").."}"
-                                pcall(function() M78.petBoostRE:FireServer("UseToy", uuidBracket) end)
-                                pcall(function() M78.petBoostRE:FireServer(uuidBracket, toyName) end)
-                                pcall(function() M78.petBoostRE:FireServer(toyName, uuidBracket) end)
-                                pcall(function() M78.petBoostRE:FireServer(uuidBracket) end)
-                                pcall(function() M78.petBoostRE:FireServer("Boost", uuidBracket) end)
-                                boostFires = boostFires + 1
-                                task.wait(0.05)
-                            end
-                        end
-                        -- Status: show consumption stats biar tau boost beneran jalan
-                        local stats = " | used:"..consumed.." in "..elapsed.."s"
-                        M78.setStatus("Boost: "..size.." x"..(curCount or "?")..stats..listStr, C.Teal)
-                    else
-                        -- v12.82: multi-select size - try di urutan Large > Medium > Small (atau apa yang dipilih)
-                        local sizePref = {}
-                        for _, s in ipairs({"Large","Medium","Small"}) do
-                            if M78.boostToySizes[s] then table.insert(sizePref, s) end
-                        end
-                        local found = nil
-                        for _, sz in ipairs(sizePref) do
-                            for _, t in pairs(bp:GetChildren()) do
-                                if t:IsA("Tool") and t.Name:find(sz.." Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
-                                    found = t break
-                                end
-                            end
-                            if found then break end
-                        end
-                        -- Fallback: kalo gak ada selection, atau gak ketemu size pref, ambil any size
-                        if not found then
-                            for _, t in pairs(bp:GetChildren()) do
-                                if t:IsA("Tool") and t.Name:find("Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
-                                    found = t break
-                                end
-                            end
-                        end
-                        if found then
+                if not shouldRun then
+                    -- Unequip toy if any held + idle status
+                    for _, t in pairs(char:GetChildren()) do
+                        if t:IsA("Tool") and t.Name:find("Pet Toy", 1, true) then
                             pcall(function() hum:UnequipTools() end)
-                            task.wait(0.1)
-                            local equipOK = false
-                            pcall(function() hum:EquipTool(found) equipOK = true end)
-                            if not equipOK or found.Parent ~= char then
-                                pcall(function() found.Parent = char end)
-                            end
-                            task.wait(0.1)
-                            -- v12.87: one-time inspection log isi toy
-                            if not M78.toyInspected then
-                                M78.toyInspected = true
-                                pcall(function()
-                                    dbg("[boost] === TOY INSPECT: "..found.Name.." ===")
-                                    for _, c in pairs(found:GetDescendants()) do
-                                        dbg("[boost] toy child: "..c.ClassName.." | "..c.Name)
-                                    end
-                                    dbg("[boost] === END TOY INSPECT ===")
-                                end)
-                            end
-                            local nowEquipped = (found.Parent == char)
-                            M78.setStatus("Boost: "..(nowEquipped and "EQUIP" or "FAIL").." "..(found.Name:match("^(%S+)") or "?")..listStr,
-                                          nowEquipped and C.Teal or C.Gold)
+                            break
+                        end
+                    end
+                    M78.setStatus("Boost: no match | filter:"..filterCount.." placed:"..placedCount, C.Gold)
+                    task.wait(2)
+                else
+                    -- Collect enabled sizes
+                    local sizes = {}
+                    for _, s in ipairs({"Small","Medium","Large"}) do
+                        if M78.boostToySizes[s] then table.insert(sizes, s) end
+                    end
+                    if #sizes == 0 then
+                        M78.setStatus("Boost: no size selected", C.Gold)
+                        task.wait(2)
+                    else
+                        -- Ensure Action ready
+                        local action = M78.getBoostAction()
+                        if not action then
+                            M78.setStatus("Boost: extracting action...", C.Gold)
+                            task.wait(2)
                         else
-                            local sizeInfo = #sizePref == 0 and "(no size selected)" or "(tried "..table.concat(sizePref,",")..")"
-                            M78.setStatus("Boost: NO Pet Toy di bp "..sizeInfo..listStr, C.Gold)
+                            local cycleResults = {}
+                            for _, size in ipairs(sizes) do
+                                if not M78.autoBoost or M78.giftInProgress then break end
+                                -- Find toy in bp/char
+                                local toy = nil
+                                for _, t in pairs(char:GetChildren()) do
+                                    if t:IsA("Tool") and t.Name:find(size.." Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
+                                        toy = t break
+                                    end
+                                end
+                                if not toy then
+                                    for _, t in pairs(bp:GetChildren()) do
+                                        if t:IsA("Tool") and t.Name:find(size.." Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
+                                            toy = t break
+                                        end
+                                    end
+                                end
+                                if not toy then
+                                    cycleResults[#cycleResults + 1] = size..":no-toy"
+                                else
+                                    -- Equip
+                                    if toy.Parent ~= char then
+                                        pcall(function() hum:UnequipTools() end)
+                                        task.wait(0.1)
+                                        pcall(function() hum:EquipTool(toy) end)
+                                        task.wait(0.15)
+                                    end
+                                    local before = toy:GetAttribute("e") or 0
+                                    -- Iterate pets, call Activate
+                                    local pets = M78.findPetParts()
+                                    local applied = 0
+                                    for _, p in ipairs(pets) do
+                                        if not M78.autoBoost or M78.giftInProgress then break end
+                                        -- Filter by UUID if filter active
+                                        if filterCount > 0 then
+                                            local matched = false
+                                            for _, uuid in ipairs(matchingUUIDs) do
+                                                if uuid == p.uuid or uuid == "{"..p.uuid.."}" or p.uuid == "{"..uuid.."}" then
+                                                    matched = true break
+                                                end
+                                            end
+                                            if not matched then continue end
+                                        end
+                                        pcall(function() M78.PAS.SetTarget(p.part) end)
+                                        task.wait(0.05)
+                                        pcall(function() return action.Activate(p.part) end)
+                                        task.wait(0.12)
+                                        local cur = toy:GetAttribute("e") or before
+                                        if cur < before then
+                                            applied = applied + 1
+                                            before = cur
+                                        end
+                                    end
+                                    pcall(function() M78.PAS.Close() end)
+                                    cycleResults[#cycleResults + 1] = size..":"..applied.."/"..#pets
+                                end
+                                task.wait(0.3)
+                            end
+
+                            M78.setStatus("Boost: "..table.concat(cycleResults, "  ")..(filterCount > 0 and (" | filter:"..filterCount) or ""), C.Teal)
+
+                            -- Cycle countdown with reset capability
+                            local cycleStart = tick()
+                            M78.boostCycleReset = false
+                            while tick() - cycleStart < M78.boostCycleSec and M78.autoBoost
+                                  and not M78.giftInProgress and not M78.boostCycleReset do
+                                task.wait(1)
+                            end
                         end
                     end
                 end
             end
+        else
+            -- Auto Boost OFF atau auto-gift jalan - unequip toy kalo masih dipegang
+            if M78.giftInProgress then
+                local char = player.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if char and hum then
+                    for _, t in pairs(char:GetChildren()) do
+                        if t:IsA("Tool") and t.Name:find("Pet Toy", 1, true) then
+                            pcall(function() hum:UnequipTools() end)
+                            break
+                        end
+                    end
+                end
+            end
+            task.wait(1)
         end
-        task.wait(2)
     end
 end)
 
@@ -4363,4 +4505,4 @@ end)()
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.78: Misc rewrite IIFE+M78")
+print("ZenxLvl "..SCRIPT_VERSION.." loaded! v12.92: Gift+Collect upgrade module-based (PetGiftingService, CollectController)")
