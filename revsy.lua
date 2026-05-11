@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.79"
+local SCRIPT_VERSION="v12.82"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (misc rewrite v1.4 IIFE+M78)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (boost multi-select sizes + ALL_PETS pet picker)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2587,8 +2587,9 @@ local M78 = {
     autoCollect = d.autoCollect or false,
     -- v12.79m: Auto Boost - keep Pet Toy equipped untuk passive XP boost
     autoBoost = d.autoBoost or false,
-    boostToySize = d.boostToySize or "Medium", -- Small / Medium / Large / Any
-    boostPetTypes = d.boostPetTypes or {}, -- v12.79o: pet types yang trigger boost (empty = semua)
+    -- v12.82: boostToySizes = multi-select set { Small=true, Medium=true, Large=true }
+    boostToySizes = d.boostToySizes or { Medium = true },
+    boostPetTypes = d.boostPetTypes or {}, -- pet types yang trigger boost (empty = semua)
     feedThresholdPct = d.feedThresholdPct or 70, -- legacy, gak dipake lagi tp tetep di-load biar gak break
     feedCycleMin = d.feedCycleMin or 15,
     feedDuration = 20,
@@ -2680,6 +2681,24 @@ do
         else
             dbg("[misc78] GEARS dynamic load fail, using hardcoded fallback ("..#M78.GEARS..")")
         end
+    end
+    -- v12.82: Load PETS from PetAnimations folder (204 base pet types)
+    M78.ALL_PETS = {}
+    local assets = RS:FindFirstChild("Assets")
+    local anims = assets and assets:FindFirstChild("Animations")
+    local pa = anims and anims:FindFirstChild("PetAnimations")
+    if pa then
+        local seen = {}
+        for _, c in pairs(pa:GetChildren()) do
+            if c.Name and #c.Name > 0 and not seen[c.Name] then
+                seen[c.Name] = true
+                table.insert(M78.ALL_PETS, c.Name)
+            end
+        end
+        table.sort(M78.ALL_PETS)
+        dbg("[misc78] ALL_PETS loaded: "..#M78.ALL_PETS.." pet types from PetAnimations")
+    else
+        dbg("[misc78] PetAnimations folder NOT FOUND - pet picker bakal pake bp/placed only")
     end
 end
 
@@ -2889,33 +2908,46 @@ do
     -- v12.79m: Auto Boost - keep Pet Toy equipped untuk passive XP boost
     miscTogRow("Auto Boost (Pet Toy)", "Hold Pet Toy biar dapet passive XP boost", 7, "autoBoost")
 
-    -- Toy size picker
+    -- v12.82: Toy size picker - MULTI-SELECT (bisa pilih Small + Medium + Large)
+    local function countSelectedSizes()
+        local n = 0
+        for _ in pairs(M78.boostToySizes) do n = n + 1 end
+        return n
+    end
+    local function sizeRowText()
+        local sel = {}
+        for _, s in ipairs({"Small","Medium","Large"}) do
+            if M78.boostToySizes[s] then table.insert(sel, s) end
+        end
+        if #sel == 0 then return "Toy size: (none - pick at least 1)" end
+        return "Toy size: "..table.concat(sel, ", ")
+    end
     local sizeRow = mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=8,Parent=miscScroll})
     corner(sizeRow,6) local sizeStroke = stroke(sizeRow,C.Dim,1.1)
-    lbl(sizeRow,"Toy size: "..M78.boostToySize,12,C.White).Size=UDim2.new(0.65,0,1,0)
-    local sizeBtn = btn(sizeRow, "Ganti", 11, C.TDim, C.Teal)
+    local sizeLbl = lbl(sizeRow, sizeRowText(), 12, C.White)
+    sizeLbl.Size=UDim2.new(0.65,0,1,0)
+    local sizeBtn = btn(sizeRow, "Pilih", 11, C.TDim, C.Teal)
     sizeBtn.Size = UDim2.new(0,60,0,22) sizeBtn.Position = UDim2.new(1,-68,0.5,-11)
     stroke(sizeBtn, C.Teal, 1)
     sizeBtn.MouseButton1Click:Connect(function()
-        local sizes = {"Small","Medium","Large","Any"}
+        local sizes = {"Small","Medium","Large"}
         local items = {}
         for _, s in ipairs(sizes) do
-            table.insert(items, {value=s, label=s, selected=(M78.boostToySize==s)})
+            table.insert(items, {value=s, label=s, selected=(M78.boostToySizes[s]==true)})
         end
         showPickerModal({
-            title = "Pilih Toy Size",
-            items = items, multi = false,
-            onSelect = function(value, _)
-                M78.boostToySize = value
-                d.boostToySize = value
+            title = "Pilih Toy Size (multi)",
+            items = items, multi = true,
+            onSelect = function(value, isSelected)
+                if isSelected then M78.boostToySizes[value] = true else M78.boostToySizes[value] = nil end
+                d.boostToySizes = M78.boostToySizes
                 save()
-                local lbl = sizeRow:FindFirstChildOfClass("TextLabel")
-                if lbl then lbl.Text = "Toy size: "..value end
+                sizeLbl.Text = sizeRowText()
             end,
         })
     end)
 
-    -- v12.79o: Pet type filter picker
+    -- v12.79o → v12.82: Pet type filter picker - sekarang pake ALL_PETS list (semua pet types)
     local function countBoostTypes()
         local n = 0
         for _ in pairs(M78.boostPetTypes) do n = n + 1 end
@@ -2933,9 +2965,18 @@ do
     petBtn.Size = UDim2.new(0,60,0,22) petBtn.Position = UDim2.new(1,-68,0.5,-11)
     stroke(petBtn, C.Teal, 1)
     petBtn.MouseButton1Click:Connect(function()
-        -- Build picker items dari pet di backpack + placed
         local items = {}
         local seen = {}
+        -- v12.82: pake ALL_PETS list (~204 base pet types) sebagai source utama
+        if M78.ALL_PETS then
+            for _, name in ipairs(M78.ALL_PETS) do
+                if not seen[name] then
+                    seen[name] = true
+                    table.insert(items, {value=name, label=name, selected=(M78.boostPetTypes[name]==true)})
+                end
+            end
+        end
+        -- Tambahin yang ada di bp (kalo ada pet baru yang gak di registry)
         local bp = player:FindFirstChild("Backpack")
         if bp then
             for _, it in pairs(bp:GetChildren()) do
@@ -2943,11 +2984,12 @@ do
                     local base = getBaseName(getPetName(it))
                     if base and base ~= "" and not seen[base] then
                         seen[base] = true
-                        table.insert(items, {value=base, label=base, selected=(M78.boostPetTypes[base]==true)})
+                        table.insert(items, {value=base, label=base.." (bp)", selected=(M78.boostPetTypes[base]==true)})
                     end
                 end
             end
         end
+        -- Tambahin yang placed
         pcall(function()
             local placed = M78.getPlacedPets()
             for uuid, _ in pairs(placed) do
@@ -2963,7 +3005,7 @@ do
         end)
         table.sort(items, function(a,b) return a.label < b.label end)
         if #items == 0 then
-            table.insert(items, {value="__empty__", label="(no pet in bp/placed)", selected=false})
+            table.insert(items, {value="__empty__", label="(no pets discovered)", selected=false})
         end
         showPickerModal({
             title = "Pilih pet yang trigger boost (multi)",
@@ -3262,15 +3304,21 @@ task.spawn(function()
                         local size = equipped.Name:match("^(%S+)%s+Pet Toy") or "?"
                         M78.setStatus("Boost: "..size.." equipped"..listStr, C.Teal)
                     else
-                        local pref = M78.boostToySize or "Medium"
+                        -- v12.82: multi-select size - try di urutan Large > Medium > Small (atau apa yang dipilih)
+                        local sizePref = {}
+                        for _, s in ipairs({"Large","Medium","Small"}) do
+                            if M78.boostToySizes[s] then table.insert(sizePref, s) end
+                        end
                         local found = nil
-                        if pref ~= "Any" then
+                        for _, sz in ipairs(sizePref) do
                             for _, t in pairs(bp:GetChildren()) do
-                                if t:IsA("Tool") and t.Name:find(pref.." Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
+                                if t:IsA("Tool") and t.Name:find(sz.." Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
                                     found = t break
                                 end
                             end
+                            if found then break end
                         end
+                        -- Fallback: kalo gak ada selection, atau gak ketemu size pref, ambil any size
                         if not found then
                             for _, t in pairs(bp:GetChildren()) do
                                 if t:IsA("Tool") and t.Name:find("Pet Toy", 1, true) and t.Name:find("Passive Boost", 1, true) then
@@ -3279,10 +3327,20 @@ task.spawn(function()
                             end
                         end
                         if found then
-                            pcall(function() hum:EquipTool(found) end)
-                            M78.setStatus("Boost: equipping "..(found.Name:match("^(%S+)") or "?")..listStr, C.Teal)
+                            pcall(function() hum:UnequipTools() end)
+                            task.wait(0.1)
+                            local equipOK = false
+                            pcall(function() hum:EquipTool(found) equipOK = true end)
+                            if not equipOK or found.Parent ~= char then
+                                pcall(function() found.Parent = char end)
+                            end
+                            task.wait(0.1)
+                            local nowEquipped = (found.Parent == char)
+                            M78.setStatus("Boost: "..(nowEquipped and "EQUIP" or "FAIL").." "..(found.Name:match("^(%S+)") or "?")..listStr,
+                                          nowEquipped and C.Teal or C.Gold)
                         else
-                            M78.setStatus("Boost: NO Pet Toy di bp"..listStr, C.Gold)
+                            local sizeInfo = #sizePref == 0 and "(no size selected)" or "(tried "..table.concat(sizePref,",")..")"
+                            M78.setStatus("Boost: NO Pet Toy di bp "..sizeInfo..listStr, C.Gold)
                         end
                     end
                 end
