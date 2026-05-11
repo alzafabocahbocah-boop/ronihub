@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.87"
+local SCRIPT_VERSION="v12.88"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (firesignal Tool.Equipped + toy inspector + more boost remote patterns)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (track toy count delta - bukti boost beneran tick)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -3353,8 +3353,19 @@ task.spawn(function()
 
                     if equipped then
                         local size = equipped.Name:match("^(%S+)%s+Pet Toy") or "?"
+                        -- v12.88: track 'e' attribute (uses count) to verify boost beneran tick
+                        local curCount = equipped:GetAttribute("e")
+                        if not M78.boostInitialCount then
+                            M78.boostInitialCount = curCount
+                            M78.boostStartTime = tick()
+                        end
+                        local consumed = 0
+                        local elapsed = 0
+                        if M78.boostInitialCount and curCount then
+                            consumed = M78.boostInitialCount - curCount
+                            elapsed = math.floor(tick() - M78.boostStartTime)
+                        end
                         -- v12.87: fire Tool.Equipped signal supaya local-script di toy ke-trigger
-                        -- (PEACOCK equip might not fire client-side Equipped event)
                         pcall(function() if firesignal then firesignal(equipped.Equipped) end end)
                         pcall(function() if firesignal then firesignal(equipped.Activated) end end)
                         pcall(function()
@@ -3373,13 +3384,10 @@ task.spawn(function()
                         end)
                         -- v12.86: USE toy ke matching pets (gak cukup di-equip doang)
                         local boostFires = 0
-                        -- Method A: Tool:Activate() (simulate click while holding)
                         pcall(function() equipped:Activate() end)
-                        -- Method B: fire PetBoostService remote dengan pet UUID
                         if M78.petBoostRE then
                             local toyName = equipped.Name
                             local targets = (#matchingUUIDs > 0) and matchingUUIDs or {}
-                            -- Kalo filter empty, fire ke semua placed pets
                             if filterCount == 0 then
                                 targets = {}
                                 pcall(function()
@@ -3399,7 +3407,9 @@ task.spawn(function()
                                 task.wait(0.05)
                             end
                         end
-                        M78.setStatus("Boost: "..size.." used→"..boostFires..listStr, C.Teal)
+                        -- Status: show consumption stats biar tau boost beneran jalan
+                        local stats = " | used:"..consumed.." in "..elapsed.."s"
+                        M78.setStatus("Boost: "..size.." x"..(curCount or "?")..stats..listStr, C.Teal)
                     else
                         -- v12.82: multi-select size - try di urutan Large > Medium > Small (atau apa yang dipilih)
                         local sizePref = {}
