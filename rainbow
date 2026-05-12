@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.25"
+local SCRIPT_VERSION="v13.26"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4899,18 +4899,36 @@ doStart = function()
     end
 
     statusLbl.Text="Pasang tim + target..." statusLbl.TextColor3=C.Gold
-    -- v13.17: rapid-fire equip BOTH Tim (support) and Target (grind targets)
+    -- v13.26: rapid-fire equip BOTH Tim (support) and Target, SKIP pet age >= equipTargetLvl
     local placedTotal=0
+    local skippedAge=0
+    local function shouldPlace(uuid)
+        local age = getFullAge and getFullAge(uuid)
+        if not age then
+            local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+            if item then age = getAgeFromKG(item) end
+        end
+        if age and age >= (config.equipTargetLvl or 40) then
+            dbg("[doStart] SKIP place "..tostring(uuid):sub(1,8).." age="..age.." >= "..(config.equipTargetLvl or 40))
+            skippedAge = skippedAge + 1
+            return false
+        end
+        return true
+    end
     for uuid,_ in pairs(teamPetUUIDs) do
-        pcall(function() equipPet(uuid) end)
-        placedTotal=placedTotal+1
+        if shouldPlace(uuid) then
+            pcall(function() equipPet(uuid) end)
+            placedTotal=placedTotal+1
+        end
     end
     for uuid,_ in pairs(targetPetUUIDs) do
-        pcall(function() equipPet(uuid) end)
-        placedTotal=placedTotal+1
+        if shouldPlace(uuid) then
+            pcall(function() equipPet(uuid) end)
+            placedTotal=placedTotal+1
+        end
     end
     if placedTotal>0 then
-        dbg("[doStart] Tim+Target "..placedTotal.." pet di-place (rapid-fire)")
+        dbg("[doStart] Tim+Target "..placedTotal.." pet di-place (rapid-fire) - skipped "..skippedAge.." pet age>=target")
         task.wait(math.min(config.placeDelay or 0.12, 0.03+placedTotal*0.01))
         -- v13.12: verifikasi
         local petsPhys = workspace:FindFirstChild("PetsPhysical")
