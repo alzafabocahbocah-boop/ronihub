@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.22"
+local SCRIPT_VERSION="v13.23"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4767,18 +4767,29 @@ doStart = function()
     completedPets={}
     if isRunning then dbg("[doStart] sudah running, skip") return end
 
-    -- v13.19: cleanup stale targetPetUUIDs - drop yg gak match Jenis Pet sekarang
-    if config.petType and config.petType ~= "" then
+    -- v13.23: cleanup stale targetPetUUIDs - drop yg:
+    --   - gak match Jenis Pet sekarang
+    --   - age udah >= equipTargetLvl (maxed buat phase 1)
+    --   - base KG udah > Sampai KG (done)
+    do
         local dropped = 0
         for uuid,_ in pairs(targetPetUUIDs) do
             local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
             if item then
                 local nm = getPetName(item)
-                if not isTargetPet(nm) then
+                local mismatch = config.petType and config.petType ~= "" and not isTargetPet(nm)
+                local age = getAgeFromKG(item)
+                local agePast = age and age >= (config.equipTargetLvl or 40)
+                local kg = getKG(item)
+                local baseKG = nil
+                if kg and age and age >= 1 then baseKG = kg * 11 / (age + 10) end
+                local kgPast = baseKG and baseKG > (config.targetKG or 60)
+                if mismatch or agePast or kgPast then
                     targetPetUUIDs[uuid] = nil
                     targetPetInfoCache[uuid] = nil
                     dropped = dropped + 1
-                    dbg("[cleanup-Target] drop "..tostring(uuid):sub(1,8).." ('"..nm.."' gak match Jenis Pet)")
+                    local reason = mismatch and "wrong jenis" or (agePast and ("age "..tostring(age).." >= "..(config.equipTargetLvl or 40)) or ("kg "..string.format("%.2f",baseKG).." > Sampai"))
+                    dbg("[cleanup-Target] drop "..tostring(uuid):sub(1,8).." ('"..nm.."', "..reason..")")
                 end
             end
         end
