@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.23 (revert /10, cache udah baseKG)"
+local SCRIPT_VERSION = "v3.24 (mutation prefix update - support comma + new mutations)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -166,33 +166,65 @@ local function getAge(item)
     return nil
 end
 
--- v3.6: maxKG cache - build dari pet yg punya BOTH age + kg di nama
--- Pakai buat back-calculate age di pet yg gak punya Age di nama
+-- v3.24: MUTATION_NAMES sinkron dengan sc leveling - tambah Moonlit/Galactic/Eclipsed/dll
+-- Plus auto-build prefix list dengan ", " (format antar mutasi) DAN " " (sebelum base name)
+local MUTATION_NAMES = {
+    -- Single-word mutations (sorted alphabetical)
+    "Alienated","Ancient","Angelic","Aromatic","Ascended","Astral","Aurora",
+    "Bearded","Blazing","Blessed","Blossoming","Bloodlust",
+    "Celestial","Chaotic","Chilled","Chocolate","Christmas","Chromatic","Corrupt","Corrupted",
+    "Cosmic","Crocodile","Crystal","Cursed",
+    "Dawn","Demonic","Diamond","Disco","Divine","Dreadbound",
+    "Eclipse","Eclipsed","Eldritch","Enchanted","Ethereal","Everchanted",
+    "Fiery","Forger","Fried","Frostbite","Frozen",
+    "Galactic","GIANT","Giraffe","Ghostly","Glacial","Glimmering","Gold","Golden",
+    "HyperHunger","Holy",
+    "Icy","Infernal","Inferno","Inverted","IronSkin",
+    "JollyDecorator","JUMBO",
+    "Lion","Lunar","Luminous",
+    "Mega","MerryNursery","Mimic","Mini","Moonlit","Mystic","Mythic",
+    "Nightmare","Nocturnal","Nutty",
+    "Oxpecker",
+    "Peppermint","Phantom","Plasma","Prismatic","Primal",
+    "Radiant","Rainbow","Rhino","Rideable","Royal",
+    "Shadow","Shiny","Shocked","Silver","SpiritSparkle","Solar","Soulflame","Sparkling","Spectral","Starlit","Stellar","Storm",
+    "Tempest","Tethered","Tiny","Toxic","Tranquil","Twilight",
+    "UFO",
+    "Venom","Verdant","Volcanic",
+    "Wet","Windy",
+    "Zombified",
+    -- Multi-word PascalCase + spaced variants
+    "Christmas Rally","ChristmasRally",
+    "Giant Bean","GiantBean",
+    "Giant Golem","GiantGolem",
+    "Hyper Hunger",
+    "Iron Skin",
+    "Jolly Decorator",
+    "Merry Nursery","MerryNursery",
+    "Spirit Sparkle",
+}
+-- Auto-build prefix list with both " " and ", " separators
+local MUTATION_PREFIXES = {}
+for _, m in ipairs(MUTATION_NAMES) do
+    table.insert(MUTATION_PREFIXES, m..", ")  -- comma + space (between mutations)
+    table.insert(MUTATION_PREFIXES, m.." ")   -- space (before base name)
+end
+
 local function getBaseName(name)
-    -- Strip common mutation prefixes
-    local mutPrefixes = {
-        "Everchanted ","Enchanted ","Shiny ","Rainbow ","Wet ","Chocolate ","Zombified ","Disco ","Gold ","Frozen ",
-        "Lunar ","Plasma ","Angelic ","Corrupt ","Crystal ","Verdant ","Blazing ","Icy ","Storm ","Shadow ",
-        "Celestial ","Infernal ","Ancient ","Mythic ","Divine ","Venom ","Mimic ","Cosmic ","Galactic ","Stellar ",
-        "Toxic ","Radiant ","Mystic ","Phantom ","Spectral ","Eldritch ","Primal ","Ethereal ","Astral ","Chromatic ",
-        "Prismatic ","Volcanic ","Glacial ","Tempest ","Solar ","Nightmare ","Dreadbound ","Ghostly ","Diamond ","Bearded ",
-        "Glimmering ","Sparkling ","Inverted ","Bloodlust ","Dawn ","Twilight ","Eclipse ","Aurora ","Frostbite ","Inferno ",
-        "Demonic ","Holy ","Cursed ","Blessed ","Chaotic ","GIANT ","Mega ","Mini ","Tiny ","Royal ",
-    }
-    local current = name
-    -- Strip multiple prefixes (e.g. "Nightmare Diamond Panther" → "Panther")
-    for _ = 1, 3 do  -- max 3 layers
-        local matched = false
-        for _, prefix in ipairs(mutPrefixes) do
-            if current:sub(1, #prefix) == prefix then
-                current = current:sub(#prefix + 1)
-                matched = true
+    local result = name
+    local changed = true
+    -- Strip multi-layer mutations (e.g. "Shocked, Moonlit, Galactic Mimic Octopus" → "Mimic Octopus")
+    while changed do
+        changed = false
+        for _, prefix in ipairs(MUTATION_PREFIXES) do
+            if result:sub(1, #prefix) == prefix then
+                result = result:sub(#prefix + 1)
+                changed = true
                 break
             end
         end
-        if not matched then break end
     end
-    return current
+    return result
 end
 
 local maxKGCache = {}
