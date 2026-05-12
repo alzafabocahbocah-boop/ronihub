@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.99"
+local SCRIPT_VERSION="v13.01"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Jenis Pet dropdown picker)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Elephant automation UI + notif listener)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -110,7 +110,7 @@ end
 local loaded=loadData()
 if not getgenv().ZenxData then
     getgenv().ZenxData=loaded or {
-        config={equipInterval=5,rejoinMinutes=30,petType="",targetKG=60,petCount=3,equipTargetLvl=100},
+        config={equipInterval=5,rejoinMinutes=30,petType="",targetKG=60,petCount=3,equipTargetLvl=100,elephantThresholdKG=6.05},
         targetPetTypes={},
         fromAge=1,toAge=100,maxPetTarget=1,
         autoStartEnabled=false,autoRejoin=false,
@@ -205,6 +205,16 @@ end
 local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Name end
 local function getKG(item) return tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) end
 local function getPetUUID(item) return item:GetAttribute("PET_UUID") end
+
+-- v13.00: getBaseKG - cari base weight dari attribute dulu, fallback ke formula
+local function getBaseKG(item)
+    if not item then return nil end
+    for _,attrName in ipairs({"BASE_KG","PET_BASE_KG","BaseKG","BaseWeight","PET_BASE_WEIGHT","BASE_WEIGHT","PET_KG_BASE","StartingWeight","STARTING_KG"}) do
+        local ok, v = pcall(function() return item:GetAttribute(attrName) end)
+        if ok and v and type(v) == "number" and v > 0 then return v end
+    end
+    return nil
+end
 
 local function fmtUUID(uuid)
     local s=tostring(uuid)
@@ -648,28 +658,32 @@ local function passAgeFilter(item,filterStr)
     return true
 end
 
--- v12.79: MUTATION_PREFIXES verified dari PetMutationRegistry + GetPetMutationNames (50 real mutations)
--- Excluding "Normal" (default state, never prefix). Include space variant for PascalCase multi-word.
-local MUTATION_PREFIXES={
-    -- Single-word mutations (sorted alphabetical)
-    "Alienated ","Aromatic ","Ascended ","Aurora ","Blossoming ",
-    "Corrupted ","Crocodile ","Dreadbound ","Everchanted ","Fiery ",
-    "Forger ","Fried ","Frozen ","Giraffe ","Glimmering ",
-    "Golden ","Inverted ","JUMBO ","Lion ","Luminous ",
-    "Mega ","Nightmare ","Nocturnal ","Nutty ","Oxpecker ",
-    "Peppermint ","Radiant ","Rainbow ","Rhino ","Rideable ",
-    "Shiny ","Shocked ","Silver ","Soulflame ","Spectral ",
-    "Tethered ","Tiny ","Tranquil ","UFO ","Venom ","Windy ",
-    -- Multi-word PascalCase (original + spaced version)
-    "ChristmasRally ","Christmas Rally ",
-    "GiantBean ","Giant Bean ",
-    "GiantGolem ","Giant Golem ",
-    "HyperHunger ","Hyper Hunger ",
-    "IronSkin ","Iron Skin ",
-    "JollyDecorator ","Jolly Decorator ",
-    "MerryNursery ","Merry Nursery ",
-    "SpiritSparkle ","Spirit Sparkle ",
+-- v13.00: MUTATION_NAMES + auto-build comma+space prefixes (sync dgn leveling v12.95)
+-- Tambah Moonlit/Galactic/Eclipsed/Cosmic/Chilled/Ethereal/Starlit/Ghostly + format koma
+local MUTATION_NAMES={
+    "Alienated","Aromatic","Ascended","Aurora","Blossoming",
+    "Chilled","Corrupted","Cosmic","Crocodile","Dreadbound",
+    "Eclipsed","Ethereal","Everchanted","Fiery",
+    "Forger","Fried","Frozen","Galactic","Ghostly","Giraffe","Glimmering",
+    "Golden","Inverted","JUMBO","Lion","Luminous",
+    "Mega","Moonlit","Nightmare","Nocturnal","Nutty","Oxpecker",
+    "Peppermint","Radiant","Rainbow","Rhino","Rideable",
+    "Shiny","Shocked","Silver","Soulflame","Spectral","Starlit",
+    "Tethered","Tiny","Tranquil","UFO","Venom","Windy",
+    "ChristmasRally","Christmas Rally",
+    "GiantBean","Giant Bean",
+    "GiantGolem","Giant Golem",
+    "HyperHunger","Hyper Hunger",
+    "IronSkin","Iron Skin",
+    "JollyDecorator","Jolly Decorator",
+    "MerryNursery","Merry Nursery",
+    "SpiritSparkle","Spirit Sparkle",
 }
+local MUTATION_PREFIXES={}
+for _,m in ipairs(MUTATION_NAMES) do
+    table.insert(MUTATION_PREFIXES, m..", ")
+    table.insert(MUTATION_PREFIXES, m.." ")
+end
 function getBaseName(name)
     local result=name
     local changed=true
@@ -834,10 +848,9 @@ function getAgeFromKG(item)
         local kg=getKG(item)
         if kg then
             local maxKG=getMaxKGForPet(getPetName(item))
-            if maxKG then
-                kgAge=math.max(1,math.min(100,math.floor(kg*110/maxKG - 10)))
-            elseif kg >= 20 then
-                kgAge=100
+            if maxKG and maxKG > 0 then
+                local raw = math.floor(kg*110/maxKG - 10)
+                if raw >= 1 and raw <= 100 then kgAge = raw end
             end
         end
     end
@@ -931,7 +944,7 @@ local content=mk("Frame",{Size=UDim2.new(1,-(SIDEBAR_W+15),1,-34),Position=UDim2
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,2),Parent=tabBar})
 
-local tabNames={"UP KG","UP AGE","Swap Skill","Other Setting"}  -- v12.97: rename Tim Leveling → UP KG, Pet ke 100 → UP AGE
+local tabNames={"UP KG versi 1","UP AGE","Swap Skill","Other Setting"}  -- v13.01: rename UP KG → UP KG versi 1
 local tabBtns={}
 
 local function makeScroll(yPos,height)
@@ -963,6 +976,35 @@ local runStroke=stroke(runBtn,C.Dim,1.5)
 local stopBtn=btn(content,"STOP",12,C.Panel,C.Gray)
 stopBtn.Size=UDim2.new(0,90,0,26) stopBtn.Position=UDim2.new(0,160,0,BOT_Y)
 local stopStroke=stroke(stopBtn,C.Dim,1.5)
+-- v13.01: Auto Elephant Cycle toggle - starts/stops the Phase1 ↔ Phase2 state machine
+local aecBtn=btn(content,"AUTO ELE: OFF",11,C.Panel,C.Gray)
+aecBtn.Size=UDim2.new(0,130,0,26) aecBtn.Position=UDim2.new(0,255,0,BOT_Y)
+local aecStroke=stroke(aecBtn,C.Dim,1.5)
+local function refreshAECBtn()
+    if autoElephantCycle then
+        aecBtn.Text="AUTO ELE: ON"
+        aecBtn.BackgroundColor3=C.TDim
+        aecBtn.TextColor3=C.Teal
+        aecStroke.Color=C.Teal
+    else
+        aecBtn.Text="AUTO ELE: OFF"
+        aecBtn.BackgroundColor3=C.Panel
+        aecBtn.TextColor3=C.Gray
+        aecStroke.Color=C.Dim
+    end
+end
+refreshAECBtn()
+aecBtn.MouseButton1Click:Connect(function()
+    autoElephantCycle = not autoElephantCycle
+    if M78 then
+        M78.elephantState = autoElephantCycle and "leveling" or "stopped"
+        M78.elephantBlessingsThisCycle = 0
+        M78.elephantPetsAge40 = {}
+    end
+    refreshAECBtn()
+    pcall(function() save() end)
+    dbg("[ele] Auto Elephant Cycle: "..(autoElephantCycle and "ON (start leveling phase)" or "OFF"))
+end)
 
 
 
@@ -1110,6 +1152,7 @@ local function switchSection(idx)
     botBar.Visible = false
     runBtn.Visible = false
     stopBtn.Visible = false
+    if aecBtn then aecBtn.Visible = false end
     if invShowGroup then invShowGroup.Visible = false end
     miscGroup.Visible = false
 
@@ -1119,6 +1162,7 @@ local function switchSection(idx)
         botBar.Visible = true
         runBtn.Visible = true
         stopBtn.Visible = true
+        if aecBtn then aecBtn.Visible = true end
         switchTab(currentTab)
     elseif idx == 2 then
         -- Misc (was 3)
@@ -1202,6 +1246,9 @@ miniZBtn.MouseButton1Click:Connect(function() setMinimized(false) end)
 
 
 local teamPetUUIDs=d.teamPetUUIDs or {}
+-- v13.01: Tim Elephant - pet yang berfungsi sebagai Elephant (skill blesser)
+local elephantTeamUUIDs = d.elephantTeamUUIDs or {}
+local autoElephantCycle = d.autoElephantCycle or false  -- Auto Elephant Cycle toggle
 local teamPetInfoCache=d.teamPetInfoCache or {}
 
 -- v12.99: forward declare showPickerModal biar bisa dipake di cfgCard
@@ -1212,6 +1259,7 @@ config.petType = config.petType or ""
 config.targetKG = config.targetKG or 60
 config.petCount = config.petCount or 3
 config.equipTargetLvl = config.equipTargetLvl or 100
+config.elephantThresholdKG = config.elephantThresholdKG or 6.05  -- v13.01
 local targetPetTypes=d.targetPetTypes or {}
 local fromAge=d.fromAge or 1
 local maxPetTarget=d.maxPetTarget or 1
@@ -1234,6 +1282,11 @@ for i=1,3 do
     giftSlots[i].kg=giftSlots[i].kg or ""
     giftSlots[i].age=giftSlots[i].age or ""
     giftSlots[i].mutationFilter=giftSlots[i].mutationFilter or ""
+    -- v13.00: multi-select target. targets = array of names. Migrate from old single target.
+    giftSlots[i].targets = giftSlots[i].targets or {}
+    if #giftSlots[i].targets == 0 and giftSlots[i].target ~= "" then
+        table.insert(giftSlots[i].targets, giftSlots[i].target)
+    end
 end
 -- v12.79l: gift target history (riwayat penerima)
 local giftTargetHistory=d.giftTargetHistory or {}
@@ -1266,6 +1319,7 @@ local function save()
     d.antiAfk=antiAfk d.showAllPets=showAllPets d.showAllPetsSwap=showAllPetsSwap
     d.swapPerPet=swapPerPet d.swapPetInfoCache=swapPetInfoCache
     d.teamPetUUIDs=teamPetUUIDs d.teamPetInfoCache=teamPetInfoCache
+    d.elephantTeamUUIDs=elephantTeamUUIDs d.autoElephantCycle=autoElephantCycle  -- v13.01
     saveToFile(d)
 end
 
@@ -1491,6 +1545,8 @@ buildTimList=function()
     local kgBox = mkInputRow("Sampai KG", config.targetKG, 2, function(v) config.targetKG = math.max(1, v) end, true)
     local pcBox = mkInputRow("Jumlah Pet", config.petCount, 3, function(v) config.petCount = math.max(1, math.min(100, v)) end, true)
     local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 4, function(v) config.equipTargetLvl = math.max(1, v) end, true)
+    -- v13.01: Threshold KG field - base KG di atas threshold = pet udah maxed (skip dari rotation)
+    local thBox = mkInputRow("Threshold KG (max base)", config.elephantThresholdKG, 5, function(v) config.elephantThresholdKG = math.max(0.1, math.min(20, v)) end, true)
 
     local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[1]})
     corner(saRow,6) stroke(saRow,C.Dim,1.1)
@@ -1539,7 +1595,7 @@ buildTimList=function()
 
     updatePreview=function()
         for _,c in pairs(areas[1]:GetChildren()) do
-            if (c:IsA("Frame") or c:IsA("TextLabel")) and c.LayoutOrder>=4 then c:Destroy() end
+            if (c:IsA("Frame") or c:IsA("TextLabel")) and c.LayoutOrder>=4 and c.Name~="ZenxElephantPickerRow" then c:Destroy() end
         end
         div(areas[1],4)
         local timHdr=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=5,Parent=areas[1]})
@@ -1682,6 +1738,73 @@ buildTimList=function()
         picker.Size=pickerOpen and UDim2.new(1,0,0,185) or UDim2.new(1,0,0,0)
         pickArrow.Text=pickerOpen and "^" or "v"
         pickStroke.Color=pickerOpen and C.Teal or C.Dim
+    end)
+
+    -- v13.01: Tim Elephant picker - pet yang dipakai sebagai Elephant (blesser)
+    local elephantPickerRow = mk("Frame",{Name="ZenxElephantPickerRow",Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=4,Parent=areas[1]})
+    corner(elephantPickerRow,6) local elPickStroke=stroke(elephantPickerRow,C.Dim,1.1)
+    local function elephantCount()
+        local n=0
+        for _ in pairs(elephantTeamUUIDs) do n=n+1 end
+        return n
+    end
+    local elephantLbl = lbl(elephantPickerRow, "Pilih Tim Elephant  ("..elephantCount().." dipilih)", 11, C.White)
+    elephantLbl.Size = UDim2.new(0.8,0,1,0) elephantLbl.Position = UDim2.new(0,10,0,0)
+    local elephantArrow = lbl(elephantPickerRow, "v", 11, C.Teal, Enum.TextXAlignment.Right)
+    elephantArrow.Size = UDim2.new(0,20,1,0) elephantArrow.Position = UDim2.new(1,-24,0,0)
+    local elephantBtnCover = mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=elephantPickerRow})
+
+    elephantBtnCover.MouseButton1Click:Connect(function()
+        -- Build pet list dari backpack (pet apapun bisa jadi Elephant)
+        local items = {}
+        pcall(function()
+            local bp = player:FindFirstChild("Backpack")
+            if bp then
+                for _, it in pairs(bp:GetChildren()) do
+                    if isPet(it) then
+                        local u = getPetUUID(it)
+                        if u then
+                            local uuidStr = tostring(u)
+                            local name = getPetName(it)
+                            local kg = getKG(it) or 0
+                            local age = getAgeFromKG(it)
+                            local lbl_txt = name.."  ["..string.format("%.2fkg",kg)..(age and " age "..age or "").."]"
+                            table.insert(items,{value=uuidStr, label=lbl_txt, selected=(elephantTeamUUIDs[uuidStr]==true)})
+                        end
+                    end
+                end
+            end
+        end)
+        -- Plus placed pets juga
+        pcall(function()
+            for _, part in ipairs(workspace:GetDescendants()) do
+                if part:IsA("Part") and part.Name == "PetMover" then
+                    local u = part:GetAttribute("UUID")
+                    if u then
+                        local uuidStr = tostring(u)
+                        if not items[uuidStr] then
+                            local placedName = M78 and M78.getPlacedPetName and M78.getPlacedPetName(uuidStr) or "PlacedPet"
+                            table.insert(items,{value=uuidStr, label=placedName.." (placed)", selected=(elephantTeamUUIDs[uuidStr]==true)})
+                        end
+                    end
+                end
+            end
+        end)
+        if #items == 0 then
+            table.insert(items,{value="__empty__", label="(belum ada pet di bp/placed)", selected=false})
+        end
+        showPickerModal({
+            title = "Pilih Tim Elephant - multi-select",
+            items = items, multi = true,
+            onSelect = function(value, selected)
+                if not value or value == "" or value == "__empty__" then return end
+                if selected then elephantTeamUUIDs[value] = true
+                else elephantTeamUUIDs[value] = nil end
+                elephantLbl.Text = "Pilih Tim Elephant  ("..elephantCount().." dipilih)"
+                elPickStroke.Color = elephantCount() > 0 and C.Teal or C.Dim
+                save()
+            end,
+        })
     end)
 end
 
@@ -2219,46 +2342,66 @@ local function buildAutoGift()
         local slot=giftSlots[slotIdx]
 
         -- v12.79: Target picker → modal popup
-        local function trText() return slot.target == "" and "(klik pilih)" or slot.target end
+        -- v13.00: multi-select target
+        local function trText()
+            local n = #slot.targets
+            if n == 0 then return "(klik pilih)" end
+            if n == 1 then return slot.targets[1] end
+            return slot.targets[1].." +"..(n-1).." lainnya"
+        end
         local trRow=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
         corner(trRow,6) local trStroke=stroke(trRow,C.Dim,1.1)
         local trLbl=lbl(trRow,"Target: "..trText(),13,C.White) trLbl.Size=UDim2.new(0.85,0,1,0) trLbl.Position=UDim2.new(0,10,0,0)
         local trIcon=lbl(trRow,">",14,C.Teal,Enum.TextXAlignment.Right) trIcon.Size=UDim2.new(0,20,1,0) trIcon.Position=UDim2.new(1,-24,0,0)
         local trCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=trRow})
+        local function inTargets(name)
+            for _,t in ipairs(slot.targets) do if t == name then return true end end
+            return false
+        end
         trCover.MouseButton1Click:Connect(function()
-            local items={{value="",label="(Batalin pilihan)",selected=(slot.target=="")}}
-            -- v12.79l: history items di atas (prefix bintang, with delete button)
+            local items={}
             local inHistorySet={}
             for _,h in ipairs(giftTargetHistory) do
                 inHistorySet[h]=true
                 table.insert(items,{
                     value=h,
                     label=string.char(0xE2,0xAD,0x90).." "..h.." (riwayat)",
-                    selected=(slot.target==h),
+                    selected=inTargets(h),
                     removable=true,
                 })
             end
-            -- Player online di server
             local plist={}
             for _,p in ipairs(Players:GetPlayers()) do
                 if p ~= player and not inHistorySet[p.Name] then table.insert(plist,p.Name) end
             end
             table.sort(plist)
             for _,name in ipairs(plist) do
-                table.insert(items,{value=name,label=name,selected=(slot.target==name)})
+                table.insert(items,{value=name,label=name,selected=inTargets(name)})
+            end
+            for _,t in ipairs(slot.targets) do
+                if not inHistorySet[t] and not findPlayerByName(t) then
+                    table.insert(items,{value=t,label=t.." (offline)",selected=true})
+                end
             end
             showPickerModal({
-                title="Pilih Target Player (Gift "..slotIdx..")",
-                items=items, multi=false,
+                title="Pilih Target Player (Gift "..slotIdx..") - multi",
+                items=items, multi=true,
                 emptyText="(belum ada player lain di server)",
-                onSelect=function(value,_)
-                    slot.target=value
-                    trLbl.Text="Target: "..(value=="" and "(klik pilih)" or value)
-                    trStroke.Color=(value=="" and C.Dim or C.Teal)
+                onSelect=function(value, selected)
+                    if not value or value == "" then return end
+                    if selected then
+                        if not inTargets(value) then table.insert(slot.targets, value) end
+                    else
+                        for i=#slot.targets,1,-1 do
+                            if slot.targets[i] == value then table.remove(slot.targets, i) end
+                        end
+                    end
+                    slot.target = slot.targets[1] or ""
+                    trLbl.Text="Target: "..trText()
+                    trStroke.Color=(#slot.targets == 0 and C.Dim or C.Teal)
                     save()
                 end,
                 onRemove=function(value)
-                    -- Remove dari history
                     for i=#giftTargetHistory,1,-1 do
                         if giftTargetHistory[i]==value then
                             table.remove(giftTargetHistory,i)
@@ -2575,12 +2718,29 @@ autoSendTask = task.spawn(function()
         for slotIdx=1,3 do
             if scriptShutdown then break end
             local slot=giftSlots[slotIdx]
-            if slot and slot.target~="" and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
-                -- v12.79m: pre-check target online; kalo offline, status "nunggu rejoin" + skip slot
-                local targetOnline = findPlayerByName(slot.target)
+            local hasTargets = slot and (#slot.targets > 0 or slot.target ~= "")
+            if hasTargets and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
+                -- v13.00: migrate legacy single target -> targets array
+                if #slot.targets == 0 and slot.target ~= "" then
+                    table.insert(slot.targets, slot.target)
+                end
+                -- v13.00: pick RANDOM online target dari slot.targets
+                local activeTarget = nil
+                local onlineList = {}
+                for _, name in ipairs(slot.targets) do
+                    if name and name ~= "" and findPlayerByName(name) then
+                        table.insert(onlineList, name)
+                    end
+                end
+                if #onlineList > 0 then
+                    activeTarget = onlineList[math.random(1, #onlineList)]
+                end
+                slot.target = activeTarget or slot.targets[1] or ""
+                local targetOnline = activeTarget and findPlayerByName(activeTarget) or nil
                 if not targetOnline then
                     if sendStatusLbl then
-                        sendStatusLbl.Text="Slot "..slotIdx..": nunggu "..slot.target.." rejoin..."
+                        local list = table.concat(slot.targets, ", ")
+                        sendStatusLbl.Text="Slot "..slotIdx..": semua target offline ("..list..")"
                         sendStatusLbl.TextColor3=C.Gray
                     end
                 else
@@ -3466,30 +3626,24 @@ task.spawn(function()
                     M78.collectNextStartAt = now + (M78.collectCycleMin * 60)
                     M78.setStatus(string.format("Collect: SELESAI cycle. Next %dm (total:%d)", M78.collectCycleMin, M78.collectTotalFired), C.Green)
                 else
-                    -- v12.92: try CollectController.Collect first, fallback ke ProximityPrompt
+                    -- v13.00: revert ke ProximityPrompt-only (CollectController kadang gak work)
                     local fruitsBefore = M78.countBp()
+                    if (tick() - M78.promptsCacheT) > 3 then M78.refreshPrompts() end
                     local fired = 0
-                    if M78.CollectController then
-                        fired = M78.collectAllFruits()
-                    end
-                    -- Fallback: ProximityPrompt method
-                    if fired == 0 then
-                        if (tick() - M78.promptsCacheT) > 3 then M78.refreshPrompts() end
-                        for _, dd in ipairs(M78.promptsCache) do
-                            if dd.Parent then
-                                if not M78.promptsConfigured[dd] then
-                                    pcall(function()
-                                        dd.MaxActivationDistance = 1000
-                                        dd.HoldDuration = 0
-                                    end)
-                                    M78.promptsConfigured[dd] = true
-                                end
+                    for _, dd in ipairs(M78.promptsCache) do
+                        if dd.Parent then
+                            if not M78.promptsConfigured[dd] then
                                 pcall(function()
-                                    if fireproximityprompt then fireproximityprompt(dd)
-                                    else dd:InputHoldBegin() dd:InputHoldEnd() end
+                                    dd.MaxActivationDistance = 1000
+                                    dd.HoldDuration = 0
                                 end)
-                                fired = fired + 1
+                                M78.promptsConfigured[dd] = true
                             end
+                            pcall(function()
+                                if fireproximityprompt then fireproximityprompt(dd)
+                                else dd:InputHoldBegin() dd:InputHoldEnd() end
+                            end)
+                            fired = fired + 1
                         end
                     end
                     M78.lastPromptCount = fired
@@ -3549,6 +3703,58 @@ M78.getPlacedPetName = function(uuid)
     end
     return nil, "not_found"
 end
+
+-- v13.01: Elephant Skill Automation - State Machine + Notification Listener
+-- ====================================================================
+-- States: "leveling" (Phase 1) | "elephant" (Phase 2) | "stopped"
+-- Notifications captured from PlayerGui.Top_Notification.Frame.Notification_UI_Mobile.TextLabel
+
+M78.elephantState = "stopped"  -- current phase
+M78.elephantBlessingsThisCycle = 0  -- count blessings received in current Phase 2
+M78.elephantPetsAge40 = {}  -- track pets that hit age 40 in Phase 1 (UUID set)
+M78.elephantLastNotif = nil  -- last notif text (debug)
+M78.elephantLastFailAt = 0  -- timestamp last FAIL notif
+M78.elephantLastSuccessAt = 0  -- timestamp last SUCCESS notif
+
+-- Listener: watch Top_Notification for Elephant patterns
+task.spawn(function()
+    local function findTopNotifLabel()
+        local pg = player:FindFirstChild("PlayerGui") if not pg then return nil end
+        local top = pg:FindFirstChild("Top_Notification") if not top then return nil end
+        local fr = top:FindFirstChild("Frame") if not fr then return nil end
+        local mob = fr:FindFirstChild("Notification_UI_Mobile") if not mob then return nil end
+        return mob:FindFirstChildOfClass("TextLabel")
+    end
+
+    local hooked = nil
+    while not scriptShutdown do
+        local lbl = findTopNotifLabel()
+        if lbl and lbl ~= hooked then
+            hooked = lbl
+            pcall(function()
+                lbl:GetPropertyChangedSignal("Text"):Connect(function()
+                    local t = lbl.Text or ""
+                    if t == "" then return end
+                    M78.elephantLastNotif = t
+                    -- SUCCESS pattern: "🐘 Elephant blessed your <PET>! Age reset to 1 and gained +0.11 KG (<X> KG total)!"
+                    -- (matched substring agar mendukung variasi formatting)
+                    if t:find("Elephant blessed your", 1, true) then
+                        M78.elephantLastSuccessAt = tick()
+                        M78.elephantBlessingsThisCycle = M78.elephantBlessingsThisCycle + 1
+                        local petName = t:match("Elephant blessed your (.-)!")
+                        local newKg = t:match("%(([%d%.]+)%s*KG total")
+                        dbg("[ele] BLESS SUCCESS: "..(petName or "?").." -> "..(newKg or "?").."kg (total "..M78.elephantBlessingsThisCycle..")")
+                    elseif t:find("trumpeted a blessing", 1, true) and t:find("found no", 1, true) then
+                        M78.elephantLastFailAt = tick()
+                        dbg("[ele] BLESS FAIL: no eligible pet found")
+                    end
+                end)
+            end)
+            dbg("[ele] notif listener hooked")
+        end
+        task.wait(2)  -- re-scan tiap 2 detik (notif container kadang re-created)
+    end
+end)
 
 -- v12.91: Auto Boost loop - ACTIVE mode via Action.Activate (full automatic)
 -- Auto-pause kalo autoGift jalan (giftInProgress = true)
