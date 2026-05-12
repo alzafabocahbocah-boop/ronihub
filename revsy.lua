@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.97"
+local SCRIPT_VERSION="v12.98"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (implicit MAX age detection - pet tanpa [Age N] = age 100)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (revert implicit MAX assumption)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -199,11 +199,6 @@ local function getAge(item)
     end
     -- "MAX" / "MAXED" text
     if item.Name:match("%[Age%s*MAX%]") or item.Name:match("%[MAX%]") then return 100 end
-    -- v12.97: convention - pet dengan [KG] section tapi GAK ada [Age N] section = age max (100)
-    -- (game ngilangin Age display utk max-level pets)
-    local hasKG = item.Name:match("%[[%d%.]+%s*[Kk][Gg]%]")
-    local hasAge = item.Name:match("%[Age") or item.Name:match("%[Lv") or item.Name:match("%[Level") or item.Name:match("%[Lvl")
-    if hasKG and not hasAge then return 100 end
     return nil
 end
 local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Name end
@@ -4584,4 +4579,4 @@ end)()
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.97: pet tanpa [Age N] tag = age 100 (fix max-age detection)")
+print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.98: revert v12.97 - no implicit MAX assumption")
