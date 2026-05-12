@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.29"
+local SCRIPT_VERSION="v13.30"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4771,6 +4771,9 @@ doStart = function()
     completedPets={}
     if isRunning then dbg("[doStart] sudah running, skip") return end
 
+    -- v13.30: build maxKG cache FIRST biar getAgeFromKG works di cleanup/auto-fill
+    buildMaxKGCache()
+
     -- v13.25: helper - cek age pakai cascade (UI/tool/placed/KG estimate) - sama kayak display
     local function getFullAge(uuid)
         local age = nil
@@ -4784,7 +4787,6 @@ doStart = function()
             if placed and getPlacedPetAge then age = getPlacedPetAge(placed) end
         end
         if not age then
-            -- KG estimate fallback
             local item = findPetInBackpack(uuid)
             if item then
                 local kg = getKG(item)
@@ -4794,6 +4796,16 @@ doStart = function()
                         age = math.max(1, math.min(100, math.floor(kg * 11 / maxKG - 10)))
                     elseif kg >= 20 then age = 100
                     end
+                end
+            end
+        end
+        -- v13.30: last resort - kalo KG tinggi tanpa age detection, assume tinggi
+        if not age then
+            local item = findPetInBackpack(uuid)
+            if item then
+                local kg = getKG(item)
+                if kg and kg >= 5 then
+                    age = 100  -- KG tinggi (>=5kg) tanpa age = assume maxed
                 end
             end
         end
