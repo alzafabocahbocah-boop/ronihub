@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.94"
+local SCRIPT_VERSION="v12.95"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (fix age detection - hapus kg>=20 fallback)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (mutation prefixes update + random gift target)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -647,28 +647,36 @@ local function passAgeFilter(item,filterStr)
     return true
 end
 
--- v12.79: MUTATION_PREFIXES verified dari PetMutationRegistry + GetPetMutationNames (50 real mutations)
--- Excluding "Normal" (default state, never prefix). Include space variant for PascalCase multi-word.
-local MUTATION_PREFIXES={
+-- v12.95: MUTATION_NAMES = base names, auto-generate space + comma format prefixes
+-- Format yang dipakai game: "Shocked, Moonlit, Galactic Mimic Octopus" (koma + spasi antar mutasi)
+-- Plus tambah mutasi yang sebelumnya missing: Moonlit, Galactic, Eclipsed, Cosmic, Chilled, dll
+local MUTATION_NAMES={
     -- Single-word mutations (sorted alphabetical)
-    "Alienated ","Aromatic ","Ascended ","Aurora ","Blossoming ",
-    "Corrupted ","Crocodile ","Dreadbound ","Everchanted ","Fiery ",
-    "Forger ","Fried ","Frozen ","Giraffe ","Glimmering ",
-    "Golden ","Inverted ","JUMBO ","Lion ","Luminous ",
-    "Mega ","Nightmare ","Nocturnal ","Nutty ","Oxpecker ",
-    "Peppermint ","Radiant ","Rainbow ","Rhino ","Rideable ",
-    "Shiny ","Shocked ","Silver ","Soulflame ","Spectral ",
-    "Tethered ","Tiny ","Tranquil ","UFO ","Venom ","Windy ",
-    -- Multi-word PascalCase (original + spaced version)
-    "ChristmasRally ","Christmas Rally ",
-    "GiantBean ","Giant Bean ",
-    "GiantGolem ","Giant Golem ",
-    "HyperHunger ","Hyper Hunger ",
-    "IronSkin ","Iron Skin ",
-    "JollyDecorator ","Jolly Decorator ",
-    "MerryNursery ","Merry Nursery ",
-    "SpiritSparkle ","Spirit Sparkle ",
+    "Alienated","Aromatic","Ascended","Aurora","Blossoming",
+    "Chilled","Corrupted","Cosmic","Crocodile","Dreadbound",
+    "Eclipsed","Ethereal","Everchanted","Fiery",
+    "Forger","Fried","Frozen","Galactic","Ghostly","Giraffe","Glimmering",
+    "Golden","Inverted","JUMBO","Lion","Luminous",
+    "Mega","Moonlit","Nightmare","Nocturnal","Nutty","Oxpecker",
+    "Peppermint","Radiant","Rainbow","Rhino","Rideable",
+    "Shiny","Shocked","Silver","Soulflame","Spectral","Starlit",
+    "Tethered","Tiny","Tranquil","UFO","Venom","Windy",
+    -- Multi-word (both PascalCase + spaced)
+    "ChristmasRally","Christmas Rally",
+    "GiantBean","Giant Bean",
+    "GiantGolem","Giant Golem",
+    "HyperHunger","Hyper Hunger",
+    "IronSkin","Iron Skin",
+    "JollyDecorator","Jolly Decorator",
+    "MerryNursery","Merry Nursery",
+    "SpiritSparkle","Spirit Sparkle",
 }
+-- Auto-build prefix list with both " " and ", " separators
+local MUTATION_PREFIXES={}
+for _,m in ipairs(MUTATION_NAMES) do
+    table.insert(MUTATION_PREFIXES, m..", ")  -- comma + space (umumnya antar mutasi)
+    table.insert(MUTATION_PREFIXES, m.." ")   -- space (sebelum base pet name)
+end
 function getBaseName(name)
     local result=name
     local changed=true
@@ -2539,18 +2547,16 @@ autoSendTask = task.spawn(function()
                 if #slot.targets == 0 and slot.target ~= "" then
                     table.insert(slot.targets, slot.target)
                 end
-                -- Cari next online target dari rotasi
+                -- v12.95: RANDOM pick dari online target (bukan rotasi sequential)
                 local activeTarget = nil
-                local startIdx = giftSlotRotIdx[slotIdx] or 1
-                if startIdx > #slot.targets then startIdx = 1 end
-                for tries=0,#slot.targets-1 do
-                    local idx = ((startIdx - 1 + tries) % #slot.targets) + 1
-                    local name = slot.targets[idx]
+                local onlineList = {}
+                for _, name in ipairs(slot.targets) do
                     if name and name ~= "" and findPlayerByName(name) then
-                        activeTarget = name
-                        giftSlotRotIdx[slotIdx] = (idx % #slot.targets) + 1  -- next time start from next
-                        break
+                        table.insert(onlineList, name)
                     end
+                end
+                if #onlineList > 0 then
+                    activeTarget = onlineList[math.random(1, #onlineList)]
                 end
                 slot.target = activeTarget or slot.targets[1] or ""
                 local targetOnline = activeTarget and findPlayerByName(activeTarget) or nil
@@ -4558,4 +4564,4 @@ end)()
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.94: fix Jadi counter false-positive untuk pet base KG tinggi")
+print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.95: tambah mutasi (Moonlit/Galactic/dll) + comma format + random gift")
