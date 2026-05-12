@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.23"
+local SCRIPT_VERSION="v13.25"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4767,10 +4767,36 @@ doStart = function()
     completedPets={}
     if isRunning then dbg("[doStart] sudah running, skip") return end
 
-    -- v13.23: cleanup stale targetPetUUIDs - drop yg:
-    --   - gak match Jenis Pet sekarang
-    --   - age udah >= equipTargetLvl (maxed buat phase 1)
-    --   - base KG udah > Sampai KG (done)
+    -- v13.25: helper - cek age pakai cascade (UI/tool/placed/KG estimate) - sama kayak display
+    local function getFullAge(uuid)
+        local age = nil
+        if getAgeFromUI then age = getAgeFromUI(uuid) end
+        if not age then
+            local item = findPetInBackpack(uuid)
+            if item then age = getAgeFromKG(item) end
+        end
+        if not age then
+            local placed = findPlacedPetByUUID(uuid)
+            if placed and getPlacedPetAge then age = getPlacedPetAge(placed) end
+        end
+        if not age then
+            -- KG estimate fallback
+            local item = findPetInBackpack(uuid)
+            if item then
+                local kg = getKG(item)
+                if kg then
+                    local maxKG = getMaxKGForPet and getMaxKGForPet(getPetName(item))
+                    if maxKG and maxKG > 0 then
+                        age = math.max(1, math.min(100, math.floor(kg * 11 / maxKG - 10)))
+                    elseif kg >= 20 then age = 100
+                    end
+                end
+            end
+        end
+        return age
+    end
+
+    -- v13.23/25: cleanup stale targetPetUUIDs
     do
         local dropped = 0
         for uuid,_ in pairs(targetPetUUIDs) do
@@ -4778,7 +4804,7 @@ doStart = function()
             if item then
                 local nm = getPetName(item)
                 local mismatch = config.petType and config.petType ~= "" and not isTargetPet(nm)
-                local age = getAgeFromKG(item)
+                local age = getFullAge(uuid)  -- v13.25: full cascade
                 local agePast = age and age >= (config.equipTargetLvl or 40)
                 local kg = getKG(item)
                 local baseKG = nil
@@ -4818,10 +4844,10 @@ doStart = function()
                         local bn = getBaseName and getBaseName(nm) or nm
                         local matchResult = isTargetPet(nm)
                         if matchResult then
-                            -- v13.20: skip pet yg udah age >= equipTargetLvl (udah maxed buat phase 1)
-                            local age = getAgeFromKG(item)
+                            -- v13.25: skip pet age >= equipTargetLvl pakai full cascade detection
+                            local age = getFullAge(uuidStr)
+                            if not age then age = getAgeFromKG(item) end
                             local skipAge = age and age >= (config.equipTargetLvl or 40)
-                            -- skip pet yg base KG udah > Sampai KG (udah done)
                             local kg = getKG(item)
                             local baseKG = nil
                             if kg and age and age >= 1 then baseKG = kg * 11 / (age + 10) end
@@ -5101,7 +5127,12 @@ doStart = function()
                     end
                 end
                 local ageStr=age and (age.."/"..toAge) or ("?/"..toAge)
-                table.insert(activeNames,nameStr.." "..ageStr)
+                -- v13.24: skip pet age >= equipTargetLvl dari display (udah selesai phase 1)
+                if age and age >= (config.equipTargetLvl or toAge) then
+                    -- skip - don't show
+                else
+                    table.insert(activeNames,nameStr.." "..ageStr)
+                end
             end -- end addPetToDisplay
             -- v13.22: Show ONLY Pet Target di Lvl display (gak include queue pets biar gak numpuk)
             for uuid,_ in pairs(targetPetUUIDs) do addPetToDisplay(uuid) end
