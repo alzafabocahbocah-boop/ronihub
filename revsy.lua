@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.92"
+local SCRIPT_VERSION="v12.93"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (boost+gift+collect = module-based, smooth)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (multi-target gift + revert auto collect ke ProximityPrompt)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1232,7 +1232,14 @@ for i=1,3 do
     giftSlots[i].kg=giftSlots[i].kg or ""
     giftSlots[i].age=giftSlots[i].age or ""
     giftSlots[i].mutationFilter=giftSlots[i].mutationFilter or ""
+    -- v12.93: multi-select target. targets = array of names. Migrate from old single target.
+    giftSlots[i].targets = giftSlots[i].targets or {}
+    if #giftSlots[i].targets == 0 and giftSlots[i].target ~= "" then
+        table.insert(giftSlots[i].targets, giftSlots[i].target)
+    end
 end
+-- v12.93: rotation state per slot (not saved, runtime only)
+local giftSlotRotIdx = {1,1,1}
 -- v12.79l: gift target history (riwayat penerima)
 local giftTargetHistory=d.giftTargetHistory or {}
 local antiAfk=(d.antiAfk~=false)
@@ -2137,46 +2144,73 @@ local function buildAutoGift()
         local slot=giftSlots[slotIdx]
 
         -- v12.79: Target picker → modal popup
-        local function trText() return slot.target == "" and "(klik pilih)" or slot.target end
+        -- v12.93: multi-select target
+        local function trText()
+            local n = #slot.targets
+            if n == 0 then return "(klik pilih)" end
+            if n == 1 then return slot.targets[1] end
+            return slot.targets[1].." +"..(n-1).." lainnya"
+        end
         local trRow=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=parent})
         corner(trRow,6) local trStroke=stroke(trRow,C.Dim,1.1)
         local trLbl=lbl(trRow,"Target: "..trText(),13,C.White) trLbl.Size=UDim2.new(0.85,0,1,0) trLbl.Position=UDim2.new(0,10,0,0)
         local trIcon=lbl(trRow,">",14,C.Teal,Enum.TextXAlignment.Right) trIcon.Size=UDim2.new(0,20,1,0) trIcon.Position=UDim2.new(1,-24,0,0)
         local trCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=trRow})
+        -- helper: cek apakah name udah di slot.targets
+        local function inTargets(name)
+            for _,t in ipairs(slot.targets) do if t == name then return true end end
+            return false
+        end
         trCover.MouseButton1Click:Connect(function()
-            local items={{value="",label="(Batalin pilihan)",selected=(slot.target=="")}}
-            -- v12.79l: history items di atas (prefix bintang, with delete button)
+            local items={}
             local inHistorySet={}
             for _,h in ipairs(giftTargetHistory) do
                 inHistorySet[h]=true
                 table.insert(items,{
                     value=h,
                     label=string.char(0xE2,0xAD,0x90).." "..h.." (riwayat)",
-                    selected=(slot.target==h),
+                    selected=inTargets(h),
                     removable=true,
                 })
             end
-            -- Player online di server
             local plist={}
             for _,p in ipairs(Players:GetPlayers()) do
                 if p ~= player and not inHistorySet[p.Name] then table.insert(plist,p.Name) end
             end
             table.sort(plist)
             for _,name in ipairs(plist) do
-                table.insert(items,{value=name,label=name,selected=(slot.target==name)})
+                table.insert(items,{value=name,label=name,selected=inTargets(name)})
+            end
+            -- v12.93: tambahin yang udah dipilih tapi offline biar tetap kelihatan/bisa di-uncheck
+            for _,t in ipairs(slot.targets) do
+                if not inHistorySet[t] and not findPlayerByName(t) then
+                    table.insert(items,{value=t,label=t.." (offline)",selected=true})
+                end
             end
             showPickerModal({
-                title="Pilih Target Player (Gift "..slotIdx..")",
-                items=items, multi=false,
+                title="Pilih Target Player (Gift "..slotIdx..") - multi",
+                items=items, multi=true,
                 emptyText="(belum ada player lain di server)",
-                onSelect=function(value,_)
-                    slot.target=value
-                    trLbl.Text="Target: "..(value=="" and "(klik pilih)" or value)
-                    trStroke.Color=(value=="" and C.Dim or C.Teal)
+                onSelect=function(value, selected)
+                    -- Multi mode: dipanggil per-item. selected=true berarti ditambahkan, false dihapus
+                    if not value or value == "" then return end
+                    if selected then
+                        if not inTargets(value) then
+                            table.insert(slot.targets, value)
+                        end
+                    else
+                        for i=#slot.targets,1,-1 do
+                            if slot.targets[i] == value then
+                                table.remove(slot.targets, i)
+                            end
+                        end
+                    end
+                    slot.target = slot.targets[1] or ""  -- backward compat
+                    trLbl.Text="Target: "..trText()
+                    trStroke.Color=(#slot.targets == 0 and C.Dim or C.Teal)
                     save()
                 end,
                 onRemove=function(value)
-                    -- Remove dari history
                     for i=#giftTargetHistory,1,-1 do
                         if giftTargetHistory[i]==value then
                             table.remove(giftTargetHistory,i)
@@ -2493,12 +2527,32 @@ autoSendTask = task.spawn(function()
         for slotIdx=1,3 do
             if scriptShutdown then break end
             local slot=giftSlots[slotIdx]
-            if slot and slot.target~="" and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
-                -- v12.79m: pre-check target online; kalo offline, status "nunggu rejoin" + skip slot
-                local targetOnline = findPlayerByName(slot.target)
+            -- v12.93: rotate through slot.targets, set slot.target = next online
+            local hasTargets = slot and (#slot.targets > 0 or slot.target ~= "")
+            if hasTargets and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
+                -- Migrate legacy: kalo targets kosong tapi target lama isi
+                if #slot.targets == 0 and slot.target ~= "" then
+                    table.insert(slot.targets, slot.target)
+                end
+                -- Cari next online target dari rotasi
+                local activeTarget = nil
+                local startIdx = giftSlotRotIdx[slotIdx] or 1
+                if startIdx > #slot.targets then startIdx = 1 end
+                for tries=0,#slot.targets-1 do
+                    local idx = ((startIdx - 1 + tries) % #slot.targets) + 1
+                    local name = slot.targets[idx]
+                    if name and name ~= "" and findPlayerByName(name) then
+                        activeTarget = name
+                        giftSlotRotIdx[slotIdx] = (idx % #slot.targets) + 1  -- next time start from next
+                        break
+                    end
+                end
+                slot.target = activeTarget or slot.targets[1] or ""
+                local targetOnline = activeTarget and findPlayerByName(activeTarget) or nil
                 if not targetOnline then
                     if sendStatusLbl then
-                        sendStatusLbl.Text="Slot "..slotIdx..": nunggu "..slot.target.." rejoin..."
+                        local list = table.concat(slot.targets, ", ")
+                        sendStatusLbl.Text="Slot "..slotIdx..": semua target offline ("..list..")"
                         sendStatusLbl.TextColor3=C.Gray
                     end
                 else
@@ -3384,30 +3438,24 @@ task.spawn(function()
                     M78.collectNextStartAt = now + (M78.collectCycleMin * 60)
                     M78.setStatus(string.format("Collect: SELESAI cycle. Next %dm (total:%d)", M78.collectCycleMin, M78.collectTotalFired), C.Green)
                 else
-                    -- v12.92: try CollectController.Collect first, fallback ke ProximityPrompt
+                    -- v12.93: revert ke pattern lama yang work - ProximityPrompt sweep aja
                     local fruitsBefore = M78.countBp()
+                    if (tick() - M78.promptsCacheT) > 3 then M78.refreshPrompts() end
                     local fired = 0
-                    if M78.CollectController then
-                        fired = M78.collectAllFruits()
-                    end
-                    -- Fallback: ProximityPrompt method
-                    if fired == 0 then
-                        if (tick() - M78.promptsCacheT) > 3 then M78.refreshPrompts() end
-                        for _, dd in ipairs(M78.promptsCache) do
-                            if dd.Parent then
-                                if not M78.promptsConfigured[dd] then
-                                    pcall(function()
-                                        dd.MaxActivationDistance = 1000
-                                        dd.HoldDuration = 0
-                                    end)
-                                    M78.promptsConfigured[dd] = true
-                                end
+                    for _, dd in ipairs(M78.promptsCache) do
+                        if dd.Parent then
+                            if not M78.promptsConfigured[dd] then
                                 pcall(function()
-                                    if fireproximityprompt then fireproximityprompt(dd)
-                                    else dd:InputHoldBegin() dd:InputHoldEnd() end
+                                    dd.MaxActivationDistance = 1000
+                                    dd.HoldDuration = 0
                                 end)
-                                fired = fired + 1
+                                M78.promptsConfigured[dd] = true
                             end
+                            pcall(function()
+                                if fireproximityprompt then fireproximityprompt(dd)
+                                else dd:InputHoldBegin() dd:InputHoldEnd() end
+                            end)
+                            fired = fired + 1
                         end
                     end
                     M78.lastPromptCount = fired
@@ -4505,4 +4553,4 @@ end)()
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.92: Gift+Collect upgrade module-based (PetGiftingService, CollectController)")
+print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.93: multi-target gift, auto collect revert ke ProximityPrompt")
