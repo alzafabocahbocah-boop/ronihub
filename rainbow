@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.38"
+local SCRIPT_VERSION="v13.40"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -859,30 +859,25 @@ end
 
 function getAgeFromKG(item)
     if not item then return nil end
+    -- v13.40: PRIORITY tool age (immediate, reliable). Fallback ke UI/KG estimate
+    local toolAge=getAge(item)
+    if toolAge then return toolAge end  -- ✓ tool age detected, return langsung
+
     local uuid=getPetUUID(item)
     local uiAge=nil
     if uuid then uiAge=getAgeFromUI(uuid) end
+    if uiAge then return uiAge end  -- ✓ UI age, return
 
-    -- v12.79: hitung dari tool juga, jangan cuma UI cache (yg bisa stale di age 100)
-    local toolAge=getAge(item)
-    local kgAge=nil
-    if not toolAge then
-        local kg=getKG(item)
-        if kg then
-            local maxKG=getMaxKGForPet(getPetName(item))
-            if maxKG and maxKG > 0 then
-                local raw = math.floor(kg*110/maxKG - 10)
-                if raw >= 1 and raw <= 100 then kgAge = raw end
-            end
+    -- KG formula last resort (paling unreliable karena maxKG cache bisa wrong)
+    local kg=getKG(item)
+    if kg then
+        local maxKG=getMaxKGForPet(getPetName(item))
+        if maxKG and maxKG > 0 then
+            local raw = math.floor(kg*110/maxKG - 10)
+            if raw >= 1 and raw <= 100 then return raw end
         end
     end
-
-    -- Ambil yang TERTINGGI dari semua source biar gak ke-skip age 100
-    local best=nil
-    if uiAge and (not best or uiAge>best) then best=uiAge end
-    if toolAge and (not best or toolAge>best) then best=toolAge end
-    if kgAge and (not best or kgAge>best) then best=kgAge end
-    return best
+    return nil
 end
 
 local function getAgeByUUID(uuid)
@@ -4934,21 +4929,22 @@ doStart = function()
                     end
                 end
                 dbg("[rotate] "..#toRotate.." pet hit target, "..#freshList.." fresh pets available")
-                for i, item in ipairs(toRotate) do
+                -- v13.39: hanya rotate kalo ADA replacement (gak buang slot kosong)
+                local maxRotate = math.min(#toRotate, #freshList)
+                if maxRotate == 0 then
+                    dbg("[rotate] no fresh replacement available, wait for Elephant Phase 2 / bless")
+                end
+                for i = 1, maxRotate do
+                    local item = toRotate[i]
                     local uuid = item.uuid
                     pcall(function() unequipPet(uuid) end)
                     targetPetUUIDs[uuid] = nil
                     targetPetInfoCache[uuid] = nil
-                    -- Pick fresh from cached list
-                    if freshList[i] then
-                        local f = freshList[i]
-                        targetPetUUIDs[f.uuidStr] = true
-                        targetPetInfoCache[f.uuidStr] = {name=f.name, info=getPetInfo(f.item)}
-                        pcall(function() equipPet(f.uuid) end)
-                        dbg("[rotate] "..tostring(uuid):sub(1,8).." (age "..item.age..") -> "..f.uuidStr:sub(1,8).." ("..f.name..", age "..tostring(f.age)..")")
-                    else
-                        dbg("[rotate] "..tostring(uuid):sub(1,8).." unequipped, no fresh replacement available")
-                    end
+                    local f = freshList[i]
+                    targetPetUUIDs[f.uuidStr] = true
+                    targetPetInfoCache[f.uuidStr] = {name=f.name, info=getPetInfo(f.item)}
+                    pcall(function() equipPet(f.uuid) end)
+                    dbg("[rotate] "..tostring(uuid):sub(1,8).." (age "..item.age..") -> "..f.uuidStr:sub(1,8).." ("..f.name..", age "..tostring(f.age)..")")
                 end
             end
             task.wait(0.5)  -- v13.36: faster (was 2s)
