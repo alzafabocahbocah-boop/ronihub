@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.18"
+local SCRIPT_VERSION="v13.19"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4767,31 +4767,56 @@ doStart = function()
     completedPets={}
     if isRunning then dbg("[doStart] sudah running, skip") return end
 
+    -- v13.19: cleanup stale targetPetUUIDs - drop yg gak match Jenis Pet sekarang
+    if config.petType and config.petType ~= "" then
+        local dropped = 0
+        for uuid,_ in pairs(targetPetUUIDs) do
+            local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+            if item then
+                local nm = getPetName(item)
+                if not isTargetPet(nm) then
+                    targetPetUUIDs[uuid] = nil
+                    targetPetInfoCache[uuid] = nil
+                    dropped = dropped + 1
+                    dbg("[cleanup-Target] drop "..tostring(uuid):sub(1,8).." ('"..nm.."' gak match Jenis Pet)")
+                end
+            end
+        end
+        if dropped > 0 then pcall(save) end
+    end
+
     -- v13.17: auto-fill targetPetUUIDs (pet yg di-grind) sampai config.petCount
     local N = config.petCount or 1
     local currentTgt = 0
     for _ in pairs(targetPetUUIDs) do currentTgt = currentTgt + 1 end
+    dbg("[doStart] Jenis Pet config: '"..tostring(config.petType).."', target size "..currentTgt.."/"..N)
     if currentTgt < N then
         local needed = N - currentTgt
         local bp = player:FindFirstChild("Backpack")
         if bp then
-            dbg("[doStart] target size "..currentTgt.."/"..N..", auto-fill "..needed.." pet matching Jenis Pet")
+            dbg("[doStart] auto-fill "..needed.." pet matching Jenis Pet '"..(config.petType or "").."'")
+            local scanned = 0 local matched = 0
             for _,item in pairs(bp:GetChildren()) do
                 if needed <= 0 then break end
                 if isPet(item) then
+                    scanned = scanned + 1
                     local uuid = getPetUUID(item)
                     local uuidStr = uuid and tostring(uuid) or ""
                     if uuid and not targetPetUUIDs[uuidStr] and not teamPetUUIDs[uuidStr] then
                         local nm = getPetName(item)
-                        if isTargetPet(nm) then
+                        local bn = getBaseName and getBaseName(nm) or nm
+                        local matchResult = isTargetPet(nm)
+                        if matchResult then
+                            matched = matched + 1
                             targetPetUUIDs[uuidStr] = true
                             targetPetInfoCache[uuidStr] = {name=nm, info=getPetInfo(item)}
                             needed = needed - 1
-                            dbg("[autoFill-Target] +"..uuidStr:sub(1,12).." ("..nm..")")
+                            dbg("[autoFill-Target] +"..uuidStr:sub(1,12).." name='"..nm.."' base='"..bn.."' (matches)")
                         end
                     end
                 end
             end
+            dbg("[autoFill-Target] scanned "..scanned.." pet, matched "..matched..", picked into target")
             pcall(save)
         end
     end
