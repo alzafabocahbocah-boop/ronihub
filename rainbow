@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.15"
+local SCRIPT_VERSION="v13.17"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -1250,6 +1250,8 @@ miniZBtn.MouseButton1Click:Connect(function() setMinimized(false) end)
 local teamPetUUIDs=d.teamPetUUIDs or {}
 -- v13.01: Tim Elephant - pet yang berfungsi sebagai Elephant (skill blesser)
 local elephantTeamUUIDs = d.elephantTeamUUIDs or {}
+local targetPetUUIDs = d.targetPetUUIDs or {}  -- v13.17: Pet Target = pet yg di-grind level/kg (separate dari Tim Support)
+local targetPetInfoCache = d.targetPetInfoCache or {}
 local autoElephantCycle = d.autoElephantCycle or false  -- Auto Elephant Cycle toggle
 local teamPetInfoCache=d.teamPetInfoCache or {}
 
@@ -1328,6 +1330,7 @@ local function save()
     d.swapPerPet=swapPerPet d.swapPetInfoCache=swapPetInfoCache
     d.teamPetUUIDs=teamPetUUIDs d.teamPetInfoCache=teamPetInfoCache
     d.elephantTeamUUIDs=elephantTeamUUIDs d.autoElephantCycle=autoElephantCycle  -- v13.01
+    d.targetPetUUIDs=targetPetUUIDs d.targetPetInfoCache=targetPetInfoCache  -- v13.17
     saveToFile(d)
 end
 
@@ -1551,7 +1554,7 @@ buildTimList=function()
         })
     end)
     local kgBox = mkInputRow("Sampai KG", config.targetKG, 2, function(v) config.targetKG = math.max(1, v) end, true)
-    local pcBox = mkInputRow("Jumlah Pet Leveling", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
+    local pcBox = mkInputRow("Jumlah Pet Target", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
     local epcBox = mkInputRow("Jumlah Pet Elephant", config.elephantPetCount, 4, function(v) config.elephantPetCount = math.max(1, v) end, true)
     local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 5, function(v)
         config.equipTargetLvl = math.max(1, v)
@@ -1860,6 +1863,82 @@ buildTimList=function()
                 else elephantTeamUUIDs[value] = nil end
                 elephantLbl.Text = "Pilih Tim Elephant  ("..elephantCount().." dipilih)"
                 elPickStroke.Color = elephantCount() > 0 and C.Teal or C.Dim
+                save()
+            end,
+        })
+    end)
+
+    -- v13.17: Pilih Pet Target picker - pet yang DI-GRIND (kg/age)
+    local targetPickerRow = mk("Frame",{Name="ZenxTargetPickerRow",Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=areas[1]})
+    corner(targetPickerRow,6) local tgtPickStroke=stroke(targetPickerRow,C.Dim,1.1)
+    local function targetCount()
+        local n=0
+        for _ in pairs(targetPetUUIDs) do n=n+1 end
+        return n
+    end
+    local targetLbl = lbl(targetPickerRow, "Pilih Pet Target  ("..targetCount().." dipilih)", 11, C.Gold)
+    targetLbl.Size = UDim2.new(0.8,0,1,0) targetLbl.Position = UDim2.new(0,10,0,0)
+    local targetArrow = lbl(targetPickerRow, "v", 11, C.Gold, Enum.TextXAlignment.Right)
+    targetArrow.Size = UDim2.new(0,20,1,0) targetArrow.Position = UDim2.new(1,-24,0,0)
+    local targetBtnCover = mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=targetPickerRow})
+    targetBtnCover.MouseButton1Click:Connect(function()
+        local items = {}
+        pcall(function()
+            local bp = player:FindFirstChild("Backpack")
+            if bp then
+                for _, it in pairs(bp:GetChildren()) do
+                    if isPet(it) then
+                        local u = getPetUUID(it)
+                        if u then
+                            local uuidStr = tostring(u)
+                            local name = getPetName(it)
+                            local kg = getKG(it) or 0
+                            local age = getAgeFromKG(it)
+                            local lbl_txt = name.."  ["..string.format("%.2fkg",kg)..(age and " age "..age or "").."]"
+                            table.insert(items,{value=uuidStr, label=lbl_txt, selected=(targetPetUUIDs[uuidStr]==true)})
+                        end
+                    end
+                end
+            end
+        end)
+        pcall(function()
+            for _, part in ipairs(workspace:GetDescendants()) do
+                if part:IsA("Part") and part.Name == "PetMover" then
+                    local u = part:GetAttribute("UUID")
+                    if u then
+                        local uuidStr = tostring(u)
+                        local placedName = M78 and M78.getPlacedPetName and M78.getPlacedPetName(uuidStr) or "PlacedPet"
+                        table.insert(items,{value=uuidStr, label=placedName.." (placed)", selected=(targetPetUUIDs[uuidStr]==true)})
+                    end
+                end
+            end
+        end)
+        if #items == 0 then
+            table.insert(items,{value="__empty__", label="(belum ada pet di bp/placed)", selected=false})
+        end
+        showPickerModal({
+            title = "Pilih Pet Target - multi-select",
+            items = items, multi = true,
+            onSelect = function(value, selected)
+                if not value or value == "" or value == "__empty__" then return end
+                if selected then
+                    targetPetUUIDs[value] = true
+                    pcall(function()
+                        local bp = player:FindFirstChild("Backpack")
+                        if bp then
+                            for _, it in pairs(bp:GetChildren()) do
+                                if tostring(getPetUUID(it)) == value then
+                                    targetPetInfoCache[value] = {name=getPetName(it), info=getPetInfo(it)}
+                                    break
+                                end
+                            end
+                        end
+                    end)
+                else
+                    targetPetUUIDs[value] = nil
+                end
+                targetLbl.Text = "Pilih Pet Target  ("..targetCount().." dipilih)"
+                tgtPickStroke.Color = targetCount() > 0 and C.Gold or C.Dim
                 save()
             end,
         })
@@ -3801,10 +3880,10 @@ local doStart, doStop
 -- v13.07: lookup pet UUID berdasar nama (untuk mapping notif pet name -> UUID di teamPetUUIDs)
 M78.findUUIDByName = function(petName)
     if not petName or petName == "" then return nil end
-    -- Strip mutation prefix biar match base name
     local nameStripped = petName
     if getBaseName then nameStripped = getBaseName(petName) end
-    for uuid,_ in pairs(teamPetUUIDs) do
+    -- v13.17: cari di targetPetUUIDs dulu (pet yg di-grind)
+    for uuid,_ in pairs(targetPetUUIDs) do
         local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
         if item then
             local itemName = getPetName(item)
@@ -3820,14 +3899,13 @@ end
 -- v13.03: helper - cek apakah SEMUA pet di teamPetUUIDs udah reach equipTargetLvl
 -- (filter: skip pet yang base KG > targetKG (Sampai KG) ATAU yg udah di-done set)
 M78.allLevelingPetsAtTarget = function()
-    if not teamPetUUIDs or next(teamPetUUIDs) == nil then return false end
+    -- v13.17: cek SEMUA targetPetUUIDs (pet yg di-grind), bukan teamPetUUIDs (support)
+    if not targetPetUUIDs or next(targetPetUUIDs) == nil then return false end
     local anyEligible = false
-    for uuid, _ in pairs(teamPetUUIDs) do
-        -- Skip pet yg udah done (sudah lewat Sampai KG, dari notif)
+    for uuid, _ in pairs(targetPetUUIDs) do
         if not M78.elephantDonePets[uuid] then
             local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
             if item then
-                -- Hitung base KG sekarang (cek apakah udah lewat Sampai KG)
                 local baseKG = nil
                 if getBaseKG then baseKG = getBaseKG(item) end
                 if not baseKG then
@@ -3837,21 +3915,20 @@ M78.allLevelingPetsAtTarget = function()
                         baseKG = kg * 11 / (age + 10)
                     end
                 end
-                -- Skip pet yg base KG udah > Sampai KG
                 if baseKG and baseKG > (config.targetKG or 60) then
                     M78.elephantDonePets[uuid] = true
-                    dbg("[ele] pet "..tostring(uuid):sub(1,8).." base "..string.format("%.2f",baseKG).."kg > Sampai KG "..config.targetKG..", marked DONE")
+                    dbg("[ele] target "..tostring(uuid):sub(1,8).." base "..string.format("%.2f",baseKG).."kg > Sampai KG "..config.targetKG..", marked DONE")
                 else
                     anyEligible = true
                     local age = getAgeFromKG(item)
                     if not age or age < (config.equipTargetLvl or 40) then
-                        return false  -- pet ini belum siap
+                        return false
                     end
                 end
             end
         end
     end
-    return anyEligible  -- semua eligible pet udah at target
+    return anyEligible
 end
 
 -- v13.03: State machine monitor loop
@@ -3859,17 +3936,17 @@ task.spawn(function()
     while not scriptShutdown do
         if autoElephantCycle then
             if M78.elephantState == "leveling" then
-                -- v13.08: cek kalo semua pet di Tim Leveling udah done (semua lewat Sampai KG)
-                local totalTim = 0 local doneTim = 0
-                for uuid,_ in pairs(teamPetUUIDs) do
-                    totalTim = totalTim + 1
-                    if M78.elephantDonePets[uuid] then doneTim = doneTim + 1 end
+                -- v13.17: cek kalo semua targetPetUUIDs udah done (semua lewat Sampai KG)
+                local totalTgt = 0 local doneTgt = 0
+                for uuid,_ in pairs(targetPetUUIDs) do
+                    totalTgt = totalTgt + 1
+                    if M78.elephantDonePets[uuid] then doneTgt = doneTgt + 1 end
                 end
-                if totalTim > 0 and doneTim >= totalTim then
-                    dbg("[ele] SEMUA pet ("..totalTim..") udah lewat Sampai KG -> AUTO STOP cycle")
+                if totalTgt > 0 and doneTgt >= totalTgt then
+                    dbg("[ele] SEMUA Pet Target ("..totalTgt..") udah lewat Sampai KG -> AUTO STOP cycle")
                     autoElephantCycle = false
                     M78.elephantState = "stopped"
-                    if doStop then pcall(function() doStop("[AUTO ELE] All pets done") end) end
+                    if doStop then pcall(function() doStop("[AUTO ELE] All targets done") end) end
                     local char = player.Character
                     local hum = char and char:FindFirstChildOfClass("Humanoid")
                     if hum then pcall(function() hum:UnequipTools() end) end
@@ -4615,6 +4692,11 @@ doStop = function(reason)
             task.wait(0.1)
         end
     end
+    -- v13.17: unequip Pet Target juga
+    for uuid,_ in pairs(targetPetUUIDs) do
+        unequipPet(uuid)
+        task.wait(0.1)
+    end
     setRunning(false)
     statusLbl.Text=reason or "Dihentikan" statusLbl.TextColor3=C.Gray
     buildTargetList()
@@ -4677,28 +4759,27 @@ doStart = function()
     completedPets={}
     if isRunning then dbg("[doStart] sudah running, skip") return end
 
-    -- v13.15: auto-fill team size sampai config.petCount kalo kurang
-    -- (cari pet matching Jenis Pet dari backpack)
+    -- v13.17: auto-fill targetPetUUIDs (pet yg di-grind) sampai config.petCount
     local N = config.petCount or 1
-    local currentSize = 0
-    for _ in pairs(teamPetUUIDs) do currentSize = currentSize + 1 end
-    if currentSize < N then
-        local needed = N - currentSize
+    local currentTgt = 0
+    for _ in pairs(targetPetUUIDs) do currentTgt = currentTgt + 1 end
+    if currentTgt < N then
+        local needed = N - currentTgt
         local bp = player:FindFirstChild("Backpack")
         if bp then
-            dbg("[doStart] team size "..currentSize.."/"..N..", auto-fill "..needed.." pet matching Jenis Pet")
+            dbg("[doStart] target size "..currentTgt.."/"..N..", auto-fill "..needed.." pet matching Jenis Pet")
             for _,item in pairs(bp:GetChildren()) do
                 if needed <= 0 then break end
                 if isPet(item) then
                     local uuid = getPetUUID(item)
                     local uuidStr = uuid and tostring(uuid) or ""
-                    if uuid and not teamPetUUIDs[uuidStr] then
+                    if uuid and not targetPetUUIDs[uuidStr] and not teamPetUUIDs[uuidStr] then
                         local nm = getPetName(item)
-                        if isTargetPet(nm) and not isFavorite(item) then
-                            teamPetUUIDs[uuidStr] = true
-                            teamPetInfoCache[uuidStr] = {name=nm, info=getPetInfo(item)}
+                        if isTargetPet(nm) then
+                            targetPetUUIDs[uuidStr] = true
+                            targetPetInfoCache[uuidStr] = {name=nm, info=getPetInfo(item)}
                             needed = needed - 1
-                            dbg("[autoFill] +"..uuidStr:sub(1,12).." ("..nm..")")
+                            dbg("[autoFill-Target] +"..uuidStr:sub(1,12).." ("..nm..")")
                         end
                     end
                 end
@@ -4707,7 +4788,12 @@ doStart = function()
         end
     end
 
-    if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
+    -- v13.17: cek apakah ada Target atau Tim (Support optional)
+    local tgtCnt = 0 for _ in pairs(targetPetUUIDs) do tgtCnt = tgtCnt + 1 end
+    local timCnt = 0 for _ in pairs(teamPetUUIDs) do timCnt = timCnt + 1 end
+    if tgtCnt == 0 and timCnt == 0 then
+        dbg("[doStart] FAIL: pilih Pet Target/Tim dulu") statusLbl.Text="Pilih Pet Target/Tim dulu!" statusLbl.TextColor3=C.Red return
+    end
     buildMaxKGCache()
 
     statusLbl.Text="Membersihkan garden..." statusLbl.TextColor3=C.Gold
@@ -4730,22 +4816,21 @@ doStart = function()
         dbg("[doStart] garden udah kosong, gak ada yg di-pickup")
     end
 
-    statusLbl.Text="Pasang tim leveling..." statusLbl.TextColor3=C.Gold
-    -- v13.14: rapid-fire + DETAILED log per-pet
-    local teamPlaced=0
-    local teamSize=0 for _ in pairs(teamPetUUIDs) do teamSize=teamSize+1 end
-    dbg("[doStart] teamPetUUIDs size: "..teamSize)
+    statusLbl.Text="Pasang tim + target..." statusLbl.TextColor3=C.Gold
+    -- v13.17: rapid-fire equip BOTH Tim (support) and Target (grind targets)
+    local placedTotal=0
     for uuid,_ in pairs(teamPetUUIDs) do
-        local uuidShort = tostring(uuid):sub(1,12)
-        local inBP = findPetInBackpack(uuid) ~= nil
-        local placed = findPlacedPetByUUID and (findPlacedPetByUUID(uuid) ~= nil) or false
-        dbg("[doStart] equipPet("..uuidShort..") inBP="..tostring(inBP).." inGarden="..tostring(placed))
         pcall(function() equipPet(uuid) end)
-        teamPlaced=teamPlaced+1
+        placedTotal=placedTotal+1
     end
-    if teamPlaced>0 then
-        dbg("[doStart] tim "..teamPlaced.." pet di-place (rapid-fire)")
-        task.wait(math.min(config.placeDelay or 0.12, 0.03+teamPlaced*0.01))
+    for uuid,_ in pairs(targetPetUUIDs) do
+        pcall(function() equipPet(uuid) end)
+        placedTotal=placedTotal+1
+    end
+    if placedTotal>0 then
+        dbg("[doStart] Tim+Target "..placedTotal.." pet di-place (rapid-fire)")
+        task.wait(math.min(config.placeDelay or 0.12, 0.03+placedTotal*0.01))
+        -- v13.12: verifikasi
         local petsPhys = workspace:FindFirstChild("PetsPhysical")
         local actual = 0
         if petsPhys then
@@ -4753,14 +4838,18 @@ doStart = function()
                 local uid = nil pcall(function() uid = m:GetAttribute("PET_UUID") or m:GetAttribute("UUID") end)
                 if uid then
                     local uidStr = tostring(uid):gsub("^{",""):gsub("}$","")
-                    for tu,_ in pairs(teamPetUUIDs) do
-                        local tuStr = tostring(tu):gsub("^{",""):gsub("}$","")
-                        if uidStr == tuStr then actual = actual + 1 break end
+                    local checkSet = function(set)
+                        for tu,_ in pairs(set) do
+                            local tuStr = tostring(tu):gsub("^{",""):gsub("}$","")
+                            if uidStr == tuStr then return true end
+                        end
+                        return false
                     end
+                    if checkSet(teamPetUUIDs) or checkSet(targetPetUUIDs) then actual = actual + 1 end
                 end
             end
         end
-        dbg("[doStart] verifikasi: "..actual.."/"..teamPlaced.." pet di garden")
+        dbg("[doStart] verifikasi: "..actual.."/"..placedTotal.." pet di garden")
     end
 
     local queue=getQueue()
