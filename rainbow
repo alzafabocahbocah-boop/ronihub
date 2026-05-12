@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.30"
+local SCRIPT_VERSION="v13.31"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -944,7 +944,7 @@ local content=mk("Frame",{Size=UDim2.new(1,-(SIDEBAR_W+15),1,-34),Position=UDim2
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,2),Parent=tabBar})
 
-local tabNames={"UP KG versi 1","UP AGE","Swap Skill","Other Setting"}  -- v13.01: rename UP KG → UP KG versi 1
+local tabNames={"UP KG versi 1","ELEPHANT","Swap Skill","Other Setting"}  -- v13.31: rename UP AGE -> ELEPHANT
 local tabBtns={}
 
 local function makeScroll(yPos,height)
@@ -1182,8 +1182,7 @@ for i,name in ipairs(tabNames) do
     b.Size=UDim2.new(0,88,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
     local ii=i b.MouseButton1Click:Connect(function() switchTab(ii) end)
 end
--- v13.02: hide UP AGE tab (areas[2] tetep ada di code, cuma button-nya dihilangin)
-if tabBtns[2] then tabBtns[2]:Destroy() tabBtns[2] = nil end
+-- v13.31: tab[2] restored sebagai ELEPHANT (sebelumnya hidden UP AGE)
 
 -- v10.9: default sidebar = UP LVL
 switchSection(1)
@@ -1810,7 +1809,8 @@ buildTimList=function()
     end)
 
     -- v13.01: Tim Elephant picker - pet yang dipakai sebagai Elephant (blesser)
-    local elephantPickerRow = mk("Frame",{Name="ZenxElephantPickerRow",Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=4,Parent=areas[1]})
+    -- v13.31: parent ke areas[2] (ELEPHANT tab)
+    local elephantPickerRow = mk("Frame",{Name="ZenxElephantPickerRow",Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[2]})
     corner(elephantPickerRow,6) local elPickStroke=stroke(elephantPickerRow,C.Dim,1.1)
     local function elephantCount()
         local n=0
@@ -1954,176 +1954,49 @@ buildTimList=function()
 end
 
 -- ============================================
--- TAB 2: PET KE 100
+-- TAB 2: ELEPHANT
 -- ============================================
+-- v13.31: Tab ELEPHANT - berisi Pilih Tim Elephant + AUTO ELE info
+-- Pilih Tim Elephant picker dibuat di buildTimList (parent=areas[2]) biar handler tetap valid.
 local function buildTargetList()
-    for _,c in pairs(areas[2]:GetChildren()) do
-        if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
-    end
-    buildMaxKGCache()
-    local bp=player:FindFirstChild("Backpack")
-    local petNames={} local nameSet={}
-    if bp then
-        for _,item in pairs(bp:GetChildren()) do
-            if isPet(item) then
-                local name=getPetName(item)
-                if not nameSet[name] then nameSet[name]=true table.insert(petNames,name) end
-            end
-        end
-        table.sort(petNames,function(a,b) return a<b end)
-    end
-
-    local typePickerOpen=false
-    local typeRow=mk("Frame",{Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=areas[2]})
-    corner(typeRow,6) local typeStroke=stroke(typeRow,C.Dim,1.1)
-    local typeLbl=lbl(typeRow,"Jenis Pet  ("..selCount().." dipilih, 0=semua)",11,C.White)
-    typeLbl.Size=UDim2.new(0.8,0,1,0) typeLbl.Position=UDim2.new(0,10,0,0)
-    local typeArrow=lbl(typeRow,"v",11,C.Teal,Enum.TextXAlignment.Right)
-    typeArrow.Size=UDim2.new(0,20,1,0) typeArrow.Position=UDim2.new(1,-24,0,0)
-    local typeBtnCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=typeRow})
-    local typePicker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=1,Parent=areas[2]})
-    corner(typePicker,7) stroke(typePicker,C.Teal,1.3)
-    mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=typePicker})
-    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=typePicker})
-    local typeSearch=mk("TextBox",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Card,Text="",PlaceholderText="Cari jenis pet...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=13,TextScaled=false,ClearTextOnFocus=false,LayoutOrder=0,Parent=typePicker})
-    corner(typeSearch,5) stroke(typeSearch,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=typeSearch})
-    local typeScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,120),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=typePicker,ElasticBehavior=Enum.ElasticBehavior.Never})
-    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=typeScroll})
-
-    local function buildTypePicker(filter)
-        filter=filter or ""
-        for _,c in pairs(typeScroll:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
-        local n=0
-        n=n+1
-        local allSel=selCount()==0
-        local allRow=mk("Frame",{Size=UDim2.new(1,0,0,24),BackgroundColor3=allSel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=typeScroll})
-        corner(allRow,5) if allSel then stroke(allRow,C.Teal,1.1) end
-        lbl(allRow,"(Semua Pet)",8,allSel and C.Teal or C.White).Size=UDim2.new(0.72,0,1,0)
-        local allBtn=btn(allRow,allSel and "ON" or "OFF",8,allSel and C.TDim or C.Panel,allSel and C.Teal or C.Gray)
-        allBtn.Size=UDim2.new(0,44,0,18) allBtn.Position=UDim2.new(1,-48,0.5,-9) stroke(allBtn,allSel and C.Teal or C.Dim,1.1)
-        allBtn.MouseButton1Click:Connect(function()
-            targetPetTypes={} save() typeLbl.Text="Jenis Pet  (0 dipilih, 0=semua)"
-            buildTypePicker(typeSearch.Text) buildTargetList()
-        end)
-        for _,pname in ipairs(petNames) do
-            local show=filter=="" or pname:lower():find(filter:lower(),1,true)
-            if show then
-                n=n+1
-                local isSel=targetPetTypes[pname]==true
-                local row=mk("Frame",{Size=UDim2.new(1,0,0,24),BackgroundColor3=isSel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=typeScroll})
-                corner(row,5) if isSel then stroke(row,C.Teal,1.1) end
-                local nameLbl=lbl(row,pname,8,isSel and C.Teal or C.White)
-                nameLbl.Size=UDim2.new(0.72,0,1,0) nameLbl.Position=UDim2.new(0,8,0,0)
-                local togBtn=btn(row,isSel and "ON" or "OFF",8,isSel and C.TDim or C.Panel,isSel and C.Teal or C.Gray)
-                togBtn.Size=UDim2.new(0,44,0,18) togBtn.Position=UDim2.new(1,-48,0.5,-9)
-                local togStroke=stroke(togBtn,isSel and C.Teal or C.Dim,1.1)
-                local cp=pname
-                togBtn.MouseButton1Click:Connect(function()
-                    if targetPetTypes[cp] then targetPetTypes[cp]=nil else targetPetTypes[cp]=true end
-                    local nowSel=targetPetTypes[cp]==true
-                    row.BackgroundColor3=nowSel and C.TDim or C.Card
-                    local rs=row:FindFirstChildWhichIsA("UIStroke")
-                    if nowSel then if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.1) end
-                    else if rs then rs:Destroy() end end
-                    nameLbl.TextColor3=nowSel and C.Teal or C.White
-                    togBtn.Text=nowSel and "ON" or "OFF"
-                    togBtn.BackgroundColor3=nowSel and C.TDim or C.Panel
-                    togBtn.TextColor3=nowSel and C.Teal or C.Gray
-                    togStroke.Color=nowSel and C.Teal or C.Dim
-                    typeLbl.Text="Jenis Pet  ("..selCount().." dipilih, 0=semua)"
-                    save() buildTargetList()
-                end)
-            end
+    -- Clear areas[2] EXCEPT ZenxElephantPickerRow (already created in buildTimList)
+    for _,ch in pairs(areas[2]:GetChildren()) do
+        if (ch:IsA("Frame") or ch:IsA("TextButton") or ch:IsA("TextLabel")) and ch.Name ~= "ZenxElephantPickerRow" then
+            ch:Destroy()
         end
     end
-    buildTypePicker("")
-    typeSearch:GetPropertyChangedSignal("Text"):Connect(function() buildTypePicker(typeSearch.Text) end)
-    typeBtnCover.MouseButton1Click:Connect(function()
-        typePickerOpen=not typePickerOpen
-        typePicker.Visible=typePickerOpen
-        typePicker.Size=typePickerOpen and UDim2.new(1,0,0,160) or UDim2.new(1,0,0,0)
-        typeArrow.Text=typePickerOpen and "^" or "v"
-        typeStroke.Color=typePickerOpen and C.Teal or C.Dim
+
+    -- Header
+    local header=mk("Frame",{Size=UDim2.new(1,0,0,40),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[2]})
+    corner(header,7) stroke(header,C.Teal,1.2)
+    mk("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingTop=UDim.new(0,5),Parent=header})
+    lbl(header,"ELEPHANT SKILL",13,C.Teal).Size=UDim2.new(1,0,0,16)
+    local descLbl=lbl(header,"Pet Elephant bless pet age>=40 setiap 7m30s (server-side)",10,C.Gray)
+    descLbl.Size=UDim2.new(1,-10,0,14) descLbl.Position=UDim2.new(0,0,0,16) descLbl.TextWrapped=true
+
+    -- Status info card
+    local statusCard=mk("Frame",{Size=UDim2.new(1,0,0,72),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=2,Parent=areas[2]})
+    corner(statusCard,6) stroke(statusCard,C.Dim,1.1)
+    mk("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingTop=UDim.new(0,4),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,4),Parent=statusCard})
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=statusCard})
+    lbl(statusCard,"Status AUTO ELE:",11,C.Gold).Size=UDim2.new(1,0,0,14)
+    local stateLbl=lbl(statusCard,"State: stopped",10,C.White) stateLbl.Size=UDim2.new(1,0,0,12)
+    local blessLbl=lbl(statusCard,"Blessings cycle: 0  Done: 0",10,C.White) blessLbl.Size=UDim2.new(1,0,0,12)
+    local lastLbl=lbl(statusCard,"Last notif: -",10,C.Gray) lastLbl.Size=UDim2.new(1,0,0,14) lastLbl.TextWrapped=true
+    -- Live refresh
+    task.spawn(function()
+        while statusCard and statusCard.Parent and not scriptShutdown do
+            pcall(function()
+                stateLbl.Text="State: "..tostring(M78.elephantState or "stopped")
+                local doneCnt=0 for _ in pairs(M78.elephantDonePets or {}) do doneCnt=doneCnt+1 end
+                blessLbl.Text="Blessings cycle: "..(M78.elephantBlessingsThisCycle or 0).."  Done: "..doneCnt
+                local lastNotif=M78.elephantLastNotif or "-"
+                if #lastNotif>80 then lastNotif=lastNotif:sub(1,77).."..." end
+                lastLbl.Text="Last notif: "..lastNotif
+            end)
+            task.wait(2)
+        end
     end)
-
-    div(areas[2],2)
-    local function numRow(labelTxt,lo,default,onChange)
-        local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=areas[2]})
-        corner(r,6) stroke(r,C.Dim,1.1)
-        lbl(r,labelTxt,11,C.Gray).Size=UDim2.new(0.6,0,1,0)
-        local box=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(default),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
-        corner(box,5) stroke(box,C.Dim,1)
-        box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(v) save() end end)
-    end
-    numRow("Dari Age:",3,fromAge,function(v) fromAge=math.max(1,math.min(99,v)) d.fromAge=fromAge end)
-    numRow("Sampai Age:",4,toAge,function(v) toAge=math.max(1,math.min(100,v)) d.toAge=toAge end)
-
-    local pcRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=areas[2]})
-    corner(pcRow,6) stroke(pcRow,C.Dim,1.1)
-    lbl(pcRow,"Jumlah Pet (sekaligus):",11,C.Gray).Size=UDim2.new(0.55,0,1,0)
-    local pcMin=btn(pcRow,"-",14,C.Panel,C.Gray) pcMin.Size=UDim2.new(0,22,0,20) pcMin.Position=UDim2.new(1,-72,0.5,-10) stroke(pcMin,C.Dim,1.1)
-    local pcNum=lbl(pcRow,tostring(maxPetTarget),12,C.White,Enum.TextXAlignment.Center) pcNum.Size=UDim2.new(0,26,1,0) pcNum.Position=UDim2.new(1,-48,0,0) pcNum.Font=Enum.Font.GothamBold
-    local pcPlus=btn(pcRow,"+",14,C.Panel,C.Gray) pcPlus.Size=UDim2.new(0,22,0,20) pcPlus.Position=UDim2.new(1,-22,0.5,-10) stroke(pcPlus,C.Dim,1.1)
-    pcMin.MouseButton1Click:Connect(function() if maxPetTarget>1 then maxPetTarget=maxPetTarget-1 d.maxPetTarget=maxPetTarget pcNum.Text=tostring(maxPetTarget) save() end end)
-    pcPlus.MouseButton1Click:Connect(function() if maxPetTarget<10 then maxPetTarget=maxPetTarget+1 d.maxPetTarget=maxPetTarget pcNum.Text=tostring(maxPetTarget) save() end end)
-
-    div(areas[2],6)
-    local qHdr=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=7,Parent=areas[2]})
-    corner(qHdr,5) lbl(qHdr,"Pet target belum jadi (jenis):",11,C.Teal).Size=UDim2.new(1,-10,1,0)
-
-    local agg={}
-    local total=0
-    if bp then
-        for _,item in pairs(bp:GetChildren()) do
-            if isPet(item) then
-                local uuid=getPetUUID(item)
-                local uuidStr=uuid and tostring(uuid) or ""
-                if uuid and not teamPetUUIDs[uuidStr] then
-                    local name=getPetName(item)
-                    local age=getAgeFromKG(item)
-                    if isTargetPet(name) then
-                        if age==nil or (age>=fromAge and age<toAge) then
-                            local base=getBaseName(name)
-                            if not agg[base] then agg[base]={count=0,mutCount=0} end
-                            agg[base].count=agg[base].count+1
-                            if name~=base then agg[base].mutCount=agg[base].mutCount+1 end
-                            total=total+1
-                        end
-                    end
-                end
-            end
-        end
-    end
-    local sortedBases={}
-    for b,_ in pairs(agg) do table.insert(sortedBases,b) end
-    table.sort(sortedBases,function(a,b) return agg[a].count>agg[b].count end)
-
-    if total==0 then
-        local e=lbl(areas[2],"Tidak ada pet yang cocok",10,C.Red,Enum.TextXAlignment.Center)
-        e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=8
-    else
-        local idx=0
-        for _,base in ipairs(sortedBases) do
-            idx=idx+1
-            local data=agg[base]
-            local row=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=7+idx,Parent=areas[2]})
-            corner(row,5) stroke(row,C.Dim,1)
-            local nl=lbl(row,base,11,C.White) nl.Size=UDim2.new(0.65,0,1,0) nl.Position=UDim2.new(0,10,0,0)
-            local cnt=lbl(row,data.count.." pet",11,C.Teal,Enum.TextXAlignment.Right)
-            cnt.Size=UDim2.new(0,80,1,0) cnt.Position=UDim2.new(1,-90,0,0)
-            cnt.Font=Enum.Font.GothamBold
-            if data.mutCount>0 then
-                local mut=lbl(row,"("..data.mutCount.." mutasi)",9,C.Gold,Enum.TextXAlignment.Left)
-                mut.Size=UDim2.new(0.35,0,0,11) mut.Position=UDim2.new(0,10,0,16)
-                nl.Size=UDim2.new(0.65,0,0,16) nl.Position=UDim2.new(0,10,0,2)
-            end
-        end
-        local tot=lbl(areas[2],"Total: "..total.." pet ("..(#sortedBases).." jenis)",11,C.Teal,Enum.TextXAlignment.Center)
-        tot.Size=UDim2.new(1,0,0,16) tot.LayoutOrder=7+#sortedBases+1
-    end
-    div(areas[2],200)
-    local rf=btn(areas[2],"Refresh",12,C.Panel,C.White) rf.Size=UDim2.new(1,0,0,22) rf.LayoutOrder=201 stroke(rf,C.Dim,1.2)
-    rf.MouseButton1Click:Connect(function() buildMaxKGCache() buildTargetList() end)
 end
 
 -- ============================================
@@ -4773,6 +4646,17 @@ doStart = function()
 
     -- v13.30: build maxKG cache FIRST biar getAgeFromKG works di cleanup/auto-fill
     buildMaxKGCache()
+
+    -- v13.31: auto-clear targetPetUUIDs fresh tiap RUNNING (gak akumulasi pet stale)
+    -- Tapi simpan pet yang user pilih MANUAL via Pilih Pet Target (di-detect kalo gak match Jenis Pet jg, maybe manual)
+    -- Sederhana: clear ALL, biar auto-fill rebuild
+    local clearedCount = 0
+    for uuid,_ in pairs(targetPetUUIDs) do clearedCount = clearedCount + 1 end
+    if clearedCount > 0 then
+        targetPetUUIDs = {}
+        targetPetInfoCache = {}
+        dbg("[doStart] auto-clear targetPetUUIDs: "..clearedCount.." pet cleared, akan auto-fill dari scratch")
+    end
 
     -- v13.25: helper - cek age pakai cascade (UI/tool/placed/KG estimate) - sama kayak display
     local function getFullAge(uuid)
