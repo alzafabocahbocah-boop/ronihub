@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.32"
+local SCRIPT_VERSION="v13.33"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4695,16 +4695,6 @@ doStart = function()
                         age = math.max(1, math.min(100, math.floor(kg * 11 / maxKG - 10)))
                     elseif kg >= 20 then age = 100
                     end
-                end
-            end
-        end
-        -- v13.30: last resort - kalo KG tinggi tanpa age detection, assume tinggi
-        if not age then
-            local item = findPetInBackpack(uuid)
-            if item then
-                local kg = getKG(item)
-                if kg and kg >= 5 then
-                    age = 100  -- KG tinggi (>=5kg) tanpa age = assume maxed
                 end
             end
         end
