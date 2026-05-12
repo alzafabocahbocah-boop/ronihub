@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.40"
+local SCRIPT_VERSION="v13.42"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -8,7 +8,7 @@ local Players = game:GetService("Players")
 local HS = game:GetService("HttpService")
 local TS = game:GetService("TeleportService")
 local CS = game:GetService("CollectionService")
-local player = Players.LocalPlayer 
+local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui",10)
 print("[ZenxLvl] step 1 OK - services loaded")
 
@@ -188,28 +188,6 @@ local function isFavorite(item)
     return false
 end
 local function getAge(item)
-    if not item then return nil end
-    -- v13.38: cek attribute pet (Age/PET_AGE) di tool dulu - reliable buat bp pet
-    local ok, attrAge = pcall(function()
-        return item:GetAttribute("Age") or item:GetAttribute("AGE") or item:GetAttribute("PET_AGE")
-            or item:GetAttribute("Level") or item:GetAttribute("LEVEL") or item:GetAttribute("Lvl")
-    end)
-    if ok and attrAge and tonumber(attrAge) and tonumber(attrAge) > 0 then return tonumber(attrAge) end
-    -- v13.38: cek children juga (PetTool biasanya punya config script)
-    pcall(function()
-        for _, ch in ipairs(item:GetChildren()) do
-            local ca = ch:GetAttribute("Age") or ch:GetAttribute("AGE") or ch:GetAttribute("PET_AGE")
-            if ca and tonumber(ca) and tonumber(ca) > 0 then attrAge = tonumber(ca) return end
-            if ch:IsA("IntValue") or ch:IsA("NumberValue") then
-                local n=ch.Name:lower()
-                if n:find("age") or n:find("lvl") or n:find("level") then
-                    attrAge = ch.Value
-                    if tonumber(attrAge) and tonumber(attrAge) > 0 then return end
-                end
-            end
-        end
-    end)
-    if attrAge and tonumber(attrAge) and tonumber(attrAge) > 0 then return tonumber(attrAge) end
     -- v12.79f: expanded patterns buat handle mutated pets dengan format beda
     for _,pat in ipairs({
         "%[Age%s+(%d+)%]","%[Age(%d+)%]",
@@ -859,25 +837,30 @@ end
 
 function getAgeFromKG(item)
     if not item then return nil end
-    -- v13.40: PRIORITY tool age (immediate, reliable). Fallback ke UI/KG estimate
-    local toolAge=getAge(item)
-    if toolAge then return toolAge end  -- ✓ tool age detected, return langsung
-
     local uuid=getPetUUID(item)
     local uiAge=nil
     if uuid then uiAge=getAgeFromUI(uuid) end
-    if uiAge then return uiAge end  -- ✓ UI age, return
 
-    -- KG formula last resort (paling unreliable karena maxKG cache bisa wrong)
-    local kg=getKG(item)
-    if kg then
-        local maxKG=getMaxKGForPet(getPetName(item))
-        if maxKG and maxKG > 0 then
-            local raw = math.floor(kg*110/maxKG - 10)
-            if raw >= 1 and raw <= 100 then return raw end
+    -- v12.79: hitung dari tool juga, jangan cuma UI cache (yg bisa stale di age 100)
+    local toolAge=getAge(item)
+    local kgAge=nil
+    if not toolAge then
+        local kg=getKG(item)
+        if kg then
+            local maxKG=getMaxKGForPet(getPetName(item))
+            if maxKG and maxKG > 0 then
+                local raw = math.floor(kg*110/maxKG - 10)
+                if raw >= 1 and raw <= 100 then kgAge = raw end
+            end
         end
     end
-    return nil
+
+    -- Ambil yang TERTINGGI dari semua source biar gak ke-skip age 100
+    local best=nil
+    if uiAge and (not best or uiAge>best) then best=uiAge end
+    if toolAge and (not best or toolAge>best) then best=toolAge end
+    if kgAge and (not best or kgAge>best) then best=kgAge end
+    return best
 end
 
 local function getAgeByUUID(uuid)
@@ -4825,17 +4808,25 @@ doStart = function()
     end
 
     statusLbl.Text="Pasang tim + target..." statusLbl.TextColor3=C.Gold
-    -- v13.29: revert - place semua Tim Support + Pet Target (gak filter age)
-    -- Pet age >= target tetap perlu placed buat di-bless oleh Elephant (Phase 2)
+    -- v13.41: filter pet age >= target di place time (smooth, no flicker)
+    -- Tim Support placed regardless. Pet Target dengan age >= target SKIP (rotation/Phase 2 handle)
     local placedTotal=0
+    local skippedAge=0
     for uuid,_ in pairs(teamPetUUIDs) do
         pcall(function() equipPet(uuid) end)
         placedTotal=placedTotal+1
     end
     for uuid,_ in pairs(targetPetUUIDs) do
-        pcall(function() equipPet(uuid) end)
-        placedTotal=placedTotal+1
+        local ageNow = getFullAge(uuid)
+        if ageNow and ageNow >= (config.equipTargetLvl or 40) then
+            skippedAge = skippedAge + 1
+            dbg("[doStart] skip place target "..tostring(uuid):sub(1,8).." age="..tostring(ageNow).." (>= "..(config.equipTargetLvl or 40)..")")
+        else
+            pcall(function() equipPet(uuid) end)
+            placedTotal=placedTotal+1
+        end
     end
+    if skippedAge > 0 then dbg("[doStart] "..skippedAge.." pet target skipped (age past target)") end
     if placedTotal>0 then
         dbg("[doStart] Tim+Target "..placedTotal.." pet di-place (rapid-fire)")
         task.wait(math.min(config.placeDelay or 0.12, 0.03+placedTotal*0.01))
@@ -4892,13 +4883,27 @@ doStart = function()
     -- v13.34/35/36: Pet Target rotation monitor - faster check + cached fresh pet list
     task.spawn(function()
         dbg("[rotate] monitor task STARTED, targetLevel="..tostring(config.equipTargetLvl))
+        local lastDbgTime = 0
         while isRunning do
             local toRotate = {}
+            -- v13.42: dump SETIAP target pet status tiap 5s biar bisa diagnose
+            local dumpNow = (tick() - lastDbgTime > 5)
+            if dumpNow then
+                local cnt=0 for _ in pairs(targetPetUUIDs) do cnt=cnt+1 end
+                dbg("[rotate] checking "..cnt.." target pets, target="..tostring(config.equipTargetLvl))
+                lastDbgTime = tick()
+            end
             for uuid,_ in pairs(targetPetUUIDs) do
                 local age = getFullAge and getFullAge(uuid)
                 if not age then
                     local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
                     if item then age = getAgeFromKG(item) end
+                end
+                if dumpNow then
+                    local item = findPetInBackpack(uuid)
+                    local nm = item and getPetName(item) or "?"
+                    local toolName = item and item.Name or "(not in bp)"
+                    dbg("[rotate] target "..tostring(uuid):sub(1,8).." age="..tostring(age).." name='"..nm.."' tool='"..toolName.."'")
                 end
                 if age and age >= (config.equipTargetLvl or 40) then
                     table.insert(toRotate, {uuid=uuid, age=age})
