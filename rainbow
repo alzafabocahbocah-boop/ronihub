@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.13"
+local SCRIPT_VERSION="v13.15"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4676,6 +4676,37 @@ doStart = function()
     currentLevelingUUIDs={}
     completedPets={}
     if isRunning then dbg("[doStart] sudah running, skip") return end
+
+    -- v13.15: auto-fill team size sampai config.petCount kalo kurang
+    -- (cari pet matching Jenis Pet dari backpack)
+    local N = config.petCount or 1
+    local currentSize = 0
+    for _ in pairs(teamPetUUIDs) do currentSize = currentSize + 1 end
+    if currentSize < N then
+        local needed = N - currentSize
+        local bp = player:FindFirstChild("Backpack")
+        if bp then
+            dbg("[doStart] team size "..currentSize.."/"..N..", auto-fill "..needed.." pet matching Jenis Pet")
+            for _,item in pairs(bp:GetChildren()) do
+                if needed <= 0 then break end
+                if isPet(item) then
+                    local uuid = getPetUUID(item)
+                    local uuidStr = uuid and tostring(uuid) or ""
+                    if uuid and not teamPetUUIDs[uuidStr] then
+                        local nm = getPetName(item)
+                        if isTargetPet(nm) and not isFavorite(item) then
+                            teamPetUUIDs[uuidStr] = true
+                            teamPetInfoCache[uuidStr] = {name=nm, info=getPetInfo(item)}
+                            needed = needed - 1
+                            dbg("[autoFill] +"..uuidStr:sub(1,12).." ("..nm..")")
+                        end
+                    end
+                end
+            end
+            pcall(save)
+        end
+    end
+
     if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
     buildMaxKGCache()
 
@@ -4700,16 +4731,21 @@ doStart = function()
     end
 
     statusLbl.Text="Pasang tim leveling..." statusLbl.TextColor3=C.Gold
-    -- v13.13: revert ke rapid-fire pattern (kayak zenx leveling - server prefer batch)
+    -- v13.14: rapid-fire + DETAILED log per-pet
     local teamPlaced=0
+    local teamSize=0 for _ in pairs(teamPetUUIDs) do teamSize=teamSize+1 end
+    dbg("[doStart] teamPetUUIDs size: "..teamSize)
     for uuid,_ in pairs(teamPetUUIDs) do
+        local uuidShort = tostring(uuid):sub(1,12)
+        local inBP = findPetInBackpack(uuid) ~= nil
+        local placed = findPlacedPetByUUID and (findPlacedPetByUUID(uuid) ~= nil) or false
+        dbg("[doStart] equipPet("..uuidShort..") inBP="..tostring(inBP).." inGarden="..tostring(placed))
         pcall(function() equipPet(uuid) end)
         teamPlaced=teamPlaced+1
     end
     if teamPlaced>0 then
         dbg("[doStart] tim "..teamPlaced.." pet di-place (rapid-fire)")
         task.wait(math.min(config.placeDelay or 0.12, 0.03+teamPlaced*0.01))
-        -- v13.12: verifikasi - cek berapa pet beneran di garden setelah place
         local petsPhys = workspace:FindFirstChild("PetsPhysical")
         local actual = 0
         if petsPhys then
