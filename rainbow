@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.19"
+local SCRIPT_VERSION="v13.21"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4807,11 +4807,23 @@ doStart = function()
                         local bn = getBaseName and getBaseName(nm) or nm
                         local matchResult = isTargetPet(nm)
                         if matchResult then
-                            matched = matched + 1
-                            targetPetUUIDs[uuidStr] = true
-                            targetPetInfoCache[uuidStr] = {name=nm, info=getPetInfo(item)}
-                            needed = needed - 1
-                            dbg("[autoFill-Target] +"..uuidStr:sub(1,12).." name='"..nm.."' base='"..bn.."' (matches)")
+                            -- v13.20: skip pet yg udah age >= equipTargetLvl (udah maxed buat phase 1)
+                            local age = getAgeFromKG(item)
+                            local skipAge = age and age >= (config.equipTargetLvl or 40)
+                            -- skip pet yg base KG udah > Sampai KG (udah done)
+                            local kg = getKG(item)
+                            local baseKG = nil
+                            if kg and age and age >= 1 then baseKG = kg * 11 / (age + 10) end
+                            local skipKG = baseKG and baseKG > (config.targetKG or 60)
+                            if skipAge or skipKG then
+                                dbg("[autoFill-Target] skip "..uuidStr:sub(1,12).." name='"..nm.."' age="..tostring(age).." base="..tostring(baseKG).." (already maxed)")
+                            else
+                                matched = matched + 1
+                                targetPetUUIDs[uuidStr] = true
+                                targetPetInfoCache[uuidStr] = {name=nm, info=getPetInfo(item)}
+                                needed = needed - 1
+                                dbg("[autoFill-Target] +"..uuidStr:sub(1,12).." name='"..nm.."' base='"..bn.."' age="..tostring(age))
+                            end
                         end
                     end
                 end
@@ -5026,7 +5038,11 @@ doStart = function()
             end
 
             local activeNames={}
-            for uuid,_ in pairs(currentLevelingUUIDs) do
+            -- v13.21: tampilkan semua Pet Target (yg utamanya di-grind), bukan cuma currentLevelingUUIDs
+            local shownInList = {}
+            local function addPetToDisplay(uuid)
+                if shownInList[uuid] then return end
+                shownInList[uuid] = true
                 local nameStr=getPetNameFromUI(uuid)
                 if not nameStr or nameStr=="" then nameStr=getPetTypeFromUI(uuid) end
                 if not nameStr then
@@ -5034,7 +5050,7 @@ doStart = function()
                     if item then nameStr=getPetName(item) end
                 end
                 if not nameStr then
-                    local cached=teamPetInfoCache[uuid] or swapPetInfoCache[uuid]
+                    local cached=teamPetInfoCache[uuid] or swapPetInfoCache[uuid] or targetPetInfoCache[uuid]
                     nameStr=(cached and cached.name) or uuid:sub(1,8)
                 end
                 local age=getAgeFromUI(uuid)
@@ -5075,7 +5091,11 @@ doStart = function()
                 end
                 local ageStr=age and (age.."/"..toAge) or ("?/"..toAge)
                 table.insert(activeNames,nameStr.." "..ageStr)
-            end
+            end -- end addPetToDisplay
+            -- Show Pet Target first
+            for uuid,_ in pairs(targetPetUUIDs) do addPetToDisplay(uuid) end
+            -- Then queue pets
+            for uuid,_ in pairs(currentLevelingUUIDs) do addPetToDisplay(uuid) end
             if #activeNames>0 then
                 statusLbl.Text="Lvl: "..table.concat(activeNames,", ").." | Q:"..#available
             else
