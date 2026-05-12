@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.03"
+local SCRIPT_VERSION="v13.05"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Elephant state machine logic - Phase 1 <-> Phase 2)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Swap Skill config: Delay Pickup + Place)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -110,7 +110,7 @@ end
 local loaded=loadData()
 if not getgenv().ZenxData then
     getgenv().ZenxData=loaded or {
-        config={equipInterval=5,rejoinMinutes=30,petType="",targetKG=60,petCount=3,equipTargetLvl=100,elephantThresholdKG=6.05},
+        config={equipInterval=5,rejoinMinutes=30,petType="",targetKG=60,petCount=3,equipTargetLvl=100,elephantThresholdKG=6.05,pickupDelay=0.10,placeDelay=0.12},
         targetPetTypes={},
         fromAge=1,toAge=100,maxPetTarget=1,
         autoStartEnabled=false,autoRejoin=false,
@@ -1262,6 +1262,8 @@ config.targetKG = config.targetKG or 60
 config.petCount = config.petCount or 3
 config.equipTargetLvl = config.equipTargetLvl or 100
 config.elephantThresholdKG = config.elephantThresholdKG or 6.05  -- v13.01
+config.pickupDelay = config.pickupDelay or 0.10  -- v13.05
+config.placeDelay = config.placeDelay or 0.12  -- v13.05
 local targetPetTypes=d.targetPetTypes or {}
 local fromAge=d.fromAge or 1
 local maxPetTarget=d.maxPetTarget or 1
@@ -1545,7 +1547,7 @@ buildTimList=function()
         })
     end)
     local kgBox = mkInputRow("Sampai KG", config.targetKG, 2, function(v) config.targetKG = math.max(1, v) end, true)
-    local pcBox = mkInputRow("Jumlah Pet", config.petCount, 3, function(v) config.petCount = math.max(1, math.min(100, v)) end, true)
+    local pcBox = mkInputRow("Jumlah Pet", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
     local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 4, function(v) config.equipTargetLvl = math.max(1, v) end, true)
     -- v13.01: Threshold KG field - base KG di atas threshold = pet udah maxed (skip dari rotation)
     local thBox = mkInputRow("Threshold KG (max base)", config.elephantThresholdKG, 5, function(v) config.elephantThresholdKG = math.max(0.1, math.min(20, v)) end, true)
@@ -1667,16 +1669,7 @@ buildTimList=function()
                             local togStroke=stroke(togBtn,inTeam and C.Teal or C.Dim,1.1)
                             local cu=uuidStr
                             togBtn.MouseButton1Click:Connect(function()
-                                -- v12.98: limit by config.petCount (Jumlah Pet)
-                                if not teamPetUUIDs[cu] and teamCount() >= (config.petCount or 100) then
-                                    pickLbl.Text="Max "..config.petCount.." pet! (ubah Jumlah Pet)"
-                                    pickLbl.TextColor3=C.Red
-                                    task.delay(2, function()
-                                        pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
-                                        pickLbl.TextColor3=C.White
-                                    end)
-                                    return
-                                end
+                                -- v13.04: hapus limit petCount - selection bebas
                                 if teamPetUUIDs[cu] then teamPetUUIDs[cu]=nil else teamPetUUIDs[cu]=true end
                                 local nowIn=teamPetUUIDs[cu]==true
                                 row.BackgroundColor3=nowIn and C.TDim or C.Card
@@ -1688,7 +1681,7 @@ buildTimList=function()
                                 togBtn.BackgroundColor3=nowIn and C.TDim or C.Panel
                                 togBtn.TextColor3=nowIn and C.Teal or C.Gray
                                 togStroke.Color=nowIn and C.Teal or C.Dim
-                                pickLbl.Text="Pilih Pet Tim  ("..teamCount().."/"..config.petCount.." dipilih)"
+                                pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
                                 updatePreview()
                                 syncSwapTab()
                                 save()
@@ -1998,6 +1991,26 @@ buildSwapList=function()
     lbl(infoCard,"Swap Mechanic: friend-7",12,C.Teal).Size=UDim2.new(1,0,0,14)
     local descLbl=lbl(infoCard,"Toggle ON utk swap. Pet HARUS udah di garden (place manual/via tim).",10,C.Gray)
     descLbl.Size=UDim2.new(1,0,0,22) descLbl.TextWrapped=true
+
+    -- v13.05: Swap Config card - pickup + place delay
+    local cfgCard=mk("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0.5,Parent=areas[3]})
+    corner(cfgCard,7) stroke(cfgCard,C.Teal,1.2)
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=cfgCard})
+    mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=cfgCard})
+    lbl(cfgCard,"Swap Skill Config",11,C.Teal).Size=UDim2.new(1,0,0,13)
+    local function mkSwapInputRow(parent, labelText, defaultVal, lo, onChange)
+        local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
+        corner(row,5) stroke(row,C.Dim,1)
+        lbl(row,labelText,11,C.Gray).Size=UDim2.new(0.6,0,1,0)
+        local box=mk("TextBox",{Size=UDim2.new(0,90,0,20),Position=UDim2.new(1,-96,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(defaultVal),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=12,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
+        corner(box,5) stroke(box,C.Dim,1)
+        box:GetPropertyChangedSignal("Text"):Connect(function()
+            local v=tonumber(box.Text) if v then onChange(v) save() end
+        end)
+        return box
+    end
+    mkSwapInputRow(cfgCard, "Delay Pickup (s)", config.pickupDelay, 1, function(v) config.pickupDelay = math.max(0.01, math.min(5, v)) end)
+    mkSwapInputRow(cfgCard, "Delay Place (s)", config.placeDelay, 2, function(v) config.placeDelay = math.max(0.01, math.min(5, v)) end)
 
     local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[3]})
     corner(saRow,6) stroke(saRow,C.Dim,1.1)
@@ -4532,9 +4545,9 @@ local function pickupAllGardenPets()
         pcall(function() unequipPet(uuid) end)
     end
 
-    -- v12.79b: super tight 0.03+0.002N max 0.10 (per user 'udah gacor')
+    -- v13.05: pakai config.pickupDelay (user-configurable di tab Swap Skill)
     if #uuids>0 then
-        task.wait(math.min(0.10, 0.03+#uuids*0.002))
+        task.wait(math.min(config.pickupDelay or 0.10, 0.03+#uuids*0.002))
     end
 
     dbg("[pickup] total: "..#uuids.." pet di-pickup dari garden (rapid-fire)")
@@ -4578,7 +4591,8 @@ doStart = function()
     end
     if teamPlaced>0 then
         dbg("[doStart] tim "..teamPlaced.." pet di-place (rapid-fire)")
-        task.wait(math.min(0.12, 0.03+teamPlaced*0.01)) -- was 0.05+0.015N max 0.2
+        -- v13.05: pakai config.placeDelay (user-configurable di tab Swap Skill)
+        task.wait(math.min(config.placeDelay or 0.12, 0.03+teamPlaced*0.01))
     end
 
     local queue=getQueue()
