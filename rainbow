@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.17"
+local SCRIPT_VERSION="v13.18"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -1337,6 +1337,14 @@ end
 local function teamCount() local n=0 for _ in pairs(teamPetUUIDs) do n=n+1 end return n end
 local function selCount() local n=0 for _ in pairs(targetPetTypes) do n=n+1 end return n end
 local function isTargetPet(name)
+    -- v13.18: cek config.petType (Jenis Pet single-select) DULU
+    if config.petType and config.petType ~= "" then
+        local baseName = getBaseName(name)
+        if name == config.petType or baseName == config.petType then return true end
+        -- substring fallback
+        if name:lower():find(config.petType:lower(), 1, true) then return true end
+        return false
+    end
     if selCount()==0 then return true end
     if targetPetTypes[name] then return true end
     -- v12.19: cek getBaseName (strip mutation prefix)
@@ -1554,8 +1562,8 @@ buildTimList=function()
         })
     end)
     local kgBox = mkInputRow("Sampai KG", config.targetKG, 2, function(v) config.targetKG = math.max(1, v) end, true)
-    local pcBox = mkInputRow("Jumlah Pet Target", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
-    local epcBox = mkInputRow("Jumlah Pet Elephant", config.elephantPetCount, 4, function(v) config.elephantPetCount = math.max(1, v) end, true)
+    local pcBox = mkInputRow("Jumlah Pet Target di Leveling", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
+    local epcBox = mkInputRow("Jumlah Pet Target di Elephant", config.elephantPetCount, 4, function(v) config.elephantPetCount = math.max(1, v) end, true)
     local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 5, function(v)
         config.equipTargetLvl = math.max(1, v)
         -- v13.12: sync toAge biar existing leveling juga stop di level yg sama
