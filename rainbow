@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.21"
+local SCRIPT_VERSION="v13.22"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -5092,10 +5092,8 @@ doStart = function()
                 local ageStr=age and (age.."/"..toAge) or ("?/"..toAge)
                 table.insert(activeNames,nameStr.." "..ageStr)
             end -- end addPetToDisplay
-            -- Show Pet Target first
+            -- v13.22: Show ONLY Pet Target di Lvl display (gak include queue pets biar gak numpuk)
             for uuid,_ in pairs(targetPetUUIDs) do addPetToDisplay(uuid) end
-            -- Then queue pets
-            for uuid,_ in pairs(currentLevelingUUIDs) do addPetToDisplay(uuid) end
             if #activeNames>0 then
                 statusLbl.Text="Lvl: "..table.concat(activeNames,", ").." | Q:"..#available
             else
