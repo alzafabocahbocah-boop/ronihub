@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.11"
+local SCRIPT_VERSION="v13.12"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -1265,6 +1265,9 @@ config.elephantThresholdKG = config.elephantThresholdKG or 6.05  -- v13.01
 config.pickupDelay = config.pickupDelay or 0.10  -- v13.05
 config.placeDelay = config.placeDelay or 0.12  -- v13.05
 config.elephantPetCount = config.elephantPetCount or 1  -- v13.06: target jumlah Tim Elephant
+-- v13.12: sync toAge dgn equipTargetLvl (existing leveling pakai toAge utk stop)
+toAge = math.max(1, math.min(100, config.equipTargetLvl or 100))
+d.toAge = toAge
 local targetPetTypes=d.targetPetTypes or {}
 local fromAge=d.fromAge or 1
 local maxPetTarget=d.maxPetTarget or 1
@@ -1550,7 +1553,12 @@ buildTimList=function()
     local kgBox = mkInputRow("Sampai KG", config.targetKG, 2, function(v) config.targetKG = math.max(1, v) end, true)
     local pcBox = mkInputRow("Jumlah Pet Leveling", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
     local epcBox = mkInputRow("Jumlah Pet Elephant", config.elephantPetCount, 4, function(v) config.elephantPetCount = math.max(1, v) end, true)
-    local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 5, function(v) config.equipTargetLvl = math.max(1, v) end, true)
+    local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 5, function(v)
+        config.equipTargetLvl = math.max(1, v)
+        -- v13.12: sync toAge biar existing leveling juga stop di level yg sama
+        toAge = math.max(1, math.min(100, v))
+        d.toAge = toAge
+    end, true)
     -- v13.10: Threshold KG dihapus (redundant dgn Sampai KG)
 
     local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[1]})
@@ -4692,16 +4700,35 @@ doStart = function()
     end
 
     statusLbl.Text="Pasang tim leveling..." statusLbl.TextColor3=C.Gold
-    -- v13.11: per-pet delay biar server gak reject rapid fire
+    -- v13.12: per-pet delay + debug log
     local teamPlaced=0
     for uuid,_ in pairs(teamPetUUIDs) do
+        local item = findPetInBackpack(uuid)
+        local exist = "BP" if not item then exist = "garden/missing" end
+        dbg("[doStart] placing pet "..tostring(uuid):sub(1,8).." ("..exist..")")
         pcall(function() equipPet(uuid) end)
         teamPlaced=teamPlaced+1
-        -- delay antar pet (configurable via placeDelay di tab Swap Skill)
         task.wait(config.placeDelay or 0.12)
     end
     if teamPlaced>0 then
         dbg("[doStart] tim "..teamPlaced.." pet di-place (per-pet delay "..(config.placeDelay or 0.12).."s)")
+        -- v13.12: verifikasi - cek berapa pet beneran di garden setelah place
+        task.wait(0.5)
+        local petsPhys = workspace:FindFirstChild("PetsPhysical")
+        local actual = 0
+        if petsPhys then
+            for _, m in ipairs(petsPhys:GetDescendants()) do
+                local uid = nil pcall(function() uid = m:GetAttribute("PET_UUID") or m:GetAttribute("UUID") end)
+                if uid then
+                    local uidStr = tostring(uid):gsub("^{",""):gsub("}$","")
+                    for tu,_ in pairs(teamPetUUIDs) do
+                        local tuStr = tostring(tu):gsub("^{",""):gsub("}$","")
+                        if uidStr == tuStr then actual = actual + 1 break end
+                    end
+                end
+            end
+        end
+        dbg("[doStart] verifikasi: "..actual.."/"..teamPlaced.." pet beneran di garden")
     end
 
     local queue=getQueue()
