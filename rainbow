@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.31"
+local SCRIPT_VERSION="v13.32"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -1562,10 +1562,8 @@ buildTimList=function()
     end)
     local kgBox = mkInputRow("Sampai KG", config.targetKG, 2, function(v) config.targetKG = math.max(1, v) end, true)
     local pcBox = mkInputRow("Jumlah Pet Target di Leveling", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
-    local epcBox = mkInputRow("Jumlah Pet Target di Elephant", config.elephantPetCount, 4, function(v) config.elephantPetCount = math.max(1, v) end, true)
-    local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 5, function(v)
+    local lvBox = mkInputRow("Sampai Age", config.equipTargetLvl, 4, function(v)
         config.equipTargetLvl = math.max(1, v)
-        -- v13.12: sync toAge biar existing leveling juga stop di level yg sama
         toAge = math.max(1, math.min(100, v))
         d.toAge = toAge
     end, true)
@@ -1973,6 +1971,32 @@ local function buildTargetList()
     lbl(header,"ELEPHANT SKILL",13,C.Teal).Size=UDim2.new(1,0,0,16)
     local descLbl=lbl(header,"Pet Elephant bless pet age>=40 setiap 7m30s (server-side)",10,C.Gray)
     descLbl.Size=UDim2.new(1,-10,0,14) descLbl.Position=UDim2.new(0,0,0,16) descLbl.TextWrapped=true
+
+    -- v13.32: Config card di Elephant tab
+    local cfgCard=mk("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0.5,Parent=areas[2]})
+    corner(cfgCard,7) stroke(cfgCard,C.Gold,1.2)
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=cfgCard})
+    mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=cfgCard})
+    lbl(cfgCard,"Setting Elephant",11,C.Gold).Size=UDim2.new(1,0,0,13)
+    local function mkElephantInputRow(parent, labelText, defaultVal, lo, onChange)
+        local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
+        corner(row,5) stroke(row,C.Dim,1)
+        lbl(row,labelText,11,C.Gray).Size=UDim2.new(0.6,0,1,0)
+        local box=mk("TextBox",{Size=UDim2.new(0,90,0,20),Position=UDim2.new(1,-96,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(defaultVal),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=12,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
+        corner(box,5) stroke(box,C.Dim,1)
+        box:GetPropertyChangedSignal("Text"):Connect(function()
+            local v=tonumber(box.Text) if v then onChange(v) save() end
+        end)
+        return box
+    end
+    mkElephantInputRow(cfgCard, "Equip Pet Target Level", config.equipTargetLvl, 1, function(v)
+        config.equipTargetLvl = math.max(1, v)
+        toAge = math.max(1, math.min(100, v))
+        d.toAge = toAge
+    end)
+    mkElephantInputRow(cfgCard, "Jumlah Pet Target di Elephant", config.elephantPetCount, 2, function(v)
+        config.elephantPetCount = math.max(1, v)
+    end)
 
     -- Status info card
     local statusCard=mk("Frame",{Size=UDim2.new(1,0,0,72),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=2,Parent=areas[2]})
@@ -4647,16 +4671,7 @@ doStart = function()
     -- v13.30: build maxKG cache FIRST biar getAgeFromKG works di cleanup/auto-fill
     buildMaxKGCache()
 
-    -- v13.31: auto-clear targetPetUUIDs fresh tiap RUNNING (gak akumulasi pet stale)
-    -- Tapi simpan pet yang user pilih MANUAL via Pilih Pet Target (di-detect kalo gak match Jenis Pet jg, maybe manual)
-    -- Sederhana: clear ALL, biar auto-fill rebuild
-    local clearedCount = 0
-    for uuid,_ in pairs(targetPetUUIDs) do clearedCount = clearedCount + 1 end
-    if clearedCount > 0 then
-        targetPetUUIDs = {}
-        targetPetInfoCache = {}
-        dbg("[doStart] auto-clear targetPetUUIDs: "..clearedCount.." pet cleared, akan auto-fill dari scratch")
-    end
+    -- v13.32: revert auto-clear (wipe manual selection). Cleanup drops stale only.
 
     -- v13.25: helper - cek age pakai cascade (UI/tool/placed/KG estimate) - sama kayak display
     local function getFullAge(uuid)
