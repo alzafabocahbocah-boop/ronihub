@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.42"
+local SCRIPT_VERSION="v13.43"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4942,13 +4942,15 @@ doStart = function()
                 for i = 1, maxRotate do
                     local item = toRotate[i]
                     local uuid = item.uuid
-                    pcall(function() unequipPet(uuid) end)
-                    targetPetUUIDs[uuid] = nil
-                    targetPetInfoCache[uuid] = nil
                     local f = freshList[i]
+                    -- v13.43: EQUIP fresh DULU, baru unequip old → no empty slot gap
                     targetPetUUIDs[f.uuidStr] = true
                     targetPetInfoCache[f.uuidStr] = {name=f.name, info=getPetInfo(f.item)}
                     pcall(function() equipPet(f.uuid) end)
+                    task.wait(0.05)
+                    pcall(function() unequipPet(uuid) end)
+                    targetPetUUIDs[uuid] = nil
+                    targetPetInfoCache[uuid] = nil
                     dbg("[rotate] "..tostring(uuid):sub(1,8).." (age "..item.age..") -> "..f.uuidStr:sub(1,8).." ("..f.name..", age "..tostring(f.age)..")")
                 end
             end
