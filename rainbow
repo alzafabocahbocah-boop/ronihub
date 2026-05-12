@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.37"
+local SCRIPT_VERSION="v13.38"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -188,6 +188,28 @@ local function isFavorite(item)
     return false
 end
 local function getAge(item)
+    if not item then return nil end
+    -- v13.38: cek attribute pet (Age/PET_AGE) di tool dulu - reliable buat bp pet
+    local ok, attrAge = pcall(function()
+        return item:GetAttribute("Age") or item:GetAttribute("AGE") or item:GetAttribute("PET_AGE")
+            or item:GetAttribute("Level") or item:GetAttribute("LEVEL") or item:GetAttribute("Lvl")
+    end)
+    if ok and attrAge and tonumber(attrAge) and tonumber(attrAge) > 0 then return tonumber(attrAge) end
+    -- v13.38: cek children juga (PetTool biasanya punya config script)
+    pcall(function()
+        for _, ch in ipairs(item:GetChildren()) do
+            local ca = ch:GetAttribute("Age") or ch:GetAttribute("AGE") or ch:GetAttribute("PET_AGE")
+            if ca and tonumber(ca) and tonumber(ca) > 0 then attrAge = tonumber(ca) return end
+            if ch:IsA("IntValue") or ch:IsA("NumberValue") then
+                local n=ch.Name:lower()
+                if n:find("age") or n:find("lvl") or n:find("level") then
+                    attrAge = ch.Value
+                    if tonumber(attrAge) and tonumber(attrAge) > 0 then return end
+                end
+            end
+        end
+    end)
+    if attrAge and tonumber(attrAge) and tonumber(attrAge) > 0 then return tonumber(attrAge) end
     -- v12.79f: expanded patterns buat handle mutated pets dengan format beda
     for _,pat in ipairs({
         "%[Age%s+(%d+)%]","%[Age(%d+)%]",
