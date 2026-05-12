@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.05"
+local SCRIPT_VERSION="v13.07"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Swap Skill config: Delay Pickup + Place)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -110,7 +110,7 @@ end
 local loaded=loadData()
 if not getgenv().ZenxData then
     getgenv().ZenxData=loaded or {
-        config={equipInterval=5,rejoinMinutes=30,petType="",targetKG=60,petCount=3,equipTargetLvl=100,elephantThresholdKG=6.05,pickupDelay=0.10,placeDelay=0.12},
+        config={equipInterval=5,rejoinMinutes=30,petType="",targetKG=60,petCount=3,equipTargetLvl=100,elephantThresholdKG=6.05,pickupDelay=0.10,placeDelay=0.12,elephantPetCount=1},
         targetPetTypes={},
         fromAge=1,toAge=100,maxPetTarget=1,
         autoStartEnabled=false,autoRejoin=false,
@@ -1264,6 +1264,7 @@ config.equipTargetLvl = config.equipTargetLvl or 100
 config.elephantThresholdKG = config.elephantThresholdKG or 6.05  -- v13.01
 config.pickupDelay = config.pickupDelay or 0.10  -- v13.05
 config.placeDelay = config.placeDelay or 0.12  -- v13.05
+config.elephantPetCount = config.elephantPetCount or 1  -- v13.06: target jumlah Tim Elephant
 local targetPetTypes=d.targetPetTypes or {}
 local fromAge=d.fromAge or 1
 local maxPetTarget=d.maxPetTarget or 1
@@ -1547,10 +1548,11 @@ buildTimList=function()
         })
     end)
     local kgBox = mkInputRow("Sampai KG", config.targetKG, 2, function(v) config.targetKG = math.max(1, v) end, true)
-    local pcBox = mkInputRow("Jumlah Pet", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
-    local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 4, function(v) config.equipTargetLvl = math.max(1, v) end, true)
+    local pcBox = mkInputRow("Jumlah Pet Leveling", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
+    local epcBox = mkInputRow("Jumlah Pet Elephant", config.elephantPetCount, 4, function(v) config.elephantPetCount = math.max(1, v) end, true)
+    local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 5, function(v) config.equipTargetLvl = math.max(1, v) end, true)
     -- v13.01: Threshold KG field - base KG di atas threshold = pet udah maxed (skip dari rotation)
-    local thBox = mkInputRow("Threshold KG (max base)", config.elephantThresholdKG, 5, function(v) config.elephantThresholdKG = math.max(0.1, math.min(20, v)) end, true)
+    local thBox = mkInputRow("Threshold KG (max base)", config.elephantThresholdKG, 6, function(v) config.elephantThresholdKG = math.max(0.1, math.min(20, v)) end, true)
 
     local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[1]})
     corner(saRow,6) stroke(saRow,C.Dim,1.1)
@@ -3727,6 +3729,7 @@ end
 M78.elephantState = "stopped"  -- current phase
 M78.elephantBlessingsThisCycle = 0  -- count blessings received in current Phase 2
 M78.elephantPetsAge40 = {}  -- track pets that hit age 40 in Phase 1 (UUID set)
+M78.elephantDonePets = {}  -- v13.07: pet yg udah lewat Sampai KG (done set)
 M78.elephantLastNotif = nil  -- last notif text (debug)
 M78.elephantLastFailAt = 0  -- timestamp last FAIL notif
 M78.elephantLastSuccessAt = 0  -- timestamp last SUCCESS notif
@@ -3734,32 +3737,55 @@ M78.elephantLastSuccessAt = 0  -- timestamp last SUCCESS notif
 -- v13.03: forward-declare doStart/doStop biar state machine bisa akses
 local doStart, doStop
 
+-- v13.07: lookup pet UUID berdasar nama (untuk mapping notif pet name -> UUID di teamPetUUIDs)
+M78.findUUIDByName = function(petName)
+    if not petName or petName == "" then return nil end
+    -- Strip mutation prefix biar match base name
+    local nameStripped = petName
+    if getBaseName then nameStripped = getBaseName(petName) end
+    for uuid,_ in pairs(teamPetUUIDs) do
+        local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+        if item then
+            local itemName = getPetName(item)
+            local itemBase = getBaseName(itemName)
+            if itemName == petName or itemBase == nameStripped then
+                return uuid
+            end
+        end
+    end
+    return nil
+end
+
 -- v13.03: helper - cek apakah SEMUA pet di teamPetUUIDs udah reach equipTargetLvl
--- (filter: skip pet yang base KG >= threshold, karena udah maxed)
+-- (filter: skip pet yang base KG > targetKG (Sampai KG) ATAU yg udah di-done set)
 M78.allLevelingPetsAtTarget = function()
     if not teamPetUUIDs or next(teamPetUUIDs) == nil then return false end
     local anyEligible = false
     for uuid, _ in pairs(teamPetUUIDs) do
-        local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
-        if item then
-            -- Hitung base KG
-            local baseKG = nil
-            if getBaseKG then baseKG = getBaseKG(item) end
-            if not baseKG then
-                local kg = getKG(item)
-                local age = getAgeFromKG(item)
-                if kg and age and age >= 1 then
-                    baseKG = kg * 11 / (age + 10)
+        -- Skip pet yg udah done (sudah lewat Sampai KG, dari notif)
+        if not M78.elephantDonePets[uuid] then
+            local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+            if item then
+                -- Hitung base KG sekarang (cek apakah udah lewat Sampai KG)
+                local baseKG = nil
+                if getBaseKG then baseKG = getBaseKG(item) end
+                if not baseKG then
+                    local kg = getKG(item)
+                    local age = getAgeFromKG(item)
+                    if kg and age and age >= 1 then
+                        baseKG = kg * 11 / (age + 10)
+                    end
                 end
-            end
-            -- Skip pet yg udah >= threshold (maxed)
-            if baseKG and baseKG >= (config.elephantThresholdKG or 6.05) then
-                -- skip (gak masuk antrian leveling lagi)
-            else
-                anyEligible = true
-                local age = getAgeFromKG(item)
-                if not age or age < (config.equipTargetLvl or 40) then
-                    return false  -- pet ini belum siap
+                -- Skip pet yg base KG udah > Sampai KG
+                if baseKG and baseKG > (config.targetKG or 60) then
+                    M78.elephantDonePets[uuid] = true
+                    dbg("[ele] pet "..tostring(uuid):sub(1,8).." base "..string.format("%.2f",baseKG).."kg > Sampai KG "..config.targetKG..", marked DONE")
+                else
+                    anyEligible = true
+                    local age = getAgeFromKG(item)
+                    if not age or age < (config.equipTargetLvl or 40) then
+                        return false  -- pet ini belum siap
+                    end
                 end
             end
         end
@@ -3841,13 +3867,25 @@ task.spawn(function()
                     if t == "" then return end
                     M78.elephantLastNotif = t
                     -- SUCCESS pattern: "🐘 Elephant blessed your <PET>! Age reset to 1 and gained +0.11 KG (<X> KG total)!"
-                    -- (matched substring agar mendukung variasi formatting)
                     if t:find("Elephant blessed your", 1, true) then
                         M78.elephantLastSuccessAt = tick()
                         M78.elephantBlessingsThisCycle = M78.elephantBlessingsThisCycle + 1
                         local petName = t:match("Elephant blessed your (.-)!")
-                        local newKg = t:match("%(([%d%.]+)%s*KG total")
-                        dbg("[ele] BLESS SUCCESS: "..(petName or "?").." -> "..(newKg or "?").."kg (total "..M78.elephantBlessingsThisCycle..")")
+                        local newKgStr = t:match("%(([%d%.]+)%s*KG total")
+                        local newKg = tonumber(newKgStr)
+                        dbg("[ele] BLESS SUCCESS: "..(petName or "?").." -> "..(newKgStr or "?").."kg (total "..M78.elephantBlessingsThisCycle..")")
+                        -- v13.07: cek apakah pet ini udah lewat Sampai KG → mark DONE
+                        if petName and newKg then
+                            local petUUID = M78.findUUIDByName(petName)
+                            if petUUID then
+                                if newKg > (config.targetKG or 60) then
+                                    M78.elephantDonePets[petUUID] = true
+                                    dbg("[ele] pet "..petName.." ("..tostring(petUUID):sub(1,8)..") "..newKg.."kg > Sampai KG "..config.targetKG..", marked DONE")
+                                else
+                                    dbg("[ele] pet "..petName.." "..newKg.."kg <= Sampai KG "..config.targetKG..", masih aman")
+                                end
+                            end
+                        end
                     elseif t:find("trumpeted a blessing", 1, true) and t:find("found no", 1, true) then
                         M78.elephantLastFailAt = tick()
                         dbg("[ele] BLESS FAIL: no eligible pet found")
