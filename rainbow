@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.36"
+local SCRIPT_VERSION="v13.37"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4749,22 +4749,26 @@ doStart = function()
                         local bn = getBaseName and getBaseName(nm) or nm
                         local matchResult = isTargetPet(nm)
                         if matchResult then
-                            -- v13.25: skip pet age >= equipTargetLvl pakai full cascade detection
+                            -- v13.37: strict age detection - require age detected AND < target
                             local age = getFullAge(uuidStr)
                             if not age then age = getAgeFromKG(item) end
-                            local skipAge = age and age >= (config.equipTargetLvl or 40)
                             local kg = getKG(item)
                             local baseKG = nil
                             if kg and age and age >= 1 then baseKG = kg * 11 / (age + 10) end
                             local skipKG = baseKG and baseKG > (config.targetKG or 60)
-                            if skipAge or skipKG then
-                                dbg("[autoFill-Target] skip "..uuidStr:sub(1,12).." name='"..nm.."' age="..tostring(age).." base="..tostring(baseKG).." (already maxed)")
+                            -- HANYA terima pet kalo age detected AND age < target AND kg OK
+                            if not age then
+                                dbg("[autoFill-Target] skip "..uuidStr:sub(1,12).." name='"..nm.."' age UNDETECTABLE")
+                            elseif age >= (config.equipTargetLvl or 40) then
+                                dbg("[autoFill-Target] skip "..uuidStr:sub(1,12).." name='"..nm.."' age="..age.." (>= target)")
+                            elseif skipKG then
+                                dbg("[autoFill-Target] skip "..uuidStr:sub(1,12).." name='"..nm.."' base="..tostring(baseKG).." (kg > Sampai)")
                             else
                                 matched = matched + 1
                                 targetPetUUIDs[uuidStr] = true
                                 targetPetInfoCache[uuidStr] = {name=nm, info=getPetInfo(item)}
                                 needed = needed - 1
-                                dbg("[autoFill-Target] +"..uuidStr:sub(1,12).." name='"..nm.."' base='"..bn.."' age="..tostring(age))
+                                dbg("[autoFill-Target] +"..uuidStr:sub(1,12).." name='"..nm.."' base='"..bn.."' age="..age)
                             end
                         end
                     end
@@ -4895,8 +4899,11 @@ doStart = function()
                             if newUuid and not targetPetUUIDs[newUuidStr] and not teamPetUUIDs[newUuidStr] then
                                 local nm = getPetName(bpItem)
                                 if isTargetPet(nm) then
-                                    local newAge = getAgeFromKG(bpItem)  -- cepet, gak cascade
-                                    if not newAge or newAge < (config.equipTargetLvl or 40) then
+                                    -- v13.37: pakai full cascade buat akurat detection
+                                    local newAge = getFullAge and getFullAge(newUuidStr)
+                                    if not newAge then newAge = getAgeFromKG(bpItem) end
+                                    -- STRICT: require age detection success AND age < target (no nil bypass)
+                                    if newAge and newAge < (config.equipTargetLvl or 40) then
                                         table.insert(freshList, {uuid=newUuid, uuidStr=newUuidStr, name=nm, item=bpItem, age=newAge})
                                     end
                                 end
