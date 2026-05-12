@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.07"
+local SCRIPT_VERSION="v13.11"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -1551,8 +1551,7 @@ buildTimList=function()
     local pcBox = mkInputRow("Jumlah Pet Leveling", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
     local epcBox = mkInputRow("Jumlah Pet Elephant", config.elephantPetCount, 4, function(v) config.elephantPetCount = math.max(1, v) end, true)
     local lvBox = mkInputRow("Equip Pet Target Level", config.equipTargetLvl, 5, function(v) config.equipTargetLvl = math.max(1, v) end, true)
-    -- v13.01: Threshold KG field - base KG di atas threshold = pet udah maxed (skip dari rotation)
-    local thBox = mkInputRow("Threshold KG (max base)", config.elephantThresholdKG, 6, function(v) config.elephantThresholdKG = math.max(0.1, math.min(20, v)) end, true)
+    -- v13.10: Threshold KG dihapus (redundant dgn Sampai KG)
 
     local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[1]})
     corner(saRow,6) stroke(saRow,C.Dim,1.1)
@@ -1719,6 +1718,60 @@ buildTimList=function()
                 end
             end
         end
+        -- v13.09: scan placed pets di garden yg BELUM masuk teamPetUUIDs/shown, biar bisa di-select
+        pcall(function()
+            local petsPhys = workspace:FindFirstChild("PetsPhysical")
+            if not petsPhys then return end
+            local seenPlaced = {}
+            for _, m in ipairs(petsPhys:GetDescendants()) do
+                if m:IsA("Model") or m:IsA("BasePart") then
+                    local uuid = nil
+                    pcall(function() uuid = m:GetAttribute("PET_UUID") or m:GetAttribute("UUID") end)
+                    if not uuid then
+                        local mn = m.Name
+                        if mn:sub(1,1) == "{" and mn:sub(-1) == "}" then uuid = mn:sub(2,-2) end
+                    end
+                    if uuid then
+                        local uuidStr = tostring(uuid):gsub("^{",""):gsub("}$","")
+                        if not seenPlaced[uuidStr] and not shown[uuidStr] then
+                            seenPlaced[uuidStr] = true
+                            local placedName = (M78 and M78.getPlacedPetName and M78.getPlacedPetName(uuidStr)) or "PlacedPet"
+                            local show = filter=="" or placedName:lower():find(filter:lower(),1,true)
+                            if show then
+                                n = n + 1
+                                local inTeam = teamPetUUIDs[uuidStr] == true
+                                local row = mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=inTeam and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=petPickScroll})
+                                corner(row,5) if inTeam then stroke(row,C.Teal,1.1) end
+                                local nl = lbl(row, placedName.." (garden)", 12, inTeam and C.Teal or C.White)
+                                nl.Size = UDim2.new(0.72,0,1,0) nl.Position = UDim2.new(0,8,0,0)
+                                local tb = btn(row, inTeam and "ON" or "OFF", 12, inTeam and C.TDim or C.Panel, inTeam and C.Teal or C.Gray)
+                                tb.Size = UDim2.new(0,52,0,24) tb.Position = UDim2.new(1,-56,0.5,-12)
+                                local tbStroke = stroke(tb, inTeam and C.Teal or C.Dim, 1.1)
+                                local cu = uuidStr
+                                teamPetInfoCache[uuidStr] = {name=placedName, info=placedName.." (garden)"}
+                                tb.MouseButton1Click:Connect(function()
+                                    if teamPetUUIDs[cu] then teamPetUUIDs[cu]=nil else teamPetUUIDs[cu]=true end
+                                    local nowIn=teamPetUUIDs[cu]==true
+                                    row.BackgroundColor3=nowIn and C.TDim or C.Card
+                                    local rs=row:FindFirstChildWhichIsA("UIStroke")
+                                    if nowIn then if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.1) end
+                                    else if rs then rs:Destroy() end end
+                                    nl.TextColor3=nowIn and C.Teal or C.White
+                                    tb.Text=nowIn and "ON" or "OFF"
+                                    tb.BackgroundColor3=nowIn and C.TDim or C.Panel
+                                    tb.TextColor3=nowIn and C.Teal or C.Gray
+                                    tbStroke.Color=nowIn and C.Teal or C.Dim
+                                    pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
+                                    updatePreview()
+                                    syncSwapTab()
+                                    save()
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+        end)
         if n==0 then
             local msg=favCount==0 and "Belum ada pet di-love. Tekan icon love di pet game dulu." or "Tidak ada pet love yg cocok"
             local e=lbl(petPickScroll,msg,10,C.Red,Enum.TextXAlignment.Center)
@@ -3798,6 +3851,23 @@ task.spawn(function()
     while not scriptShutdown do
         if autoElephantCycle then
             if M78.elephantState == "leveling" then
+                -- v13.08: cek kalo semua pet di Tim Leveling udah done (semua lewat Sampai KG)
+                local totalTim = 0 local doneTim = 0
+                for uuid,_ in pairs(teamPetUUIDs) do
+                    totalTim = totalTim + 1
+                    if M78.elephantDonePets[uuid] then doneTim = doneTim + 1 end
+                end
+                if totalTim > 0 and doneTim >= totalTim then
+                    dbg("[ele] SEMUA pet ("..totalTim..") udah lewat Sampai KG -> AUTO STOP cycle")
+                    autoElephantCycle = false
+                    M78.elephantState = "stopped"
+                    if doStop then pcall(function() doStop("[AUTO ELE] All pets done") end) end
+                    local char = player.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hum then pcall(function() hum:UnequipTools() end) end
+                    if refreshAECBtn then pcall(refreshAECBtn) end
+                    pcall(save)
+                else
                 -- Phase 1: monitor existing leveling progress
                 if M78.allLevelingPetsAtTarget() then
                     dbg("[ele] Phase 1 DONE - semua pet target di age "..(config.equipTargetLvl or 40).." -> Phase 2")
@@ -3822,6 +3892,7 @@ task.spawn(function()
                     M78.elephantLastFailAt = 0
                     M78.elephantState = "elephant"
                 end
+                end -- v13.08: end else (auto-stop check)
             elseif M78.elephantState == "elephant" then
                 -- Phase 2: wait for FAIL notif (means cycle complete)
                 if M78.elephantLastFailAt > 0 then
@@ -4621,16 +4692,16 @@ doStart = function()
     end
 
     statusLbl.Text="Pasang tim leveling..." statusLbl.TextColor3=C.Gold
-    -- v12.79b: rapid-fire equip team
+    -- v13.11: per-pet delay biar server gak reject rapid fire
     local teamPlaced=0
     for uuid,_ in pairs(teamPetUUIDs) do
         pcall(function() equipPet(uuid) end)
         teamPlaced=teamPlaced+1
+        -- delay antar pet (configurable via placeDelay di tab Swap Skill)
+        task.wait(config.placeDelay or 0.12)
     end
     if teamPlaced>0 then
-        dbg("[doStart] tim "..teamPlaced.." pet di-place (rapid-fire)")
-        -- v13.05: pakai config.placeDelay (user-configurable di tab Swap Skill)
-        task.wait(math.min(config.placeDelay or 0.12, 0.03+teamPlaced*0.01))
+        dbg("[doStart] tim "..teamPlaced.." pet di-place (per-pet delay "..(config.placeDelay or 0.12).."s)")
     end
 
     local queue=getQueue()
