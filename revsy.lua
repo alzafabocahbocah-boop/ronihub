@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.95"
+local SCRIPT_VERSION="v12.97"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (mutation prefixes update + random gift target)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (implicit MAX age detection - pet tanpa [Age N] = age 100)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -199,11 +199,26 @@ local function getAge(item)
     end
     -- "MAX" / "MAXED" text
     if item.Name:match("%[Age%s*MAX%]") or item.Name:match("%[MAX%]") then return 100 end
+    -- v12.97: convention - pet dengan [KG] section tapi GAK ada [Age N] section = age max (100)
+    -- (game ngilangin Age display utk max-level pets)
+    local hasKG = item.Name:match("%[[%d%.]+%s*[Kk][Gg]%]")
+    local hasAge = item.Name:match("%[Age") or item.Name:match("%[Lv") or item.Name:match("%[Level") or item.Name:match("%[Lvl")
+    if hasKG and not hasAge then return 100 end
     return nil
 end
 local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Name end
 local function getKG(item) return tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) end
 local function getPetUUID(item) return item:GetAttribute("PET_UUID") end
+
+-- v12.96: getBaseKG - cari base weight dari attribute dulu, fallback ke formula
+local function getBaseKG(item)
+    if not item then return nil end
+    for _,attrName in ipairs({"BASE_KG","PET_BASE_KG","BaseKG","BaseWeight","PET_BASE_WEIGHT","BASE_WEIGHT","PET_KG_BASE","StartingWeight","STARTING_KG"}) do
+        local ok, v = pcall(function() return item:GetAttribute(attrName) end)
+        if ok and v and type(v) == "number" and v > 0 then return v end
+    end
+    return nil
+end
 
 local function fmtUUID(uuid)
     local s=tostring(uuid)
@@ -1047,8 +1062,13 @@ local function _doBuildInvShow()
             local kg = getKG(item)
             local fav = isFavorite(item)
             local baseKG = nil
-            if kg and age and age >= 1 then
+            -- v12.96: PRIMARY = baca dari attribute (paling akurat, gak ke-pengaruh mutation multiplier)
+            baseKG = getBaseKG(item)
+            -- FALLBACK: formula (asumsi linear scaling, salah utk mutated pet)
+            if not baseKG and kg and age and age >= 1 then
                 baseKG = kg * 11 / (age + 10)
+            end
+            if baseKG then
                 if baseKG < minBase then minBase = baseKG end
                 if baseKG > maxBase then maxBase = baseKG end
                 sumBase = sumBase + baseKG
@@ -4564,4 +4584,4 @@ end)()
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.95: tambah mutasi (Moonlit/Galactic/dll) + comma format + random gift")
+print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.97: pet tanpa [Age N] tag = age 100 (fix max-age detection)")
