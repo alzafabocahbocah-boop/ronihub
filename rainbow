@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.27"
+local SCRIPT_VERSION="v13.28"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4504,10 +4504,21 @@ startTeamKeeper=function()
             for uuid,_ in pairs(teamPetUUIDs) do
                 if not isPetInSwap(uuid) and not currentLevelingUUIDs[uuid] then
                     if not isPetEquippedInUI(uuid) then
-                        local uuidStr=tostring(uuid)
-                        dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak di UI, re-equip")
-                        equipPet(uuid)
-                        task.wait(0.1)
+                        -- v13.28: skip re-equip kalo age >= equipTargetLvl
+                        local skipAge = false
+                        local item = findPetInBackpack(uuid)
+                        local age = item and getAgeFromKG(item)
+                        if not age then
+                            local placed = findPlacedPetByUUID(uuid)
+                            if placed and getPlacedPetAge then age = getPlacedPetAge(placed) end
+                        end
+                        if age and age >= (config.equipTargetLvl or 40) then skipAge = true end
+                        if not skipAge then
+                            local uuidStr=tostring(uuid)
+                            dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak di UI, re-equip")
+                            equipPet(uuid)
+                            task.wait(0.1)
+                        end
                     end
                 end
             end
