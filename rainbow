@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.28"
+local SCRIPT_VERSION="v13.29"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4460,20 +4460,8 @@ local function equipTeam()
     for uuid,_ in pairs(teamPetUUIDs) do
         if not isPetInSwap(uuid) then
             if not isPetEquippedInUI(uuid) then
-                -- v13.27: skip pet age >= equipTargetLvl
-                local age = nil
-                local item = findPetInBackpack(uuid)
-                if item then age = getAgeFromKG(item) end
-                if not age then
-                    local placed = findPlacedPetByUUID(uuid)
-                    if placed and getPlacedPetAge then age = getPlacedPetAge(placed) end
-                end
-                if age and age >= (config.equipTargetLvl or 40) then
-                    -- skip - pet udah lewat target
-                else
-                    equipPet(uuid)
-                    task.wait(0.1)
-                end
+                equipPet(uuid)
+                task.wait(0.1)
             end
         end
     end
@@ -4504,21 +4492,10 @@ startTeamKeeper=function()
             for uuid,_ in pairs(teamPetUUIDs) do
                 if not isPetInSwap(uuid) and not currentLevelingUUIDs[uuid] then
                     if not isPetEquippedInUI(uuid) then
-                        -- v13.28: skip re-equip kalo age >= equipTargetLvl
-                        local skipAge = false
-                        local item = findPetInBackpack(uuid)
-                        local age = item and getAgeFromKG(item)
-                        if not age then
-                            local placed = findPlacedPetByUUID(uuid)
-                            if placed and getPlacedPetAge then age = getPlacedPetAge(placed) end
-                        end
-                        if age and age >= (config.equipTargetLvl or 40) then skipAge = true end
-                        if not skipAge then
-                            local uuidStr=tostring(uuid)
-                            dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak di UI, re-equip")
-                            equipPet(uuid)
-                            task.wait(0.1)
-                        end
+                        local uuidStr=tostring(uuid)
+                        dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak di UI, re-equip")
+                        equipPet(uuid)
+                        task.wait(0.1)
                     end
                 end
             end
@@ -4679,21 +4656,22 @@ _G.ZenxStopSwap=stopSwapForPet
 
 local function getQueue()
     local queue={}
+    -- v13.29: kalo ada Pet Target di-pick/auto-fill, queue DISABLED - cuma grind target
+    local hasTarget = false
+    for _ in pairs(targetPetUUIDs) do hasTarget = true break end
+    if hasTarget then return queue end
+
     local bp=player:FindFirstChild("Backpack") if not bp then return queue end
     for _,item in pairs(bp:GetChildren()) do
         if isPet(item) then
             local uuid=getPetUUID(item)
             local uuidStr=uuid and tostring(uuid) or ""
-            -- v13.27: juga exclude targetPetUUIDs (pet target sudah di-handle separate)
-            if uuid and not teamPetUUIDs[uuidStr] and not targetPetUUIDs[uuidStr] then
+            if uuid and not teamPetUUIDs[uuidStr] then
                 if not currentLevelingUUIDs[uuidStr] and not completedPets[uuidStr] and not isFavorite(item) then
                     local name=getPetName(item)
                     if isTargetPet(name) then
                         local age=getAgeFromKG(item)
-                        -- v13.27: SKIP pet age >= equipTargetLvl
-                        if age and age >= (config.equipTargetLvl or 40) then
-                            -- skip
-                        elseif age==nil or (age>=fromAge and age<toAge) then
+                        if age==nil or (age>=fromAge and age<toAge) then
                             table.insert(queue,item)
                         end
                     end
@@ -4701,7 +4679,6 @@ local function getQueue()
             end
         end
     end
-    -- v12.79o: shuffle queue biar pet beda jenis ke-equip mix, gak group per jenis
     for i=#queue,2,-1 do
         local j=math.random(i)
         queue[i],queue[j]=queue[j],queue[i]
@@ -4926,36 +4903,19 @@ doStart = function()
     end
 
     statusLbl.Text="Pasang tim + target..." statusLbl.TextColor3=C.Gold
-    -- v13.26: rapid-fire equip BOTH Tim (support) and Target, SKIP pet age >= equipTargetLvl
+    -- v13.29: revert - place semua Tim Support + Pet Target (gak filter age)
+    -- Pet age >= target tetap perlu placed buat di-bless oleh Elephant (Phase 2)
     local placedTotal=0
-    local skippedAge=0
-    local function shouldPlace(uuid)
-        local age = getFullAge and getFullAge(uuid)
-        if not age then
-            local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
-            if item then age = getAgeFromKG(item) end
-        end
-        if age and age >= (config.equipTargetLvl or 40) then
-            dbg("[doStart] SKIP place "..tostring(uuid):sub(1,8).." age="..age.." >= "..(config.equipTargetLvl or 40))
-            skippedAge = skippedAge + 1
-            return false
-        end
-        return true
-    end
     for uuid,_ in pairs(teamPetUUIDs) do
-        if shouldPlace(uuid) then
-            pcall(function() equipPet(uuid) end)
-            placedTotal=placedTotal+1
-        end
+        pcall(function() equipPet(uuid) end)
+        placedTotal=placedTotal+1
     end
     for uuid,_ in pairs(targetPetUUIDs) do
-        if shouldPlace(uuid) then
-            pcall(function() equipPet(uuid) end)
-            placedTotal=placedTotal+1
-        end
+        pcall(function() equipPet(uuid) end)
+        placedTotal=placedTotal+1
     end
     if placedTotal>0 then
-        dbg("[doStart] Tim+Target "..placedTotal.." pet di-place (rapid-fire) - skipped "..skippedAge.." pet age>=target")
+        dbg("[doStart] Tim+Target "..placedTotal.." pet di-place (rapid-fire)")
         task.wait(math.min(config.placeDelay or 0.12, 0.03+placedTotal*0.01))
         -- v13.12: verifikasi
         local petsPhys = workspace:FindFirstChild("PetsPhysical")
@@ -5172,12 +5132,8 @@ doStart = function()
                     end
                 end
                 local ageStr=age and (age.."/"..toAge) or ("?/"..toAge)
-                -- v13.24: skip pet age >= equipTargetLvl dari display (udah selesai phase 1)
-                if age and age >= (config.equipTargetLvl or toAge) then
-                    -- skip - don't show
-                else
-                    table.insert(activeNames,nameStr.." "..ageStr)
-                end
+                -- v13.29: revert v13.24 - tampilkan SEMUA Pet Target, gak hide pet age >= target
+                table.insert(activeNames,nameStr.." "..ageStr)
             end -- end addPetToDisplay
             -- v13.22: Show ONLY Pet Target di Lvl display (gak include queue pets biar gak numpuk)
             for uuid,_ in pairs(targetPetUUIDs) do addPetToDisplay(uuid) end
