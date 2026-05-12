@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.12"
+local SCRIPT_VERSION="v13.13"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4700,20 +4700,16 @@ doStart = function()
     end
 
     statusLbl.Text="Pasang tim leveling..." statusLbl.TextColor3=C.Gold
-    -- v13.12: per-pet delay + debug log
+    -- v13.13: revert ke rapid-fire pattern (kayak zenx leveling - server prefer batch)
     local teamPlaced=0
     for uuid,_ in pairs(teamPetUUIDs) do
-        local item = findPetInBackpack(uuid)
-        local exist = "BP" if not item then exist = "garden/missing" end
-        dbg("[doStart] placing pet "..tostring(uuid):sub(1,8).." ("..exist..")")
         pcall(function() equipPet(uuid) end)
         teamPlaced=teamPlaced+1
-        task.wait(config.placeDelay or 0.12)
     end
     if teamPlaced>0 then
-        dbg("[doStart] tim "..teamPlaced.." pet di-place (per-pet delay "..(config.placeDelay or 0.12).."s)")
+        dbg("[doStart] tim "..teamPlaced.." pet di-place (rapid-fire)")
+        task.wait(math.min(config.placeDelay or 0.12, 0.03+teamPlaced*0.01))
         -- v13.12: verifikasi - cek berapa pet beneran di garden setelah place
-        task.wait(0.5)
         local petsPhys = workspace:FindFirstChild("PetsPhysical")
         local actual = 0
         if petsPhys then
@@ -4728,7 +4724,7 @@ doStart = function()
                 end
             end
         end
-        dbg("[doStart] verifikasi: "..actual.."/"..teamPlaced.." pet beneran di garden")
+        dbg("[doStart] verifikasi: "..actual.."/"..teamPlaced.." pet di garden")
     end
 
     local queue=getQueue()
