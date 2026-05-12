@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.35"
+local SCRIPT_VERSION="v13.36"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4868,11 +4868,10 @@ doStart = function()
         while isRunning do equipTeam() task.wait(1) end
     end)
 
-    -- v13.34: Pet Target rotation monitor - pet age >= Sampai Age di-unequip + replace
+    -- v13.34/35/36: Pet Target rotation monitor - faster check + cached fresh pet list
     task.spawn(function()
         dbg("[rotate] monitor task STARTED, targetLevel="..tostring(config.equipTargetLvl))
         while isRunning do
-            -- v13.35: collect rotations first, apply after iteration (safe)
             local toRotate = {}
             for uuid,_ in pairs(targetPetUUIDs) do
                 local age = getFullAge and getFullAge(uuid)
@@ -4885,14 +4884,8 @@ doStart = function()
                 end
             end
             if #toRotate > 0 then
-                dbg("[rotate] "..#toRotate.." pet hit target age, rotating...")
-            end
-            for _, item in ipairs(toRotate) do
-                local uuid = item.uuid
-                dbg("[rotate] "..tostring(uuid):sub(1,8).." age "..item.age.." >= "..(config.equipTargetLvl or 40).." - unequip & replace")
-                pcall(function() unequipPet(uuid) end)
-                targetPetUUIDs[uuid] = nil
-                targetPetInfoCache[uuid] = nil
+                -- v13.36: pre-collect SEMUA fresh pets dari bp dulu, lalu pakai
+                local freshList = {}
                 local bp = player:FindFirstChild("Backpack")
                 if bp then
                     for _, bpItem in pairs(bp:GetChildren()) do
@@ -4902,22 +4895,34 @@ doStart = function()
                             if newUuid and not targetPetUUIDs[newUuidStr] and not teamPetUUIDs[newUuidStr] then
                                 local nm = getPetName(bpItem)
                                 if isTargetPet(nm) then
-                                    local newAge = getFullAge and getFullAge(newUuidStr)
-                                    if not newAge then newAge = getAgeFromKG(bpItem) end
+                                    local newAge = getAgeFromKG(bpItem)  -- cepet, gak cascade
                                     if not newAge or newAge < (config.equipTargetLvl or 40) then
-                                        targetPetUUIDs[newUuidStr] = true
-                                        targetPetInfoCache[newUuidStr] = {name=nm, info=getPetInfo(bpItem)}
-                                        pcall(function() equipPet(newUuid) end)
-                                        dbg("[rotate] +"..newUuidStr:sub(1,12).." ("..nm..") age="..tostring(newAge))
-                                        break
+                                        table.insert(freshList, {uuid=newUuid, uuidStr=newUuidStr, name=nm, item=bpItem, age=newAge})
                                     end
                                 end
                             end
                         end
                     end
                 end
+                dbg("[rotate] "..#toRotate.." pet hit target, "..#freshList.." fresh pets available")
+                for i, item in ipairs(toRotate) do
+                    local uuid = item.uuid
+                    pcall(function() unequipPet(uuid) end)
+                    targetPetUUIDs[uuid] = nil
+                    targetPetInfoCache[uuid] = nil
+                    -- Pick fresh from cached list
+                    if freshList[i] then
+                        local f = freshList[i]
+                        targetPetUUIDs[f.uuidStr] = true
+                        targetPetInfoCache[f.uuidStr] = {name=f.name, info=getPetInfo(f.item)}
+                        pcall(function() equipPet(f.uuid) end)
+                        dbg("[rotate] "..tostring(uuid):sub(1,8).." (age "..item.age..") -> "..f.uuidStr:sub(1,8).." ("..f.name..", age "..tostring(f.age)..")")
+                    else
+                        dbg("[rotate] "..tostring(uuid):sub(1,8).." unequipped, no fresh replacement available")
+                    end
+                end
             end
-            task.wait(2)
+            task.wait(0.5)  -- v13.36: faster (was 2s)
         end
         dbg("[rotate] monitor task STOPPED")
     end)
