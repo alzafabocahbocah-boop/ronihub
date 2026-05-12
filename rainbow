@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.33"
+local SCRIPT_VERSION="v13.34"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4866,6 +4866,50 @@ doStart = function()
 
     mainTask=task.spawn(function()
         while isRunning do equipTeam() task.wait(1) end
+    end)
+
+    -- v13.34: Pet Target rotation monitor - pet age >= Sampai Age di-unequip + replace
+    task.spawn(function()
+        while isRunning do
+            for uuid,_ in pairs(targetPetUUIDs) do
+                local age = getFullAge and getFullAge(uuid)
+                if not age then
+                    local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+                    if item then age = getAgeFromKG(item) end
+                end
+                if age and age >= (config.equipTargetLvl or 40) then
+                    dbg("[rotate] "..tostring(uuid):sub(1,8).." age "..age.." >= "..(config.equipTargetLvl or 40).." - unequip & replace")
+                    pcall(function() unequipPet(uuid) end)
+                    targetPetUUIDs[uuid] = nil
+                    targetPetInfoCache[uuid] = nil
+                    -- Cari replacement fresh pet matching Jenis Pet
+                    local bp = player:FindFirstChild("Backpack")
+                    if bp then
+                        for _, item in pairs(bp:GetChildren()) do
+                            if isPet(item) then
+                                local newUuid = getPetUUID(item)
+                                local newUuidStr = newUuid and tostring(newUuid) or ""
+                                if newUuid and not targetPetUUIDs[newUuidStr] and not teamPetUUIDs[newUuidStr] then
+                                    local nm = getPetName(item)
+                                    if isTargetPet(nm) then
+                                        local newAge = getFullAge and getFullAge(newUuidStr)
+                                        if not newAge then newAge = getAgeFromKG(item) end
+                                        if not newAge or newAge < (config.equipTargetLvl or 40) then
+                                            targetPetUUIDs[newUuidStr] = true
+                                            targetPetInfoCache[newUuidStr] = {name=nm, info=getPetInfo(item)}
+                                            pcall(function() equipPet(newUuid) end)
+                                            dbg("[rotate] +"..newUuidStr:sub(1,12).." ("..nm..") age="..tostring(newAge))
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(2)
+        end
     end)
 
     monitorTask=task.spawn(function()
