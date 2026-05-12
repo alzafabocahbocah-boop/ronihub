@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.26"
+local SCRIPT_VERSION="v13.27"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
@@ -4460,8 +4460,20 @@ local function equipTeam()
     for uuid,_ in pairs(teamPetUUIDs) do
         if not isPetInSwap(uuid) then
             if not isPetEquippedInUI(uuid) then
-                equipPet(uuid)
-                task.wait(0.1)
+                -- v13.27: skip pet age >= equipTargetLvl
+                local age = nil
+                local item = findPetInBackpack(uuid)
+                if item then age = getAgeFromKG(item) end
+                if not age then
+                    local placed = findPlacedPetByUUID(uuid)
+                    if placed and getPlacedPetAge then age = getPlacedPetAge(placed) end
+                end
+                if age and age >= (config.equipTargetLvl or 40) then
+                    -- skip - pet udah lewat target
+                else
+                    equipPet(uuid)
+                    task.wait(0.1)
+                end
             end
         end
     end
@@ -4661,12 +4673,16 @@ local function getQueue()
         if isPet(item) then
             local uuid=getPetUUID(item)
             local uuidStr=uuid and tostring(uuid) or ""
-            if uuid and not teamPetUUIDs[uuidStr] then
+            -- v13.27: juga exclude targetPetUUIDs (pet target sudah di-handle separate)
+            if uuid and not teamPetUUIDs[uuidStr] and not targetPetUUIDs[uuidStr] then
                 if not currentLevelingUUIDs[uuidStr] and not completedPets[uuidStr] and not isFavorite(item) then
                     local name=getPetName(item)
                     if isTargetPet(name) then
                         local age=getAgeFromKG(item)
-                        if age==nil or (age>=fromAge and age<toAge) then
+                        -- v13.27: SKIP pet age >= equipTargetLvl
+                        if age and age >= (config.equipTargetLvl or 40) then
+                            -- skip
+                        elseif age==nil or (age>=fromAge and age<toAge) then
                             table.insert(queue,item)
                         end
                     end
