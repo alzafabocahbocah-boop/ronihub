@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.93"
+local SCRIPT_VERSION="v12.94"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (multi-target gift + revert auto collect ke ProximityPrompt)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (fix age detection - hapus kg>=20 fallback)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -833,11 +833,16 @@ function getAgeFromKG(item)
         local kg=getKG(item)
         if kg then
             local maxKG=getMaxKGForPet(getPetName(item))
-            if maxKG then
-                kgAge=math.max(1,math.min(100,math.floor(kg*110/maxKG - 10)))
-            elseif kg >= 20 then
-                kgAge=100
+            if maxKG and maxKG > 0 then
+                local raw = math.floor(kg*110/maxKG - 10)
+                -- v12.94: kalo formula overflow ke 100+ artinya maxKG kemungkinan stale (post-Elephant base naik)
+                -- → set nil biar gak salah claim age 100
+                if raw >= 1 and raw <= 100 then
+                    kgAge = raw
+                end
             end
+            -- v12.94: hapus fallback "kg>=20 -> age 100" karena salah utk pet base KG tinggi
+            -- (pet hasil Elephant grinding bisa punya base 5.5kg, jadi total 20+kg di age rendah)
         end
     end
 
@@ -4553,4 +4558,4 @@ end)()
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.93: multi-target gift, auto collect revert ke ProximityPrompt")
+print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.94: fix Jadi counter false-positive untuk pet base KG tinggi")
