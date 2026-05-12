@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.01"
+local SCRIPT_VERSION="v13.03"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Elephant automation UI + notif listener)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Elephant state machine logic - Phase 1 <-> Phase 2)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1011,7 +1011,7 @@ end)
 local currentTab = 1
 local function switchTab(idx)
     currentTab = idx
-    for i,b in ipairs(tabBtns) do
+    for i,b in pairs(tabBtns) do
         local s=b:FindFirstChildWhichIsA("UIStroke")
         if i==idx then b.TextColor3=C.Teal b.BackgroundColor3=C.TDim if s then s.Color=C.Teal end areas[i].Visible=true
         else b.TextColor3=C.Gray b.BackgroundColor3=C.Card if s then s.Color=C.Dim end areas[i].Visible=false end
@@ -1182,6 +1182,8 @@ for i,name in ipairs(tabNames) do
     b.Size=UDim2.new(0,88,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
     local ii=i b.MouseButton1Click:Connect(function() switchTab(ii) end)
 end
+-- v13.02: hide UP AGE tab (areas[2] tetep ada di code, cuma button-nya dihilangin)
+if tabBtns[2] then tabBtns[2]:Destroy() tabBtns[2] = nil end
 
 -- v10.9: default sidebar = UP LVL
 switchSection(1)
@@ -3716,6 +3718,95 @@ M78.elephantLastNotif = nil  -- last notif text (debug)
 M78.elephantLastFailAt = 0  -- timestamp last FAIL notif
 M78.elephantLastSuccessAt = 0  -- timestamp last SUCCESS notif
 
+-- v13.03: forward-declare doStart/doStop biar state machine bisa akses
+local doStart, doStop
+
+-- v13.03: helper - cek apakah SEMUA pet di teamPetUUIDs udah reach equipTargetLvl
+-- (filter: skip pet yang base KG >= threshold, karena udah maxed)
+M78.allLevelingPetsAtTarget = function()
+    if not teamPetUUIDs or next(teamPetUUIDs) == nil then return false end
+    local anyEligible = false
+    for uuid, _ in pairs(teamPetUUIDs) do
+        local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+        if item then
+            -- Hitung base KG
+            local baseKG = nil
+            if getBaseKG then baseKG = getBaseKG(item) end
+            if not baseKG then
+                local kg = getKG(item)
+                local age = getAgeFromKG(item)
+                if kg and age and age >= 1 then
+                    baseKG = kg * 11 / (age + 10)
+                end
+            end
+            -- Skip pet yg udah >= threshold (maxed)
+            if baseKG and baseKG >= (config.elephantThresholdKG or 6.05) then
+                -- skip (gak masuk antrian leveling lagi)
+            else
+                anyEligible = true
+                local age = getAgeFromKG(item)
+                if not age or age < (config.equipTargetLvl or 40) then
+                    return false  -- pet ini belum siap
+                end
+            end
+        end
+    end
+    return anyEligible  -- semua eligible pet udah at target
+end
+
+-- v13.03: State machine monitor loop
+task.spawn(function()
+    while not scriptShutdown do
+        if autoElephantCycle then
+            if M78.elephantState == "leveling" then
+                -- Phase 1: monitor existing leveling progress
+                if M78.allLevelingPetsAtTarget() then
+                    dbg("[ele] Phase 1 DONE - semua pet target di age "..(config.equipTargetLvl or 40).." -> Phase 2")
+                    -- Stop existing leveling
+                    if doStop then pcall(function() doStop("[AUTO ELE] Phase 1 done") end) end
+                    task.wait(1.5)
+                    -- Equip Elephant pet (first from elephantTeamUUIDs)
+                    local elephantUUID = nil
+                    for uuid, _ in pairs(elephantTeamUUIDs) do elephantUUID = uuid break end
+                    if elephantUUID then
+                        local item = findPetInBackpack(elephantUUID)
+                        if item then
+                            pcall(function() equipPet(elephantUUID) end)
+                            dbg("[ele] Phase 2: Elephant equipped ("..tostring(elephantUUID):sub(1,8)..")")
+                        else
+                            dbg("[ele] Phase 2: WARNING - Elephant pet UUID="..tostring(elephantUUID):sub(1,8).." gak ada di bp")
+                        end
+                    else
+                        dbg("[ele] Phase 2: WARNING - belum pilih Tim Elephant!")
+                    end
+                    M78.elephantBlessingsThisCycle = 0
+                    M78.elephantLastFailAt = 0
+                    M78.elephantState = "elephant"
+                end
+            elseif M78.elephantState == "elephant" then
+                -- Phase 2: wait for FAIL notif (means cycle complete)
+                if M78.elephantLastFailAt > 0 then
+                    local age_secs = tick() - M78.elephantLastFailAt
+                    if age_secs < 60 then  -- FAIL detected within last minute
+                        dbg("[ele] Phase 2 done (FAIL received, blessings this cycle: "..M78.elephantBlessingsThisCycle..") -> Phase 1")
+                        -- Unequip elephant
+                        local char = player.Character
+                        local hum = char and char:FindFirstChildOfClass("Humanoid")
+                        if hum then pcall(function() hum:UnequipTools() end) end
+                        task.wait(0.5)
+                        -- Resume leveling
+                        if doStart then pcall(function() doStart() end) end
+                        M78.elephantLastFailAt = 0
+                        M78.elephantBlessingsThisCycle = 0
+                        M78.elephantState = "leveling"
+                    end
+                end
+            end
+        end
+        task.wait(3)
+    end
+end)
+
 -- Listener: watch Top_Notification for Elephant patterns
 task.spawn(function()
     local function findTopNotifLabel()
@@ -4376,7 +4467,7 @@ local function getQueue()
     return queue
 end
 
-local function doStop(reason)
+doStop = function(reason)
     isRunning=false
     if mainTask then task.cancel(mainTask) mainTask=nil end
     if monitorTask then task.cancel(monitorTask) monitorTask=nil end
@@ -4450,7 +4541,7 @@ local function pickupAllGardenPets()
     return #uuids
 end
 
-local function doStart()
+doStart = function()
     dbg("[doStart] dipanggil")
     currentLevelingUUIDs={}
     completedPets={}
