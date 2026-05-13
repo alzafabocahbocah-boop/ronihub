@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.99"
+local SCRIPT_VERSION="v13.00"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (revert implicit MAX assumption)")
 
@@ -4315,7 +4315,21 @@ local function getQueue()
                     local name=getPetName(item)
                     if isTargetPet(name) then
                         local age=getAgeFromKG(item)
-                        if age==nil or (age>=fromAge and age<toAge) then
+                        -- v12.99: STRICT - kalo age >= toAge (max), pet udah jadi, skip queue
+                        -- kalo age nil, coba estimate via KG. KG tinggi (>= 20kg) = age 100, skip
+                        if age == nil then
+                            local kg = getKG(item)
+                            if kg and kg >= 20 then
+                                completedPets[uuidStr] = true  -- mark done permanently
+                                -- skip queue
+                            else
+                                -- KG gak detected juga, masukin queue (legacy fallback)
+                                table.insert(queue,item)
+                            end
+                        elseif age >= toAge then
+                            -- pet udah lewat target, mark completed biar gak masuk queue lagi
+                            completedPets[uuidStr] = true
+                        elseif age >= fromAge then
                             table.insert(queue,item)
                         end
                     end
