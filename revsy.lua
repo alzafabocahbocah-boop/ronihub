@@ -702,6 +702,44 @@ local MUTATION_NAMES={
     "MerryNursery","Merry Nursery",
     "SpiritSparkle","Spirit Sparkle",
 }
+-- v12.99: load mutations dari PetMutationRegistry (game's source of truth)
+pcall(function()
+    local RS = game:GetService("ReplicatedStorage")
+    local petReg = RS:FindFirstChild("Data") and RS.Data:FindFirstChild("PetRegistry")
+    if not petReg then return end
+    local mutReg = petReg:FindFirstChild("PetMutationRegistry")
+    if not mutReg then return end
+    local ok, mod = pcall(function() return require(mutReg) end)
+    if not ok or type(mod) ~= "table" then return end
+
+    local seenMut = {}
+    for _, m in ipairs(MUTATION_NAMES) do seenMut[m] = true end
+
+    -- Drill into all sub-tables (PetMutationRegistry, PetMutationToEnum, MachineMutationTypes)
+    local function scanTable(t)
+        if type(t) ~= "table" then return end
+        for k, v in pairs(t) do
+            -- mutation name biasanya jadi KEY (string)
+            if type(k) == "string" and #k > 1 and not k:find("^%l") then
+                if not seenMut[k] then
+                    seenMut[k] = true
+                    table.insert(MUTATION_NAMES, k)
+                end
+            end
+            -- atau jadi VALUE
+            if type(v) == "string" and #v > 1 and not v:find("^%l") then
+                if not seenMut[v] then
+                    seenMut[v] = true
+                    table.insert(MUTATION_NAMES, v)
+                end
+            end
+        end
+    end
+    for _, sub in pairs(mod) do
+        if type(sub) == "table" then scanTable(sub) end
+    end
+end)
+
 -- Auto-build prefix list with both " " and ", " separators
 local MUTATION_PREFIXES={}
 for _,m in ipairs(MUTATION_NAMES) do
@@ -2330,7 +2368,8 @@ local function buildAutoGift()
                             -- v12.99: skip favorit kalo includeFav off
                             if not slot.includeFav and isFavorite(it) then
                                 -- skip
-                            elseif passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                            else
+                                -- v12.99: picker TAMPILIN semua jenis pet (gak filter kg/age, biar bisa pilih bebas)
                                 local name=getPetName(it) local base=getBaseName(name)
                                 if not types[base] then types[base]={count=0,mut=0} end
                                 types[base].count=types[base].count+1
@@ -2349,12 +2388,43 @@ local function buildAutoGift()
                 if petMover then scanSource(petMover) end
                 scanSource(petsPhys)
             end
+            -- v12.99: tambah SEMUA jenis pet di game dari PetRegistry.PetList (421 pets)
+            pcall(function()
+                local RS = game:GetService("ReplicatedStorage")
+                local petList = RS:FindFirstChild("Data") and RS.Data:FindFirstChild("PetRegistry") and RS.Data.PetRegistry:FindFirstChild("PetList")
+                if petList then
+                    local ok, mod = pcall(function() return require(petList) end)
+                    if ok and type(mod) == "table" then
+                        for petName, _ in pairs(mod) do
+                            if type(petName) == "string" and #petName > 1 and not types[petName] then
+                                types[petName] = {count=0, mut=0}  -- count=0 = belum punya
+                            end
+                        end
+                    end
+                end
+                -- fallback: PetAnimations (204 pets) kalo PetList fail
+                local petAnim = RS:FindFirstChild("Assets") and RS.Assets:FindFirstChild("Animations") and RS.Assets.Animations:FindFirstChild("PetAnimations")
+                if petAnim then
+                    for _, p in ipairs(petAnim:GetChildren()) do
+                        local petBase = p.Name
+                        if petBase and #petBase > 1 and not types[petBase] then
+                            types[petBase] = {count=0, mut=0}
+                        end
+                    end
+                end
+            end)
             local sorted={} for b,_ in pairs(types) do table.insert(sorted,b) end
-            table.sort(sorted,function(a,b) return types[a].count>types[b].count end)
+            -- sort: yg punya count > 0 dulu (descending), terus alphabetical
+            table.sort(sorted,function(a,b)
+                local ca, cb = types[a].count, types[b].count
+                if ca ~= cb then return ca > cb end
+                return a < b
+            end)
             local items={}
             for _,base in ipairs(sorted) do
                 local data=types[base]
-                local labelTxt=base.." ("..data.count..(data.mut>0 and ", "..data.mut.." mut" or "")..")"
+                local countTxt = data.count > 0 and tostring(data.count) or "0 (belum punya)"
+                local labelTxt=base.." ("..countTxt..(data.mut>0 and ", "..data.mut.." mut" or "")..")"
                 table.insert(items,{value=base,label=labelTxt,selected=(slot.petTypes[base]==true)})
             end
             showPickerModal({
