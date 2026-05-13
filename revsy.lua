@@ -369,13 +369,8 @@ local function getPlacedPetAge(placedModel)
             local txt=""
             pcall(function() txt=(d.Text or d.Value or "") end)
             if txt~="" then
-                local kg=tonumber(txt:match("%[?([%d%.]+)%s*[Kk][Gg]"))
-                if kg then
-                    if kg>=20 then table.insert(ages,100)
-                    elseif kg<5 then table.insert(ages,1)
-                    else table.insert(ages,math.floor(kg*5)) end
-                    break
-                end
+                -- v13.00: strict - cuma ambil real age dari [Age N] di kg label, gak estimate dari kg
+                -- (kg estimate udah di-hapus untuk reliability)
             end
         end
     end
@@ -1411,11 +1406,6 @@ task.spawn(function()
                             if uuidStr then seenUUIDs[uuidStr] = true end
                             total = total + 1
                             local age = getAgeFromKG(item)
-                            -- v13.00: fallback - age nil tapi kg >= 20 = age 100 (done)
-                            if not age then
-                                local kg = getKG(item)
-                                if kg and kg >= 20 then age = 100 end
-                            end
                             if age and age >= toAge then
                                 done = done + 1
                             else
@@ -4327,20 +4317,11 @@ local function getQueue()
                     local name=getPetName(item)
                     if isTargetPet(name) then
                         local age=getAgeFromKG(item)
-                        -- v12.99: STRICT - kalo age >= toAge (max), pet udah jadi, skip queue
-                        -- kalo age nil, coba estimate via KG. KG tinggi (>= 20kg) = age 100, skip
+                        -- v13.00: STRICT - cuma trust detected age, gak pake kg fallback
                         if age == nil then
-                            local kg = getKG(item)
-                            if kg and kg >= 20 then
-                                completedPets[uuidStr] = true  -- mark done permanently
-                                -- skip queue
-                            else
-                                -- KG gak detected juga, masukin queue (legacy fallback)
-                                table.insert(queue,item)
-                            end
+                            -- skip entirely (gak queue, gak mark completed)
                         elseif age >= toAge then
-                            -- pet udah lewat target, mark completed biar gak masuk queue lagi
-                            completedPets[uuidStr] = true
+                            completedPets[uuidStr] = true  -- mark done
                         elseif age >= fromAge then
                             table.insert(queue,item)
                         end
@@ -4601,10 +4582,17 @@ local function doStart()
                     if not isRunning then break end
                     local uuid=getPetUUID(available[i])
                     if uuid then
-                        local petName=getPetName(available[i])
-                        dbg("[monitor]   -> equip "..petName.." uuid="..tostring(uuid):sub(1,8))
-                        equipPet(uuid)
-                        currentLevelingUUIDs[tostring(uuid)]=true
+                        -- v13.00: double-check age before equip - jangan equip pet yang udah jadi
+                        local checkAge = getAgeFromKG(available[i])
+                        if checkAge and checkAge >= toAge then
+                            dbg("[monitor]   SKIP equip "..tostring(uuid):sub(1,8).." age="..checkAge.." (done)")
+                            completedPets[tostring(uuid)] = true
+                        else
+                            local petName=getPetName(available[i])
+                            dbg("[monitor]   -> equip "..petName.." uuid="..tostring(uuid):sub(1,8))
+                            equipPet(uuid)
+                            currentLevelingUUIDs[tostring(uuid)]=true
+                        end
                     end
                 end
             elseif #doneList>0 then
@@ -4629,35 +4617,10 @@ local function doStart()
                     if item then age=getAgeFromKG(item) end
                 end
                 if not age then
+                if not age then
+                    -- v13.00: strict - real age detection only, gak ada kg estimate
                     local placed=findPlacedPetByUUID(uuid)
                     if placed then age=getPlacedPetAge(placed) end
-                end
-                if not age then
-                    -- v12.21: KG estimate dari item di Backpack ATAU Character
-                    local item=findPetInBackpack(uuid)
-                    if item then
-                        local kg=getKG(item)
-                        if kg then
-                            -- Pakai cache maxKG kalo ada
-                            local maxKG = getMaxKGForPet(getPetName(item))
-                            if maxKG and maxKG > 0 then
-                                age = math.max(1, math.min(100, math.floor(kg * 11 / maxKG - 10)))
-                            elseif kg >= 20 then
-                                age = 100
-                            else
-                                age = 1
-                            end
-                        end
-                    end
-                end
-                if not age then
-                    -- v12.21: last resort - get KG from placed model name (kalo nama-nya bukan UUID)
-                    local placed=findPlacedPetByUUID(uuid)
-                    if placed and placed.Name and not placed.Name:find("-") then
-                        local kg = tonumber(placed.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]"))
-                        if kg and kg >= 20 then age = 100
-                        elseif kg then age = 1 end
-                    end
                 end
                 local ageStr=age and (age.."/"..toAge) or ("?/"..toAge)
                 table.insert(activeNames,nameStr.." "..ageStr)
