@@ -2285,7 +2285,10 @@ local function buildAutoGift()
                         local uidStr = uid and tostring(uid) or it.Name
                         if not seen[uidStr] then
                             seen[uidStr]=true
-                            if passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                            -- v12.99: skip favorit kalo includeFav off
+                            if not slot.includeFav and isFavorite(it) then
+                                -- skip
+                            elseif passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
                                 n=n+1
                             end
                         end
@@ -2324,8 +2327,10 @@ local function buildAutoGift()
                         local uidStr = uid and tostring(uid) or it.Name
                         if not seenUUIDs[uidStr] then
                             seenUUIDs[uidStr] = true
-                            -- v12.79q: respect kg/age filter biar count cocok ama yang ke-gift
-                            if passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                            -- v12.99: skip favorit kalo includeFav off
+                            if not slot.includeFav and isFavorite(it) then
+                                -- skip
+                            elseif passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
                                 local name=getPetName(it) local base=getBaseName(name)
                                 if not types[base] then types[base]={count=0,mut=0} end
                                 types[base].count=types[base].count+1
@@ -2569,6 +2574,10 @@ autoSendTask = task.spawn(function()
                     local uidStr=uuid and tostring(uuid) or item.Name
                     if uuid and not seen[uidStr] then
                         seen[uidStr]=true
+                        -- v12.99: skip favorit kalo includeFav off (default)
+                        if not slot.includeFav and isFavorite(item) then
+                            -- skip
+                        else
                         local fullName = getPetName(item)
                         local base = getBaseName(fullName)
                         if slot.petTypes[base] then
@@ -2588,6 +2597,7 @@ autoSendTask = task.spawn(function()
                             if mfPass and passKgFilter(item,slot.kg) and passAgeFilter(item,slot.age) then
                                 table.insert(list,{uuid=tostring(uuid),fav=isFavorite(item)})
                             end
+                        end
                         end
                     end
                 end
