@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.98"
+local SCRIPT_VERSION="v12.99"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (revert implicit MAX assumption)")
 
@@ -497,7 +497,7 @@ local function sendGiftToPlayer(targetName, petUUID)
 
     local short = petUUID and tostring(petUUID):sub(1,8) or "any"
 
-    -- v12.92: ensure pet di backpack (kalo placed, unequip dulu)
+    -- v12.92: ensure pet di backpack (kalo placed/equipped, unequip dulu)
     if petUUID then
         local placed = findPlacedPetByUUID(petUUID)
         if placed then
@@ -505,6 +505,27 @@ local function sendGiftToPlayer(targetName, petUUID)
             for i=1,5 do
                 task.wait(0.1)
                 if findPetInBackpack(petUUID) then break end
+            end
+        end
+        -- v12.99: cek juga di Character (pet equipped sebagai tool)
+        if not findPetInBackpack(petUUID) then
+            local char = player.Character
+            if char then
+                for _, t in pairs(char:GetChildren()) do
+                    if isPet(t) then
+                        local u = getPetUUID(t)
+                        if u and tostring(u) == tostring(petUUID) then
+                            -- unequip tool back to backpack
+                            local hum = char:FindFirstChildOfClass("Humanoid")
+                            if hum then pcall(function() hum:UnequipTools() end) end
+                            for i=1,5 do
+                                task.wait(0.1)
+                                if findPetInBackpack(petUUID) then break end
+                            end
+                            break
+                        end
+                    end
+                end
             end
         end
         if not findPetInBackpack(petUUID) then
@@ -2251,15 +2272,37 @@ local function buildAutoGift()
 
         local function countTypes() local n=0 for _ in pairs(slot.petTypes) do n=n+1 end return n end
         local function countMatching()
-            -- v12.79q: respect kg/age filter biar count match yg keluar di display
-            local n=0 local bp=player:FindFirstChild("Backpack")
-            if bp then for _,it in pairs(bp:GetChildren()) do
-                if isPet(it) and slot.petTypes[getBaseName(getPetName(it))] then
-                    if passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
-                        n=n+1
+            -- v12.99: scan SEMUA source (bp + char + garden), pakai UUID dedupe
+            local n=0
+            local seen={}
+            local function scan(c)
+                if not c then return end
+                local ok,kids=pcall(function() return c:GetChildren() end)
+                if not ok or not kids then return end
+                for _,it in pairs(kids) do
+                    if isPet(it) and slot.petTypes[getBaseName(getPetName(it))] then
+                        local uid = getPetUUID and getPetUUID(it)
+                        local uidStr = uid and tostring(uid) or it.Name
+                        if not seen[uidStr] then
+                            seen[uidStr]=true
+                            -- v12.99: skip favorit kalo includeFav off
+                            if not slot.includeFav and isFavorite(it) then
+                                -- skip
+                            elseif passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                                n=n+1
+                            end
+                        end
                     end
                 end
-            end end
+            end
+            scan(player:FindFirstChild("Backpack"))
+            scan(player.Character)
+            local pp = workspace:FindFirstChild("PetsPhysical")
+            if pp then
+                local pm = pp:FindFirstChild("PetMover")
+                if pm then scan(pm) end
+                scan(pp)
+            end
             return n
         end
 
@@ -2272,19 +2315,39 @@ local function buildAutoGift()
         local pickCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=pickRow})
         pickCover.MouseButton1Click:Connect(function()
             local types={}
-            local bp=player:FindFirstChild("Backpack")
-            if bp then
-                for _,it in pairs(bp:GetChildren()) do
+            local seenUUIDs={}
+            -- v12.99: scan SEMUA source (backpack + character/equipped + garden)
+            local function scanSource(container)
+                if not container then return end
+                local ok, kids = pcall(function() return container:GetChildren() end)
+                if not ok or not kids then return end
+                for _,it in pairs(kids) do
                     if isPet(it) then
-                        -- v12.79q: respect kg/age filter biar count cocok ama yang ke-gift
-                        if passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
-                            local name=getPetName(it) local base=getBaseName(name)
-                            if not types[base] then types[base]={count=0,mut=0} end
-                            types[base].count=types[base].count+1
-                            if name~=base then types[base].mut=types[base].mut+1 end
+                        local uid = getPetUUID and getPetUUID(it)
+                        local uidStr = uid and tostring(uid) or it.Name
+                        if not seenUUIDs[uidStr] then
+                            seenUUIDs[uidStr] = true
+                            -- v12.99: skip favorit kalo includeFav off
+                            if not slot.includeFav and isFavorite(it) then
+                                -- skip
+                            elseif passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                                local name=getPetName(it) local base=getBaseName(name)
+                                if not types[base] then types[base]={count=0,mut=0} end
+                                types[base].count=types[base].count+1
+                                if name~=base then types[base].mut=types[base].mut+1 end
+                            end
                         end
                     end
                 end
+            end
+            scanSource(player:FindFirstChild("Backpack"))
+            scanSource(player.Character)
+            -- Garden / PetsPhysical
+            local petsPhys = workspace:FindFirstChild("PetsPhysical")
+            if petsPhys then
+                local petMover = petsPhys:FindFirstChild("PetMover")
+                if petMover then scanSource(petMover) end
+                scanSource(petsPhys)
             end
             local sorted={} for b,_ in pairs(types) do table.insert(sorted,b) end
             table.sort(sorted,function(a,b) return types[a].count>types[b].count end)
@@ -2500,34 +2563,54 @@ local connections = {}  -- track event connections biar bisa disconnect pas clos
 autoSendTask = task.spawn(function()
     local function getPetsForSlot(slot)
         local list={}
-        local bp=player:FindFirstChild("Backpack")
-        if bp then
-            for _,item in pairs(bp:GetChildren()) do
+        local seen={}
+        local function scanSrc(container)
+            if not container then return end
+            local ok,kids = pcall(function() return container:GetChildren() end)
+            if not ok or not kids then return end
+            for _,item in pairs(kids) do
                 if isPet(item) then
-                    local fullName = getPetName(item)
-                    local base = getBaseName(fullName)
-                    if slot.petTypes[base] then
-                        local mf = slot.mutationFilter or ""
-                        local mfPass
-                        if mf == "" then mfPass = true
-                        elseif mf == "__nomut__" then mfPass = (base == fullName)
+                    local uuid=getPetUUID(item)
+                    local uidStr=uuid and tostring(uuid) or item.Name
+                    if uuid and not seen[uidStr] then
+                        seen[uidStr]=true
+                        -- v12.99: skip favorit kalo includeFav off (default)
+                        if not slot.includeFav and isFavorite(item) then
+                            -- skip
                         else
-                            -- v12.79: try both formats - "Christmas Rally" matches "ChristmasRally..." too
-                            mfPass = fullName:find(mf, 1, true) ~= nil
-                            if not mfPass then
-                                local mfAlt = mf:gsub("%s+","")  -- no spaces
-                                if mfAlt ~= mf then
-                                    mfPass = fullName:find(mfAlt, 1, true) ~= nil
+                        local fullName = getPetName(item)
+                        local base = getBaseName(fullName)
+                        if slot.petTypes[base] then
+                            local mf = slot.mutationFilter or ""
+                            local mfPass
+                            if mf == "" then mfPass = true
+                            elseif mf == "__nomut__" then mfPass = (base == fullName)
+                            else
+                                mfPass = fullName:find(mf, 1, true) ~= nil
+                                if not mfPass then
+                                    local mfAlt = mf:gsub("%s+","")
+                                    if mfAlt ~= mf then
+                                        mfPass = fullName:find(mfAlt, 1, true) ~= nil
+                                    end
                                 end
                             end
+                            if mfPass and passKgFilter(item,slot.kg) and passAgeFilter(item,slot.age) then
+                                table.insert(list,{uuid=tostring(uuid),fav=isFavorite(item)})
+                            end
                         end
-                        if mfPass and passKgFilter(item,slot.kg) and passAgeFilter(item,slot.age) then
-                            local uuid=getPetUUID(item)
-                            if uuid then table.insert(list,{uuid=tostring(uuid),fav=isFavorite(item)}) end
                         end
                     end
                 end
             end
+        end
+        -- v12.99: scan SEMUA source - BP + Character + Garden
+        scanSrc(player:FindFirstChild("Backpack"))
+        scanSrc(player.Character)
+        local pp = workspace:FindFirstChild("PetsPhysical")
+        if pp then
+            local pm = pp:FindFirstChild("PetMover")
+            if pm then scanSrc(pm) end
+            scanSrc(pp)
         end
         return list
     end
@@ -2535,17 +2618,33 @@ autoSendTask = task.spawn(function()
     -- v12.79j: cek apakah pet masih match slot config (buat live re-check mid-batch)
     local function petStillMatches(uuid, slot)
         if slot.target == "" then return false end
-        local bp = player:FindFirstChild("Backpack")
-        if not bp then return false end
-        for _,item in pairs(bp:GetChildren()) do
-            if isPet(item) then
-                local u = getPetUUID(item)
-                if u and tostring(u) == tostring(uuid) then
-                    local fullName = getPetName(item)
-                    local base = getBaseName(fullName)
-                    return slot.petTypes[base] == true
+        local function scanSrc(container)
+            if not container then return nil end
+            local ok,kids = pcall(function() return container:GetChildren() end)
+            if not ok or not kids then return nil end
+            for _,item in pairs(kids) do
+                if isPet(item) then
+                    local u = getPetUUID(item)
+                    if u and tostring(u) == tostring(uuid) then
+                        local fullName = getPetName(item)
+                        local base = getBaseName(fullName)
+                        return slot.petTypes[base] == true
+                    end
                 end
             end
+            return nil
+        end
+        -- v12.99: scan SEMUA source
+        local r = scanSrc(player:FindFirstChild("Backpack"))
+        if r ~= nil then return r end
+        r = scanSrc(player.Character)
+        if r ~= nil then return r end
+        local pp = workspace:FindFirstChild("PetsPhysical")
+        if pp then
+            local pm = pp:FindFirstChild("PetMover")
+            if pm then r = scanSrc(pm); if r ~= nil then return r end end
+            r = scanSrc(pp)
+            if r ~= nil then return r end
         end
         return false -- pet udah gak di backpack
     end
