@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.00"
+local SCRIPT_VERSION="v13.01"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (revert implicit MAX assumption)")
 
@@ -763,10 +763,17 @@ local function buildMaxKGCache()
     local bp=player:FindFirstChild("Backpack") if not bp then return end
     for _,item in pairs(bp:GetChildren()) do
         if isPet(item) then
-            local name=getPetName(item)
             local age=getAge(item) local kg=getKG(item)
             if age and kg and age>0 then
                 local maxKG=kg*110/(age+10)
+                -- v13.01: prioritas key dari Attr[f] (server canonical type, clean tanpa mutation)
+                local fType = nil
+                pcall(function() fType = item:GetAttribute("f") end)
+                if fType and type(fType) == "string" and not maxKGCache[fType] then
+                    maxKGCache[fType] = maxKG
+                end
+                -- Fallback: simpan juga by name + base
+                local name=getPetName(item)
                 if not maxKGCache[name] then maxKGCache[name]=maxKG end
                 local base=getBaseName(name)
                 if not maxKGCache[base] then maxKGCache[base]=maxKG end
@@ -904,17 +911,23 @@ function getAgeFromKG(item)
     if not toolAge then
         local kg=getKG(item)
         if kg then
-            local maxKG=getMaxKGForPet(getPetName(item))
+            -- v13.01: prioritas lookup by Attr[f] (server canonical type, clean tanpa mutation)
+            local fType = nil
+            pcall(function() fType = item:GetAttribute("f") end)
+            local maxKG = nil
+            if fType and maxKGCache[fType] then
+                maxKG = maxKGCache[fType]
+            else
+                maxKG = getMaxKGForPet(getPetName(item))
+            end
             if maxKG and maxKG > 0 then
                 local raw = math.floor(kg*110/maxKG - 10)
-                -- v12.94: kalo formula overflow ke 100+ artinya maxKG kemungkinan stale (post-Elephant base naik)
-                -- → set nil biar gak salah claim age 100
                 if raw >= 1 and raw <= 100 then
                     kgAge = raw
+                elseif raw > 100 then
+                    kgAge = 100  -- cap (mutasi bisa overshoot karena multiplier)
                 end
             end
-            -- v12.94: hapus fallback "kg>=20 -> age 100" karena salah utk pet base KG tinggi
-            -- (pet hasil Elephant grinding bisa punya base 5.5kg, jadi total 20+kg di age rendah)
         end
     end
 
