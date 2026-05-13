@@ -4617,7 +4617,6 @@ local function doStart()
                     if item then age=getAgeFromKG(item) end
                 end
                 if not age then
-                if not age then
                     -- v13.00: strict - real age detection only, gak ada kg estimate
                     local placed=findPlacedPetByUUID(uuid)
                     if placed then age=getPlacedPetAge(placed) end
