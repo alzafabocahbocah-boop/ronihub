@@ -1411,6 +1411,11 @@ task.spawn(function()
                             if uuidStr then seenUUIDs[uuidStr] = true end
                             total = total + 1
                             local age = getAgeFromKG(item)
+                            -- v13.00: fallback - age nil tapi kg >= 20 = age 100 (done)
+                            if not age then
+                                local kg = getKG(item)
+                                if kg and kg >= 20 then age = 100 end
+                            end
                             if age and age >= toAge then
                                 done = done + 1
                             else
@@ -1448,6 +1453,13 @@ task.spawn(function()
                                     local txt = ""
                                     pcall(function() txt = ageLbl.Text end)
                                     local age = tonumber((txt or ""):match("(%d+)"))
+                                    -- v13.00: MAX/maxed fallback
+                                    if not age and (txt:lower():find("max") or txt:lower():find("level")) then age = 100 end
+                                    -- LEVEL_MAXED_TEXT child = age 100
+                                    if not age then
+                                        local maxLbl = d:FindFirstChild("LEVEL_MAXED_TEXT", true)
+                                        if maxLbl and maxLbl.Visible then age = 100 end
+                                    end
                                     if age and age >= toAge then
                                         done = done + 1
                                     else
