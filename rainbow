@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v12.99"
-print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (revert implicit MAX assumption)")
+local SCRIPT_VERSION="v13.43"
+print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -110,7 +110,7 @@ end
 local loaded=loadData()
 if not getgenv().ZenxData then
     getgenv().ZenxData=loaded or {
-        config={equipInterval=5,rejoinMinutes=30},
+        config={equipInterval=5,rejoinMinutes=30,petType="",targetKG=60,petCount=3,equipTargetLvl=100,elephantThresholdKG=6.05,pickupDelay=0.10,placeDelay=0.12,elephantPetCount=1},
         targetPetTypes={},
         fromAge=1,toAge=100,maxPetTarget=1,
         autoStartEnabled=false,autoRejoin=false,
@@ -145,7 +145,8 @@ local C={
     White=Color3.fromRGB(225,225,225),Gray=Color3.fromRGB(120,120,120),Dim=Color3.fromRGB(55,55,55),
     Green=Color3.fromRGB(70,190,90),Red=Color3.fromRGB(200,60,60),RDim=Color3.fromRGB(35,10,10),
     Gold=Color3.fromRGB(220,160,0),Blue=Color3.fromRGB(80,150,255),
-    Teal=Color3.fromRGB(40,200,160),TDim=Color3.fromRGB(8,30,24),
+    -- v12.96: TDim lebih gelap biar font kuning ke-baca jelas pas tab aktif
+    Teal=Color3.fromRGB(255,215,80),TDim=Color3.fromRGB(20,18,10),
 }
 
 local function mk(cls,props)
@@ -205,7 +206,7 @@ local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Nam
 local function getKG(item) return tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) end
 local function getPetUUID(item) return item:GetAttribute("PET_UUID") end
 
--- v12.96: getBaseKG - cari base weight dari attribute dulu, fallback ke formula
+-- v13.00: getBaseKG - cari base weight dari attribute dulu, fallback ke formula
 local function getBaseKG(item)
     if not item then return nil end
     for _,attrName in ipairs({"BASE_KG","PET_BASE_KG","BaseKG","BaseWeight","PET_BASE_WEIGHT","BASE_WEIGHT","PET_KG_BASE","StartingWeight","STARTING_KG"}) do
@@ -497,7 +498,7 @@ local function sendGiftToPlayer(targetName, petUUID)
 
     local short = petUUID and tostring(petUUID):sub(1,8) or "any"
 
-    -- v12.92: ensure pet di backpack (kalo placed/equipped, unequip dulu)
+    -- v12.92: ensure pet di backpack (kalo placed, unequip dulu)
     if petUUID then
         local placed = findPlacedPetByUUID(petUUID)
         if placed then
@@ -505,27 +506,6 @@ local function sendGiftToPlayer(targetName, petUUID)
             for i=1,5 do
                 task.wait(0.1)
                 if findPetInBackpack(petUUID) then break end
-            end
-        end
-        -- v12.99: cek juga di Character (pet equipped sebagai tool)
-        if not findPetInBackpack(petUUID) then
-            local char = player.Character
-            if char then
-                for _, t in pairs(char:GetChildren()) do
-                    if isPet(t) then
-                        local u = getPetUUID(t)
-                        if u and tostring(u) == tostring(petUUID) then
-                            -- unequip tool back to backpack
-                            local hum = char:FindFirstChildOfClass("Humanoid")
-                            if hum then pcall(function() hum:UnequipTools() end) end
-                            for i=1,5 do
-                                task.wait(0.1)
-                                if findPetInBackpack(petUUID) then break end
-                            end
-                            break
-                        end
-                    end
-                end
             end
         end
         if not findPetInBackpack(petUUID) then
@@ -678,11 +658,9 @@ local function passAgeFilter(item,filterStr)
     return true
 end
 
--- v12.95: MUTATION_NAMES = base names, auto-generate space + comma format prefixes
--- Format yang dipakai game: "Shocked, Moonlit, Galactic Mimic Octopus" (koma + spasi antar mutasi)
--- Plus tambah mutasi yang sebelumnya missing: Moonlit, Galactic, Eclipsed, Cosmic, Chilled, dll
+-- v13.00: MUTATION_NAMES + auto-build comma+space prefixes (sync dgn leveling v12.95)
+-- Tambah Moonlit/Galactic/Eclipsed/Cosmic/Chilled/Ethereal/Starlit/Ghostly + format koma
 local MUTATION_NAMES={
-    -- Single-word mutations (sorted alphabetical)
     "Alienated","Aromatic","Ascended","Aurora","Blossoming",
     "Chilled","Corrupted","Cosmic","Crocodile","Dreadbound",
     "Eclipsed","Ethereal","Everchanted","Fiery",
@@ -692,7 +670,6 @@ local MUTATION_NAMES={
     "Peppermint","Radiant","Rainbow","Rhino","Rideable",
     "Shiny","Shocked","Silver","Soulflame","Spectral","Starlit",
     "Tethered","Tiny","Tranquil","UFO","Venom","Windy",
-    -- Multi-word (both PascalCase + spaced)
     "ChristmasRally","Christmas Rally",
     "GiantBean","Giant Bean",
     "GiantGolem","Giant Golem",
@@ -702,11 +679,10 @@ local MUTATION_NAMES={
     "MerryNursery","Merry Nursery",
     "SpiritSparkle","Spirit Sparkle",
 }
--- Auto-build prefix list with both " " and ", " separators
 local MUTATION_PREFIXES={}
 for _,m in ipairs(MUTATION_NAMES) do
-    table.insert(MUTATION_PREFIXES, m..", ")  -- comma + space (umumnya antar mutasi)
-    table.insert(MUTATION_PREFIXES, m.." ")   -- space (sebelum base pet name)
+    table.insert(MUTATION_PREFIXES, m..", ")
+    table.insert(MUTATION_PREFIXES, m.." ")
 end
 function getBaseName(name)
     local result=name
@@ -874,14 +850,8 @@ function getAgeFromKG(item)
             local maxKG=getMaxKGForPet(getPetName(item))
             if maxKG and maxKG > 0 then
                 local raw = math.floor(kg*110/maxKG - 10)
-                -- v12.94: kalo formula overflow ke 100+ artinya maxKG kemungkinan stale (post-Elephant base naik)
-                -- → set nil biar gak salah claim age 100
-                if raw >= 1 and raw <= 100 then
-                    kgAge = raw
-                end
+                if raw >= 1 and raw <= 100 then kgAge = raw end
             end
-            -- v12.94: hapus fallback "kg>=20 -> age 100" karena salah utk pet base KG tinggi
-            -- (pet hasil Elephant grinding bisa punya base 5.5kg, jadi total 20+kg di age rendah)
         end
     end
 
@@ -927,7 +897,7 @@ corner(main,10) stroke(main,C.Teal,2)
 local TB=mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=C.Panel,BorderSizePixel=0,Parent=main})
 corner(TB,10)
 mk("Frame",{Size=UDim2.new(1,0,0,1.5),Position=UDim2.new(0,0,1,-1.5),BackgroundColor3=C.Teal,BorderSizePixel=0,Parent=TB})
-local titleLbl=lbl(TB,"ZENX AUTO LEVELING  "..SCRIPT_VERSION,13,C.Teal)
+local titleLbl=lbl(TB,"ZENX ELEPHANT 60KG  "..SCRIPT_VERSION,13,C.Teal)
 titleLbl.Size=UDim2.new(0,205,1,0) titleLbl.Position=UDim2.new(0,8,0,0)
 
 -- v12.79: stat "Total Jadi Kurang" pindah dari bottom ke title bar (samping nama)
@@ -965,16 +935,16 @@ local function makeSidebarBtn(name, idx)
     sectionBtns[idx] = b
     return b
 end
-local upLvlBtn = makeSidebarBtn("UP LVL", 1)
-local invShowBtn = makeSidebarBtn("Inventory Show", 2)
-local miscBtn = makeSidebarBtn("Misc", 3)
-local giftBtn = makeSidebarBtn("Auto Gift", 4)  -- v12.77: pindah dari tab ke sidebar
+local upLvlBtn = makeSidebarBtn("UP KG", 1)
+-- v12.93: Inventory Show dihapus
+local miscBtn = makeSidebarBtn("Misc", 2)
+local giftBtn = makeSidebarBtn("Auto Gift", 3)
 
 local content=mk("Frame",{Size=UDim2.new(1,-(SIDEBAR_W+15),1,-34),Position=UDim2.new(0,SIDEBAR_W+10,0,34),BackgroundTransparency=1,Parent=main})
 local tabBar=mk("Frame",{Size=UDim2.new(1,-10,0,26),Position=UDim2.new(0,5,0,4),BackgroundTransparency=1,Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,2),Parent=tabBar})
 
-local tabNames={"Tim Leveling","Pet ke 100","Swap Skill","Other Setting"}  -- v12.77: Auto Gift dipindah ke sidebar
+local tabNames={"UP KG versi 1","ELEPHANT","Swap Skill","Other Setting"}  -- v13.31: rename UP AGE -> ELEPHANT
 local tabBtns={}
 
 local function makeScroll(yPos,height)
@@ -1006,13 +976,42 @@ local runStroke=stroke(runBtn,C.Dim,1.5)
 local stopBtn=btn(content,"STOP",12,C.Panel,C.Gray)
 stopBtn.Size=UDim2.new(0,90,0,26) stopBtn.Position=UDim2.new(0,160,0,BOT_Y)
 local stopStroke=stroke(stopBtn,C.Dim,1.5)
+-- v13.01: Auto Elephant Cycle toggle - starts/stops the Phase1 ↔ Phase2 state machine
+local aecBtn=btn(content,"AUTO ELE: OFF",11,C.Panel,C.Gray)
+aecBtn.Size=UDim2.new(0,130,0,26) aecBtn.Position=UDim2.new(0,255,0,BOT_Y)
+local aecStroke=stroke(aecBtn,C.Dim,1.5)
+local function refreshAECBtn()
+    if autoElephantCycle then
+        aecBtn.Text="AUTO ELE: ON"
+        aecBtn.BackgroundColor3=C.TDim
+        aecBtn.TextColor3=C.Teal
+        aecStroke.Color=C.Teal
+    else
+        aecBtn.Text="AUTO ELE: OFF"
+        aecBtn.BackgroundColor3=C.Panel
+        aecBtn.TextColor3=C.Gray
+        aecStroke.Color=C.Dim
+    end
+end
+refreshAECBtn()
+aecBtn.MouseButton1Click:Connect(function()
+    autoElephantCycle = not autoElephantCycle
+    if M78 then
+        M78.elephantState = autoElephantCycle and "leveling" or "stopped"
+        M78.elephantBlessingsThisCycle = 0
+        M78.elephantPetsAge40 = {}
+    end
+    refreshAECBtn()
+    pcall(function() save() end)
+    dbg("[ele] Auto Elephant Cycle: "..(autoElephantCycle and "ON (start leveling phase)" or "OFF"))
+end)
 
 
 
 local currentTab = 1
 local function switchTab(idx)
     currentTab = idx
-    for i,b in ipairs(tabBtns) do
+    for i,b in pairs(tabBtns) do
         local s=b:FindFirstChildWhichIsA("UIStroke")
         if i==idx then b.TextColor3=C.Teal b.BackgroundColor3=C.TDim if s then s.Color=C.Teal end areas[i].Visible=true
         else b.TextColor3=C.Gray b.BackgroundColor3=C.Card if s then s.Color=C.Dim end areas[i].Visible=false end
@@ -1078,13 +1077,8 @@ local function _doBuildInvShow()
             local kg = getKG(item)
             local fav = isFavorite(item)
             local baseKG = nil
-            -- v12.96: PRIMARY = baca dari attribute (paling akurat, gak ke-pengaruh mutation multiplier)
-            baseKG = getBaseKG(item)
-            -- FALLBACK: formula (asumsi linear scaling, salah utk mutated pet)
-            if not baseKG and kg and age and age >= 1 then
+            if kg and age and age >= 1 then
                 baseKG = kg * 11 / (age + 10)
-            end
-            if baseKG then
                 if baseKG < minBase then minBase = baseKG end
                 if baseKG > maxBase then maxBase = baseKG end
                 sumBase = sumBase + baseKG
@@ -1143,7 +1137,7 @@ end
 
 invRefreshBtn.MouseButton1Click:Connect(buildInvShow)
 
--- Section switching (UP LVL vs Inventory Show)
+-- Section switching (UP KG vs Misc vs Auto Gift)
 local currentSection = 1
 local function switchSection(idx)
     currentSection = idx
@@ -1158,40 +1152,37 @@ local function switchSection(idx)
     botBar.Visible = false
     runBtn.Visible = false
     stopBtn.Visible = false
-    invShowGroup.Visible = false
+    if aecBtn then aecBtn.Visible = false end
+    if invShowGroup then invShowGroup.Visible = false end
     miscGroup.Visible = false
 
     if idx == 1 then
-        -- UP LVL
+        -- UP KG
         tabBar.Visible = true
         botBar.Visible = true
         runBtn.Visible = true
         stopBtn.Visible = true
+        if aecBtn then aecBtn.Visible = true end
         switchTab(currentTab)
     elseif idx == 2 then
-        -- Inventory Show
-        invShowGroup.Visible = true
-        invHeaderLbl.TextColor3 = C.Teal
-        buildInvShow()
-    elseif idx == 3 then
-        -- Misc
+        -- Misc (was 3)
         miscGroup.Visible = true
-    elseif idx == 4 then
-        -- v12.77: Auto Gift (was tab 5, now sidebar 4)
+    elseif idx == 3 then
+        -- Auto Gift (was 4)
         if areas[5] then areas[5].Visible = true end
     end
 end
 
 upLvlBtn.MouseButton1Click:Connect(function() switchSection(1) end)
-invShowBtn.MouseButton1Click:Connect(function() switchSection(2) end)
-miscBtn.MouseButton1Click:Connect(function() switchSection(3) end)
-giftBtn.MouseButton1Click:Connect(function() switchSection(4) end)  -- v12.77
+miscBtn.MouseButton1Click:Connect(function() switchSection(2) end)
+giftBtn.MouseButton1Click:Connect(function() switchSection(3) end)
 
 for i,name in ipairs(tabNames) do
     local b=btn(tabBar,name,10,C.Card,C.Gray)
     b.Size=UDim2.new(0,88,1,0) b.LayoutOrder=i stroke(b,C.Dim,1.1) tabBtns[i]=b
     local ii=i b.MouseButton1Click:Connect(function() switchTab(ii) end)
 end
+-- v13.31: tab[2] restored sebagai ELEPHANT (sebelumnya hidden UP AGE)
 
 -- v10.9: default sidebar = UP LVL
 switchSection(1)
@@ -1256,9 +1247,28 @@ miniZBtn.MouseButton1Click:Connect(function() setMinimized(false) end)
 
 
 local teamPetUUIDs=d.teamPetUUIDs or {}
+-- v13.01: Tim Elephant - pet yang berfungsi sebagai Elephant (skill blesser)
+local elephantTeamUUIDs = d.elephantTeamUUIDs or {}
+local targetPetUUIDs = d.targetPetUUIDs or {}  -- v13.17: Pet Target = pet yg di-grind level/kg (separate dari Tim Support)
+local targetPetInfoCache = d.targetPetInfoCache or {}
+local autoElephantCycle = d.autoElephantCycle or false  -- Auto Elephant Cycle toggle
 local teamPetInfoCache=d.teamPetInfoCache or {}
 
+-- v12.99: forward declare showPickerModal biar bisa dipake di cfgCard
+local showPickerModal
 local config=d.config or {equipInterval=5,rejoinMinutes=30}
+-- v12.98: ensure new fields exist (backwards compat)
+config.petType = config.petType or ""
+config.targetKG = config.targetKG or 60
+config.petCount = config.petCount or 3
+config.equipTargetLvl = config.equipTargetLvl or 100
+config.elephantThresholdKG = config.elephantThresholdKG or 6.05  -- v13.01
+config.pickupDelay = config.pickupDelay or 0.10  -- v13.05
+config.placeDelay = config.placeDelay or 0.12  -- v13.05
+config.elephantPetCount = config.elephantPetCount or 1  -- v13.06: target jumlah Tim Elephant
+-- v13.12: sync toAge dgn equipTargetLvl (existing leveling pakai toAge utk stop)
+toAge = math.max(1, math.min(100, config.equipTargetLvl or 100))
+d.toAge = toAge
 local targetPetTypes=d.targetPetTypes or {}
 local fromAge=d.fromAge or 1
 local maxPetTarget=d.maxPetTarget or 1
@@ -1281,14 +1291,12 @@ for i=1,3 do
     giftSlots[i].kg=giftSlots[i].kg or ""
     giftSlots[i].age=giftSlots[i].age or ""
     giftSlots[i].mutationFilter=giftSlots[i].mutationFilter or ""
-    -- v12.93: multi-select target. targets = array of names. Migrate from old single target.
+    -- v13.00: multi-select target. targets = array of names. Migrate from old single target.
     giftSlots[i].targets = giftSlots[i].targets or {}
     if #giftSlots[i].targets == 0 and giftSlots[i].target ~= "" then
         table.insert(giftSlots[i].targets, giftSlots[i].target)
     end
 end
--- v12.93: rotation state per slot (not saved, runtime only)
-local giftSlotRotIdx = {1,1,1}
 -- v12.79l: gift target history (riwayat penerima)
 local giftTargetHistory=d.giftTargetHistory or {}
 local antiAfk=(d.antiAfk~=false)
@@ -1320,12 +1328,22 @@ local function save()
     d.antiAfk=antiAfk d.showAllPets=showAllPets d.showAllPetsSwap=showAllPetsSwap
     d.swapPerPet=swapPerPet d.swapPetInfoCache=swapPetInfoCache
     d.teamPetUUIDs=teamPetUUIDs d.teamPetInfoCache=teamPetInfoCache
+    d.elephantTeamUUIDs=elephantTeamUUIDs d.autoElephantCycle=autoElephantCycle  -- v13.01
+    d.targetPetUUIDs=targetPetUUIDs d.targetPetInfoCache=targetPetInfoCache  -- v13.17
     saveToFile(d)
 end
 
 local function teamCount() local n=0 for _ in pairs(teamPetUUIDs) do n=n+1 end return n end
 local function selCount() local n=0 for _ in pairs(targetPetTypes) do n=n+1 end return n end
 local function isTargetPet(name)
+    -- v13.18: cek config.petType (Jenis Pet single-select) DULU
+    if config.petType and config.petType ~= "" then
+        local baseName = getBaseName(name)
+        if name == config.petType or baseName == config.petType then return true end
+        -- substring fallback
+        if name:lower():find(config.petType:lower(), 1, true) then return true end
+        return false
+    end
     if selCount()==0 then return true end
     if targetPetTypes[name] then return true end
     -- v12.19: cek getBaseName (strip mutation prefix)
@@ -1462,19 +1480,94 @@ buildTimList=function()
     end
     buildMaxKGCache()
 
-    local cfgCard=mk("Frame",{Size=UDim2.new(1,0,0,52),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[1]})
+    local cfgCard=mk("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[1]})
     corner(cfgCard,7) stroke(cfgCard,C.Teal,1.2)
     mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=cfgCard})
     mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=cfgCard})
     lbl(cfgCard,"Setting Leveling",11,C.Teal).Size=UDim2.new(1,0,0,13)
-    local eqRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,Parent=cfgCard})
-    corner(eqRow,5) stroke(eqRow,C.Dim,1)
-    lbl(eqRow,"Equip Interval (dtk)",11,C.Gray).Size=UDim2.new(0.6,0,1,0)
-    local eqBox=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(config.equipInterval),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=eqRow})
-    corner(eqBox,5) stroke(eqBox,C.Dim,1)
-    eqBox:GetPropertyChangedSignal("Text"):Connect(function()
-        local v=tonumber(eqBox.Text) if v then config.equipInterval=math.max(1,v) save() end
+
+    local function mkInputRow(labelText, defaultVal, lo, onChange, isNumber)
+        local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=cfgCard})
+        corner(row,5) stroke(row,C.Dim,1)
+        lbl(row,labelText,11,C.Gray).Size=UDim2.new(0.55,0,1,0)
+        local box=mk("TextBox",{
+            Size=UDim2.new(0,90,0,20),Position=UDim2.new(1,-96,0.5,-10),
+            BackgroundColor3=C.Panel,Text=tostring(defaultVal),TextColor3=C.White,
+            Font=Enum.Font.GothamBold,TextSize=12,TextScaled=false,
+            TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row
+        })
+        corner(box,5) stroke(box,C.Dim,1)
+        box:GetPropertyChangedSignal("Text"):Connect(function()
+            if isNumber then
+                local v=tonumber(box.Text) if v then onChange(v) save() end
+            else
+                onChange(box.Text) save()
+            end
+        end)
+        return box
+    end
+
+    -- Jenis Pet - dropdown button yang opens picker modal
+    local jpRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=cfgCard})
+    corner(jpRow,5) stroke(jpRow,C.Dim,1)
+    lbl(jpRow,"Jenis Pet",11,C.Gray).Size=UDim2.new(0.45,0,1,0)
+    local jpBtn=btn(jpRow,(config.petType ~= "" and config.petType) or "Pilih...",11,C.Panel,C.Teal)
+    jpBtn.Size=UDim2.new(0,140,0,20) jpBtn.Position=UDim2.new(1,-146,0.5,-10)
+    jpBtn.TextXAlignment=Enum.TextXAlignment.Center
+    corner(jpBtn,5) stroke(jpBtn,C.Dim,1)
+    jpBtn.MouseButton1Click:Connect(function()
+        -- Scan PetAnimations folder untuk daftar pet types
+        local items = {}
+        local seen = {}
+        pcall(function()
+            local petAnims = RS:FindFirstChild("Assets") and RS.Assets:FindFirstChild("Animations") and RS.Assets.Animations:FindFirstChild("PetAnimations")
+            if petAnims then
+                for _, c in pairs(petAnims:GetChildren()) do
+                    if not seen[c.Name] then
+                        seen[c.Name] = true
+                        table.insert(items, {value=c.Name, label=c.Name, selected=(c.Name == config.petType)})
+                    end
+                end
+            end
+        end)
+        -- Tambah dari bp/placed kalo gak ada di registry
+        pcall(function()
+            local bp = player:FindFirstChild("Backpack")
+            if bp then
+                for _, it in pairs(bp:GetChildren()) do
+                    if isPet and isPet(it) then
+                        local base = getBaseName and getBaseName(getPetName and getPetName(it) or it.Name) or it.Name
+                        if base and base ~= "" and not seen[base] then
+                            seen[base] = true
+                            table.insert(items, {value=base, label=base.." (bp)", selected=(base == config.petType)})
+                        end
+                    end
+                end
+            end
+        end)
+        table.sort(items, function(a,b) return a.label < b.label end)
+        if #items == 0 then
+            table.insert(items, {value="__empty__", label="(no pets discovered)", selected=false})
+        end
+        showPickerModal({
+            title = "Pilih Jenis Pet",
+            items = items, multi = false,
+            onSelect = function(value)
+                if value == "__empty__" then return end
+                config.petType = value
+                save()
+                jpBtn.Text = value
+            end,
+        })
     end)
+    local kgBox = mkInputRow("Sampai KG", config.targetKG, 2, function(v) config.targetKG = math.max(1, v) end, true)
+    local pcBox = mkInputRow("Jumlah Pet Target di Leveling", config.petCount, 3, function(v) config.petCount = math.max(1, v) end, true)
+    local lvBox = mkInputRow("Sampai Age", config.equipTargetLvl, 4, function(v)
+        config.equipTargetLvl = math.max(1, v)
+        toAge = math.max(1, math.min(100, v))
+        d.toAge = toAge
+    end, true)
+    -- v13.10: Threshold KG dihapus (redundant dgn Sampai KG)
 
     local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[1]})
     corner(saRow,6) stroke(saRow,C.Dim,1.1)
@@ -1523,7 +1616,7 @@ buildTimList=function()
 
     updatePreview=function()
         for _,c in pairs(areas[1]:GetChildren()) do
-            if (c:IsA("Frame") or c:IsA("TextLabel")) and c.LayoutOrder>=4 then c:Destroy() end
+            if (c:IsA("Frame") or c:IsA("TextLabel")) and c.LayoutOrder>=4 and c.Name~="ZenxElephantPickerRow" then c:Destroy() end
         end
         div(areas[1],4)
         local timHdr=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=5,Parent=areas[1]})
@@ -1593,6 +1686,7 @@ buildTimList=function()
                             local togStroke=stroke(togBtn,inTeam and C.Teal or C.Dim,1.1)
                             local cu=uuidStr
                             togBtn.MouseButton1Click:Connect(function()
+                                -- v13.04: hapus limit petCount - selection bebas
                                 if teamPetUUIDs[cu] then teamPetUUIDs[cu]=nil else teamPetUUIDs[cu]=true end
                                 local nowIn=teamPetUUIDs[cu]==true
                                 row.BackgroundColor3=nowIn and C.TDim or C.Card
@@ -1640,6 +1734,60 @@ buildTimList=function()
                 end
             end
         end
+        -- v13.09: scan placed pets di garden yg BELUM masuk teamPetUUIDs/shown, biar bisa di-select
+        pcall(function()
+            local petsPhys = workspace:FindFirstChild("PetsPhysical")
+            if not petsPhys then return end
+            local seenPlaced = {}
+            for _, m in ipairs(petsPhys:GetDescendants()) do
+                if m:IsA("Model") or m:IsA("BasePart") then
+                    local uuid = nil
+                    pcall(function() uuid = m:GetAttribute("PET_UUID") or m:GetAttribute("UUID") end)
+                    if not uuid then
+                        local mn = m.Name
+                        if mn:sub(1,1) == "{" and mn:sub(-1) == "}" then uuid = mn:sub(2,-2) end
+                    end
+                    if uuid then
+                        local uuidStr = tostring(uuid):gsub("^{",""):gsub("}$","")
+                        if not seenPlaced[uuidStr] and not shown[uuidStr] then
+                            seenPlaced[uuidStr] = true
+                            local placedName = (M78 and M78.getPlacedPetName and M78.getPlacedPetName(uuidStr)) or "PlacedPet"
+                            local show = filter=="" or placedName:lower():find(filter:lower(),1,true)
+                            if show then
+                                n = n + 1
+                                local inTeam = teamPetUUIDs[uuidStr] == true
+                                local row = mk("Frame",{Size=UDim2.new(1,0,0,34),BackgroundColor3=inTeam and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=petPickScroll})
+                                corner(row,5) if inTeam then stroke(row,C.Teal,1.1) end
+                                local nl = lbl(row, placedName.." (garden)", 12, inTeam and C.Teal or C.White)
+                                nl.Size = UDim2.new(0.72,0,1,0) nl.Position = UDim2.new(0,8,0,0)
+                                local tb = btn(row, inTeam and "ON" or "OFF", 12, inTeam and C.TDim or C.Panel, inTeam and C.Teal or C.Gray)
+                                tb.Size = UDim2.new(0,52,0,24) tb.Position = UDim2.new(1,-56,0.5,-12)
+                                local tbStroke = stroke(tb, inTeam and C.Teal or C.Dim, 1.1)
+                                local cu = uuidStr
+                                teamPetInfoCache[uuidStr] = {name=placedName, info=placedName.." (garden)"}
+                                tb.MouseButton1Click:Connect(function()
+                                    if teamPetUUIDs[cu] then teamPetUUIDs[cu]=nil else teamPetUUIDs[cu]=true end
+                                    local nowIn=teamPetUUIDs[cu]==true
+                                    row.BackgroundColor3=nowIn and C.TDim or C.Card
+                                    local rs=row:FindFirstChildWhichIsA("UIStroke")
+                                    if nowIn then if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.1) end
+                                    else if rs then rs:Destroy() end end
+                                    nl.TextColor3=nowIn and C.Teal or C.White
+                                    tb.Text=nowIn and "ON" or "OFF"
+                                    tb.BackgroundColor3=nowIn and C.TDim or C.Panel
+                                    tb.TextColor3=nowIn and C.Teal or C.Gray
+                                    tbStroke.Color=nowIn and C.Teal or C.Dim
+                                    pickLbl.Text="Pilih Pet Tim  ("..teamCount().." dipilih)"
+                                    updatePreview()
+                                    syncSwapTab()
+                                    save()
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+        end)
         if n==0 then
             local msg=favCount==0 and "Belum ada pet di-love. Tekan icon love di pet game dulu." or "Tidak ada pet love yg cocok"
             local e=lbl(petPickScroll,msg,10,C.Red,Enum.TextXAlignment.Center)
@@ -1657,179 +1805,222 @@ buildTimList=function()
         pickArrow.Text=pickerOpen and "^" or "v"
         pickStroke.Color=pickerOpen and C.Teal or C.Dim
     end)
-end
 
--- ============================================
--- TAB 2: PET KE 100
--- ============================================
-local function buildTargetList()
-    for _,c in pairs(areas[2]:GetChildren()) do
-        if c:IsA("Frame") or c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
-    end
-    buildMaxKGCache()
-    local bp=player:FindFirstChild("Backpack")
-    local petNames={} local nameSet={}
-    if bp then
-        for _,item in pairs(bp:GetChildren()) do
-            if isPet(item) then
-                local name=getPetName(item)
-                if not nameSet[name] then nameSet[name]=true table.insert(petNames,name) end
-            end
-        end
-        table.sort(petNames,function(a,b) return a<b end)
-    end
-
-    local typePickerOpen=false
-    local typeRow=mk("Frame",{Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=areas[2]})
-    corner(typeRow,6) local typeStroke=stroke(typeRow,C.Dim,1.1)
-    local typeLbl=lbl(typeRow,"Jenis Pet  ("..selCount().." dipilih, 0=semua)",11,C.White)
-    typeLbl.Size=UDim2.new(0.8,0,1,0) typeLbl.Position=UDim2.new(0,10,0,0)
-    local typeArrow=lbl(typeRow,"v",11,C.Teal,Enum.TextXAlignment.Right)
-    typeArrow.Size=UDim2.new(0,20,1,0) typeArrow.Position=UDim2.new(1,-24,0,0)
-    local typeBtnCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=typeRow})
-    local typePicker=mk("Frame",{Size=UDim2.new(1,0,0,0),BackgroundColor3=C.Panel,BorderSizePixel=0,Visible=false,LayoutOrder=1,Parent=areas[2]})
-    corner(typePicker,7) stroke(typePicker,C.Teal,1.3)
-    mk("UIPadding",{PaddingTop=UDim.new(0,4),PaddingLeft=UDim.new(0,4),PaddingRight=UDim.new(0,4),PaddingBottom=UDim.new(0,4),Parent=typePicker})
-    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=typePicker})
-    local typeSearch=mk("TextBox",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Card,Text="",PlaceholderText="Cari jenis pet...",PlaceholderColor3=C.Dim,TextColor3=C.White,Font=Enum.Font.Gotham,TextSize=13,TextScaled=false,ClearTextOnFocus=false,LayoutOrder=0,Parent=typePicker})
-    corner(typeSearch,5) stroke(typeSearch,C.Dim,1) mk("UIPadding",{PaddingLeft=UDim.new(0,6),Parent=typeSearch})
-    local typeScroll=mk("ScrollingFrame",{Size=UDim2.new(1,0,0,120),BackgroundTransparency=1,ScrollBarThickness=3,ScrollBarImageColor3=C.Teal,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,LayoutOrder=1,Parent=typePicker,ElasticBehavior=Enum.ElasticBehavior.Never})
-    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,2),Parent=typeScroll})
-
-    local function buildTypePicker(filter)
-        filter=filter or ""
-        for _,c in pairs(typeScroll:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+    -- v13.01: Tim Elephant picker - pet yang dipakai sebagai Elephant (blesser)
+    -- v13.31: parent ke areas[2] (ELEPHANT tab)
+    local elephantPickerRow = mk("Frame",{Name="ZenxElephantPickerRow",Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[2]})
+    corner(elephantPickerRow,6) local elPickStroke=stroke(elephantPickerRow,C.Dim,1.1)
+    local function elephantCount()
         local n=0
-        n=n+1
-        local allSel=selCount()==0
-        local allRow=mk("Frame",{Size=UDim2.new(1,0,0,24),BackgroundColor3=allSel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=typeScroll})
-        corner(allRow,5) if allSel then stroke(allRow,C.Teal,1.1) end
-        lbl(allRow,"(Semua Pet)",8,allSel and C.Teal or C.White).Size=UDim2.new(0.72,0,1,0)
-        local allBtn=btn(allRow,allSel and "ON" or "OFF",8,allSel and C.TDim or C.Panel,allSel and C.Teal or C.Gray)
-        allBtn.Size=UDim2.new(0,44,0,18) allBtn.Position=UDim2.new(1,-48,0.5,-9) stroke(allBtn,allSel and C.Teal or C.Dim,1.1)
-        allBtn.MouseButton1Click:Connect(function()
-            targetPetTypes={} save() typeLbl.Text="Jenis Pet  (0 dipilih, 0=semua)"
-            buildTypePicker(typeSearch.Text) buildTargetList()
-        end)
-        for _,pname in ipairs(petNames) do
-            local show=filter=="" or pname:lower():find(filter:lower(),1,true)
-            if show then
-                n=n+1
-                local isSel=targetPetTypes[pname]==true
-                local row=mk("Frame",{Size=UDim2.new(1,0,0,24),BackgroundColor3=isSel and C.TDim or C.Card,BorderSizePixel=0,LayoutOrder=n,Parent=typeScroll})
-                corner(row,5) if isSel then stroke(row,C.Teal,1.1) end
-                local nameLbl=lbl(row,pname,8,isSel and C.Teal or C.White)
-                nameLbl.Size=UDim2.new(0.72,0,1,0) nameLbl.Position=UDim2.new(0,8,0,0)
-                local togBtn=btn(row,isSel and "ON" or "OFF",8,isSel and C.TDim or C.Panel,isSel and C.Teal or C.Gray)
-                togBtn.Size=UDim2.new(0,44,0,18) togBtn.Position=UDim2.new(1,-48,0.5,-9)
-                local togStroke=stroke(togBtn,isSel and C.Teal or C.Dim,1.1)
-                local cp=pname
-                togBtn.MouseButton1Click:Connect(function()
-                    if targetPetTypes[cp] then targetPetTypes[cp]=nil else targetPetTypes[cp]=true end
-                    local nowSel=targetPetTypes[cp]==true
-                    row.BackgroundColor3=nowSel and C.TDim or C.Card
-                    local rs=row:FindFirstChildWhichIsA("UIStroke")
-                    if nowSel then if rs then rs.Color=C.Teal else stroke(row,C.Teal,1.1) end
-                    else if rs then rs:Destroy() end end
-                    nameLbl.TextColor3=nowSel and C.Teal or C.White
-                    togBtn.Text=nowSel and "ON" or "OFF"
-                    togBtn.BackgroundColor3=nowSel and C.TDim or C.Panel
-                    togBtn.TextColor3=nowSel and C.Teal or C.Gray
-                    togStroke.Color=nowSel and C.Teal or C.Dim
-                    typeLbl.Text="Jenis Pet  ("..selCount().." dipilih, 0=semua)"
-                    save() buildTargetList()
-                end)
-            end
-        end
+        for _ in pairs(elephantTeamUUIDs) do n=n+1 end
+        return n
     end
-    buildTypePicker("")
-    typeSearch:GetPropertyChangedSignal("Text"):Connect(function() buildTypePicker(typeSearch.Text) end)
-    typeBtnCover.MouseButton1Click:Connect(function()
-        typePickerOpen=not typePickerOpen
-        typePicker.Visible=typePickerOpen
-        typePicker.Size=typePickerOpen and UDim2.new(1,0,0,160) or UDim2.new(1,0,0,0)
-        typeArrow.Text=typePickerOpen and "^" or "v"
-        typeStroke.Color=typePickerOpen and C.Teal or C.Dim
-    end)
+    local elephantLbl = lbl(elephantPickerRow, "Pilih Tim Elephant  ("..elephantCount().." dipilih)", 11, C.White)
+    elephantLbl.Size = UDim2.new(0.8,0,1,0) elephantLbl.Position = UDim2.new(0,10,0,0)
+    local elephantArrow = lbl(elephantPickerRow, "v", 11, C.Teal, Enum.TextXAlignment.Right)
+    elephantArrow.Size = UDim2.new(0,20,1,0) elephantArrow.Position = UDim2.new(1,-24,0,0)
+    local elephantBtnCover = mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=elephantPickerRow})
 
-    div(areas[2],2)
-    local function numRow(labelTxt,lo,default,onChange)
-        local r=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=areas[2]})
-        corner(r,6) stroke(r,C.Dim,1.1)
-        lbl(r,labelTxt,11,C.Gray).Size=UDim2.new(0.6,0,1,0)
-        local box=mk("TextBox",{Size=UDim2.new(0,50,0,20),Position=UDim2.new(1,-56,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(default),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=14,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=r})
-        corner(box,5) stroke(box,C.Dim,1)
-        box:GetPropertyChangedSignal("Text"):Connect(function() local v=tonumber(box.Text) if v then onChange(v) save() end end)
-    end
-    numRow("Dari Age:",3,fromAge,function(v) fromAge=math.max(1,math.min(99,v)) d.fromAge=fromAge end)
-    numRow("Sampai Age:",4,toAge,function(v) toAge=math.max(1,math.min(100,v)) d.toAge=toAge end)
-
-    local pcRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=areas[2]})
-    corner(pcRow,6) stroke(pcRow,C.Dim,1.1)
-    lbl(pcRow,"Jumlah Pet (sekaligus):",11,C.Gray).Size=UDim2.new(0.55,0,1,0)
-    local pcMin=btn(pcRow,"-",14,C.Panel,C.Gray) pcMin.Size=UDim2.new(0,22,0,20) pcMin.Position=UDim2.new(1,-72,0.5,-10) stroke(pcMin,C.Dim,1.1)
-    local pcNum=lbl(pcRow,tostring(maxPetTarget),12,C.White,Enum.TextXAlignment.Center) pcNum.Size=UDim2.new(0,26,1,0) pcNum.Position=UDim2.new(1,-48,0,0) pcNum.Font=Enum.Font.GothamBold
-    local pcPlus=btn(pcRow,"+",14,C.Panel,C.Gray) pcPlus.Size=UDim2.new(0,22,0,20) pcPlus.Position=UDim2.new(1,-22,0.5,-10) stroke(pcPlus,C.Dim,1.1)
-    pcMin.MouseButton1Click:Connect(function() if maxPetTarget>1 then maxPetTarget=maxPetTarget-1 d.maxPetTarget=maxPetTarget pcNum.Text=tostring(maxPetTarget) save() end end)
-    pcPlus.MouseButton1Click:Connect(function() if maxPetTarget<10 then maxPetTarget=maxPetTarget+1 d.maxPetTarget=maxPetTarget pcNum.Text=tostring(maxPetTarget) save() end end)
-
-    div(areas[2],6)
-    local qHdr=mk("Frame",{Size=UDim2.new(1,0,0,22),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=7,Parent=areas[2]})
-    corner(qHdr,5) lbl(qHdr,"Pet target belum jadi (jenis):",11,C.Teal).Size=UDim2.new(1,-10,1,0)
-
-    local agg={}
-    local total=0
-    if bp then
-        for _,item in pairs(bp:GetChildren()) do
-            if isPet(item) then
-                local uuid=getPetUUID(item)
-                local uuidStr=uuid and tostring(uuid) or ""
-                if uuid and not teamPetUUIDs[uuidStr] then
-                    local name=getPetName(item)
-                    local age=getAgeFromKG(item)
-                    if isTargetPet(name) then
-                        if age==nil or (age>=fromAge and age<toAge) then
-                            local base=getBaseName(name)
-                            if not agg[base] then agg[base]={count=0,mutCount=0} end
-                            agg[base].count=agg[base].count+1
-                            if name~=base then agg[base].mutCount=agg[base].mutCount+1 end
-                            total=total+1
+    elephantBtnCover.MouseButton1Click:Connect(function()
+        -- Build pet list dari backpack (pet apapun bisa jadi Elephant)
+        local items = {}
+        pcall(function()
+            local bp = player:FindFirstChild("Backpack")
+            if bp then
+                for _, it in pairs(bp:GetChildren()) do
+                    if isPet(it) then
+                        local u = getPetUUID(it)
+                        if u then
+                            local uuidStr = tostring(u)
+                            local name = getPetName(it)
+                            local kg = getKG(it) or 0
+                            local age = getAgeFromKG(it)
+                            local lbl_txt = name.."  ["..string.format("%.2fkg",kg)..(age and " age "..age or "").."]"
+                            table.insert(items,{value=uuidStr, label=lbl_txt, selected=(elephantTeamUUIDs[uuidStr]==true)})
                         end
                     end
                 end
             end
-        end
-    end
-    local sortedBases={}
-    for b,_ in pairs(agg) do table.insert(sortedBases,b) end
-    table.sort(sortedBases,function(a,b) return agg[a].count>agg[b].count end)
-
-    if total==0 then
-        local e=lbl(areas[2],"Tidak ada pet yang cocok",10,C.Red,Enum.TextXAlignment.Center)
-        e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=8
-    else
-        local idx=0
-        for _,base in ipairs(sortedBases) do
-            idx=idx+1
-            local data=agg[base]
-            local row=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=7+idx,Parent=areas[2]})
-            corner(row,5) stroke(row,C.Dim,1)
-            local nl=lbl(row,base,11,C.White) nl.Size=UDim2.new(0.65,0,1,0) nl.Position=UDim2.new(0,10,0,0)
-            local cnt=lbl(row,data.count.." pet",11,C.Teal,Enum.TextXAlignment.Right)
-            cnt.Size=UDim2.new(0,80,1,0) cnt.Position=UDim2.new(1,-90,0,0)
-            cnt.Font=Enum.Font.GothamBold
-            if data.mutCount>0 then
-                local mut=lbl(row,"("..data.mutCount.." mutasi)",9,C.Gold,Enum.TextXAlignment.Left)
-                mut.Size=UDim2.new(0.35,0,0,11) mut.Position=UDim2.new(0,10,0,16)
-                nl.Size=UDim2.new(0.65,0,0,16) nl.Position=UDim2.new(0,10,0,2)
+        end)
+        -- Plus placed pets juga
+        pcall(function()
+            for _, part in ipairs(workspace:GetDescendants()) do
+                if part:IsA("Part") and part.Name == "PetMover" then
+                    local u = part:GetAttribute("UUID")
+                    if u then
+                        local uuidStr = tostring(u)
+                        if not items[uuidStr] then
+                            local placedName = M78 and M78.getPlacedPetName and M78.getPlacedPetName(uuidStr) or "PlacedPet"
+                            table.insert(items,{value=uuidStr, label=placedName.." (placed)", selected=(elephantTeamUUIDs[uuidStr]==true)})
+                        end
+                    end
+                end
             end
+        end)
+        if #items == 0 then
+            table.insert(items,{value="__empty__", label="(belum ada pet di bp/placed)", selected=false})
         end
-        local tot=lbl(areas[2],"Total: "..total.." pet ("..(#sortedBases).." jenis)",11,C.Teal,Enum.TextXAlignment.Center)
-        tot.Size=UDim2.new(1,0,0,16) tot.LayoutOrder=7+#sortedBases+1
+        showPickerModal({
+            title = "Pilih Tim Elephant - multi-select",
+            items = items, multi = true,
+            onSelect = function(value, selected)
+                if not value or value == "" or value == "__empty__" then return end
+                if selected then elephantTeamUUIDs[value] = true
+                else elephantTeamUUIDs[value] = nil end
+                elephantLbl.Text = "Pilih Tim Elephant  ("..elephantCount().." dipilih)"
+                elPickStroke.Color = elephantCount() > 0 and C.Teal or C.Dim
+                save()
+            end,
+        })
+    end)
+
+    -- v13.17: Pilih Pet Target picker - pet yang DI-GRIND (kg/age)
+    local targetPickerRow = mk("Frame",{Name="ZenxTargetPickerRow",Size=UDim2.new(1,0,0,30),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=5,Parent=areas[1]})
+    corner(targetPickerRow,6) local tgtPickStroke=stroke(targetPickerRow,C.Dim,1.1)
+    local function targetCount()
+        local n=0
+        for _ in pairs(targetPetUUIDs) do n=n+1 end
+        return n
     end
-    div(areas[2],200)
-    local rf=btn(areas[2],"Refresh",12,C.Panel,C.White) rf.Size=UDim2.new(1,0,0,22) rf.LayoutOrder=201 stroke(rf,C.Dim,1.2)
-    rf.MouseButton1Click:Connect(function() buildMaxKGCache() buildTargetList() end)
+    local targetLbl = lbl(targetPickerRow, "Pilih Pet Target  ("..targetCount().." dipilih)", 11, C.Gold)
+    targetLbl.Size = UDim2.new(0.8,0,1,0) targetLbl.Position = UDim2.new(0,10,0,0)
+    local targetArrow = lbl(targetPickerRow, "v", 11, C.Gold, Enum.TextXAlignment.Right)
+    targetArrow.Size = UDim2.new(0,20,1,0) targetArrow.Position = UDim2.new(1,-24,0,0)
+    local targetBtnCover = mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=targetPickerRow})
+    targetBtnCover.MouseButton1Click:Connect(function()
+        local items = {}
+        pcall(function()
+            local bp = player:FindFirstChild("Backpack")
+            if bp then
+                for _, it in pairs(bp:GetChildren()) do
+                    if isPet(it) then
+                        local u = getPetUUID(it)
+                        if u then
+                            local uuidStr = tostring(u)
+                            local name = getPetName(it)
+                            local kg = getKG(it) or 0
+                            local age = getAgeFromKG(it)
+                            local lbl_txt = name.."  ["..string.format("%.2fkg",kg)..(age and " age "..age or "").."]"
+                            table.insert(items,{value=uuidStr, label=lbl_txt, selected=(targetPetUUIDs[uuidStr]==true)})
+                        end
+                    end
+                end
+            end
+        end)
+        pcall(function()
+            for _, part in ipairs(workspace:GetDescendants()) do
+                if part:IsA("Part") and part.Name == "PetMover" then
+                    local u = part:GetAttribute("UUID")
+                    if u then
+                        local uuidStr = tostring(u)
+                        local placedName = M78 and M78.getPlacedPetName and M78.getPlacedPetName(uuidStr) or "PlacedPet"
+                        table.insert(items,{value=uuidStr, label=placedName.." (placed)", selected=(targetPetUUIDs[uuidStr]==true)})
+                    end
+                end
+            end
+        end)
+        if #items == 0 then
+            table.insert(items,{value="__empty__", label="(belum ada pet di bp/placed)", selected=false})
+        end
+        showPickerModal({
+            title = "Pilih Pet Target - multi-select",
+            items = items, multi = true,
+            onSelect = function(value, selected)
+                if not value or value == "" or value == "__empty__" then return end
+                if selected then
+                    targetPetUUIDs[value] = true
+                    pcall(function()
+                        local bp = player:FindFirstChild("Backpack")
+                        if bp then
+                            for _, it in pairs(bp:GetChildren()) do
+                                if tostring(getPetUUID(it)) == value then
+                                    targetPetInfoCache[value] = {name=getPetName(it), info=getPetInfo(it)}
+                                    break
+                                end
+                            end
+                        end
+                    end)
+                else
+                    targetPetUUIDs[value] = nil
+                end
+                targetLbl.Text = "Pilih Pet Target  ("..targetCount().." dipilih)"
+                tgtPickStroke.Color = targetCount() > 0 and C.Gold or C.Dim
+                save()
+            end,
+        })
+    end)
+end
+
+-- ============================================
+-- TAB 2: ELEPHANT
+-- ============================================
+-- v13.31: Tab ELEPHANT - berisi Pilih Tim Elephant + AUTO ELE info
+-- Pilih Tim Elephant picker dibuat di buildTimList (parent=areas[2]) biar handler tetap valid.
+local function buildTargetList()
+    -- Clear areas[2] EXCEPT ZenxElephantPickerRow (already created in buildTimList)
+    for _,ch in pairs(areas[2]:GetChildren()) do
+        if (ch:IsA("Frame") or ch:IsA("TextButton") or ch:IsA("TextLabel")) and ch.Name ~= "ZenxElephantPickerRow" then
+            ch:Destroy()
+        end
+    end
+
+    -- Header
+    local header=mk("Frame",{Size=UDim2.new(1,0,0,40),BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0,Parent=areas[2]})
+    corner(header,7) stroke(header,C.Teal,1.2)
+    mk("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingTop=UDim.new(0,5),Parent=header})
+    lbl(header,"ELEPHANT SKILL",13,C.Teal).Size=UDim2.new(1,0,0,16)
+    local descLbl=lbl(header,"Pet Elephant bless pet age>=40 setiap 7m30s (server-side)",10,C.Gray)
+    descLbl.Size=UDim2.new(1,-10,0,14) descLbl.Position=UDim2.new(0,0,0,16) descLbl.TextWrapped=true
+
+    -- v13.32: Config card di Elephant tab
+    local cfgCard=mk("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0.5,Parent=areas[2]})
+    corner(cfgCard,7) stroke(cfgCard,C.Gold,1.2)
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=cfgCard})
+    mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=cfgCard})
+    lbl(cfgCard,"Setting Elephant",11,C.Gold).Size=UDim2.new(1,0,0,13)
+    local function mkElephantInputRow(parent, labelText, defaultVal, lo, onChange)
+        local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
+        corner(row,5) stroke(row,C.Dim,1)
+        lbl(row,labelText,11,C.Gray).Size=UDim2.new(0.6,0,1,0)
+        local box=mk("TextBox",{Size=UDim2.new(0,90,0,20),Position=UDim2.new(1,-96,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(defaultVal),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=12,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
+        corner(box,5) stroke(box,C.Dim,1)
+        box:GetPropertyChangedSignal("Text"):Connect(function()
+            local v=tonumber(box.Text) if v then onChange(v) save() end
+        end)
+        return box
+    end
+    mkElephantInputRow(cfgCard, "Equip Pet Target Level", config.equipTargetLvl, 1, function(v)
+        config.equipTargetLvl = math.max(1, v)
+        toAge = math.max(1, math.min(100, v))
+        d.toAge = toAge
+    end)
+    mkElephantInputRow(cfgCard, "Jumlah Pet Target di Elephant", config.elephantPetCount, 2, function(v)
+        config.elephantPetCount = math.max(1, v)
+    end)
+
+    -- Status info card
+    local statusCard=mk("Frame",{Size=UDim2.new(1,0,0,72),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=2,Parent=areas[2]})
+    corner(statusCard,6) stroke(statusCard,C.Dim,1.1)
+    mk("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingTop=UDim.new(0,4),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,4),Parent=statusCard})
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=statusCard})
+    lbl(statusCard,"Status AUTO ELE:",11,C.Gold).Size=UDim2.new(1,0,0,14)
+    local stateLbl=lbl(statusCard,"State: stopped",10,C.White) stateLbl.Size=UDim2.new(1,0,0,12)
+    local blessLbl=lbl(statusCard,"Blessings cycle: 0  Done: 0",10,C.White) blessLbl.Size=UDim2.new(1,0,0,12)
+    local lastLbl=lbl(statusCard,"Last notif: -",10,C.Gray) lastLbl.Size=UDim2.new(1,0,0,14) lastLbl.TextWrapped=true
+    -- Live refresh
+    task.spawn(function()
+        while statusCard and statusCard.Parent and not scriptShutdown do
+            pcall(function()
+                stateLbl.Text="State: "..tostring(M78.elephantState or "stopped")
+                local doneCnt=0 for _ in pairs(M78.elephantDonePets or {}) do doneCnt=doneCnt+1 end
+                blessLbl.Text="Blessings cycle: "..(M78.elephantBlessingsThisCycle or 0).."  Done: "..doneCnt
+                local lastNotif=M78.elephantLastNotif or "-"
+                if #lastNotif>80 then lastNotif=lastNotif:sub(1,77).."..." end
+                lastLbl.Text="Last notif: "..lastNotif
+            end)
+            task.wait(2)
+        end
+    end)
 end
 
 -- ============================================
@@ -1847,6 +2038,26 @@ buildSwapList=function()
     lbl(infoCard,"Swap Mechanic: friend-7",12,C.Teal).Size=UDim2.new(1,0,0,14)
     local descLbl=lbl(infoCard,"Toggle ON utk swap. Pet HARUS udah di garden (place manual/via tim).",10,C.Gray)
     descLbl.Size=UDim2.new(1,0,0,22) descLbl.TextWrapped=true
+
+    -- v13.05: Swap Config card - pickup + place delay
+    local cfgCard=mk("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundColor3=C.Panel,BorderSizePixel=0,LayoutOrder=0.5,Parent=areas[3]})
+    corner(cfgCard,7) stroke(cfgCard,C.Teal,1.2)
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=cfgCard})
+    mk("UIPadding",{PaddingTop=UDim.new(0,5),PaddingLeft=UDim.new(0,5),PaddingRight=UDim.new(0,5),PaddingBottom=UDim.new(0,5),Parent=cfgCard})
+    lbl(cfgCard,"Swap Skill Config",11,C.Teal).Size=UDim2.new(1,0,0,13)
+    local function mkSwapInputRow(parent, labelText, defaultVal, lo, onChange)
+        local row=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=lo,Parent=parent})
+        corner(row,5) stroke(row,C.Dim,1)
+        lbl(row,labelText,11,C.Gray).Size=UDim2.new(0.6,0,1,0)
+        local box=mk("TextBox",{Size=UDim2.new(0,90,0,20),Position=UDim2.new(1,-96,0.5,-10),BackgroundColor3=C.Panel,Text=tostring(defaultVal),TextColor3=C.White,Font=Enum.Font.GothamBold,TextSize=12,TextScaled=false,TextXAlignment=Enum.TextXAlignment.Center,ClearTextOnFocus=false,Parent=row})
+        corner(box,5) stroke(box,C.Dim,1)
+        box:GetPropertyChangedSignal("Text"):Connect(function()
+            local v=tonumber(box.Text) if v then onChange(v) save() end
+        end)
+        return box
+    end
+    mkSwapInputRow(cfgCard, "Delay Pickup (s)", config.pickupDelay, 1, function(v) config.pickupDelay = math.max(0.01, math.min(5, v)) end)
+    mkSwapInputRow(cfgCard, "Delay Place (s)", config.placeDelay, 2, function(v) config.placeDelay = math.max(0.01, math.min(5, v)) end)
 
     local saRow=mk("Frame",{Size=UDim2.new(1,0,0,28),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=1,Parent=areas[3]})
     corner(saRow,6) stroke(saRow,C.Dim,1.1)
@@ -2065,7 +2276,7 @@ local sendStatusLbl=nil
 
 -- v12.79: Modal picker helper — floating popup overlay (replaces inline expanding pickers)
 -- usage: showPickerModal({title=, items={{value=,label=,selected=}}, multi=, onSelect=, emptyText=})
-local function showPickerModal(opts)
+showPickerModal = function(opts)
     local backdrop=mk("Frame",{Size=UDim2.new(1,0,1,0),Position=UDim2.new(0,0,0,0),BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=0.45,BorderSizePixel=0,ZIndex=100,Parent=main})
     local function close()
         if backdrop and backdrop.Parent then backdrop:Destroy() end
@@ -2193,7 +2404,7 @@ local function buildAutoGift()
         local slot=giftSlots[slotIdx]
 
         -- v12.79: Target picker → modal popup
-        -- v12.93: multi-select target
+        -- v13.00: multi-select target
         local function trText()
             local n = #slot.targets
             if n == 0 then return "(klik pilih)" end
@@ -2205,7 +2416,6 @@ local function buildAutoGift()
         local trLbl=lbl(trRow,"Target: "..trText(),13,C.White) trLbl.Size=UDim2.new(0.85,0,1,0) trLbl.Position=UDim2.new(0,10,0,0)
         local trIcon=lbl(trRow,">",14,C.Teal,Enum.TextXAlignment.Right) trIcon.Size=UDim2.new(0,20,1,0) trIcon.Position=UDim2.new(1,-24,0,0)
         local trCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=trRow})
-        -- helper: cek apakah name udah di slot.targets
         local function inTargets(name)
             for _,t in ipairs(slot.targets) do if t == name then return true end end
             return false
@@ -2230,7 +2440,6 @@ local function buildAutoGift()
             for _,name in ipairs(plist) do
                 table.insert(items,{value=name,label=name,selected=inTargets(name)})
             end
-            -- v12.93: tambahin yang udah dipilih tapi offline biar tetap kelihatan/bisa di-uncheck
             for _,t in ipairs(slot.targets) do
                 if not inHistorySet[t] and not findPlayerByName(t) then
                     table.insert(items,{value=t,label=t.." (offline)",selected=true})
@@ -2241,20 +2450,15 @@ local function buildAutoGift()
                 items=items, multi=true,
                 emptyText="(belum ada player lain di server)",
                 onSelect=function(value, selected)
-                    -- Multi mode: dipanggil per-item. selected=true berarti ditambahkan, false dihapus
                     if not value or value == "" then return end
                     if selected then
-                        if not inTargets(value) then
-                            table.insert(slot.targets, value)
-                        end
+                        if not inTargets(value) then table.insert(slot.targets, value) end
                     else
                         for i=#slot.targets,1,-1 do
-                            if slot.targets[i] == value then
-                                table.remove(slot.targets, i)
-                            end
+                            if slot.targets[i] == value then table.remove(slot.targets, i) end
                         end
                     end
-                    slot.target = slot.targets[1] or ""  -- backward compat
+                    slot.target = slot.targets[1] or ""
                     trLbl.Text="Target: "..trText()
                     trStroke.Color=(#slot.targets == 0 and C.Dim or C.Teal)
                     save()
@@ -2272,37 +2476,15 @@ local function buildAutoGift()
 
         local function countTypes() local n=0 for _ in pairs(slot.petTypes) do n=n+1 end return n end
         local function countMatching()
-            -- v12.99: scan SEMUA source (bp + char + garden), pakai UUID dedupe
-            local n=0
-            local seen={}
-            local function scan(c)
-                if not c then return end
-                local ok,kids=pcall(function() return c:GetChildren() end)
-                if not ok or not kids then return end
-                for _,it in pairs(kids) do
-                    if isPet(it) and slot.petTypes[getBaseName(getPetName(it))] then
-                        local uid = getPetUUID and getPetUUID(it)
-                        local uidStr = uid and tostring(uid) or it.Name
-                        if not seen[uidStr] then
-                            seen[uidStr]=true
-                            -- v12.99: skip favorit kalo includeFav off
-                            if not slot.includeFav and isFavorite(it) then
-                                -- skip
-                            elseif passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
-                                n=n+1
-                            end
-                        end
+            -- v12.79q: respect kg/age filter biar count match yg keluar di display
+            local n=0 local bp=player:FindFirstChild("Backpack")
+            if bp then for _,it in pairs(bp:GetChildren()) do
+                if isPet(it) and slot.petTypes[getBaseName(getPetName(it))] then
+                    if passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                        n=n+1
                     end
                 end
-            end
-            scan(player:FindFirstChild("Backpack"))
-            scan(player.Character)
-            local pp = workspace:FindFirstChild("PetsPhysical")
-            if pp then
-                local pm = pp:FindFirstChild("PetMover")
-                if pm then scan(pm) end
-                scan(pp)
-            end
+            end end
             return n
         end
 
@@ -2315,39 +2497,19 @@ local function buildAutoGift()
         local pickCover=mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=pickRow})
         pickCover.MouseButton1Click:Connect(function()
             local types={}
-            local seenUUIDs={}
-            -- v12.99: scan SEMUA source (backpack + character/equipped + garden)
-            local function scanSource(container)
-                if not container then return end
-                local ok, kids = pcall(function() return container:GetChildren() end)
-                if not ok or not kids then return end
-                for _,it in pairs(kids) do
+            local bp=player:FindFirstChild("Backpack")
+            if bp then
+                for _,it in pairs(bp:GetChildren()) do
                     if isPet(it) then
-                        local uid = getPetUUID and getPetUUID(it)
-                        local uidStr = uid and tostring(uid) or it.Name
-                        if not seenUUIDs[uidStr] then
-                            seenUUIDs[uidStr] = true
-                            -- v12.99: skip favorit kalo includeFav off
-                            if not slot.includeFav and isFavorite(it) then
-                                -- skip
-                            elseif passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
-                                local name=getPetName(it) local base=getBaseName(name)
-                                if not types[base] then types[base]={count=0,mut=0} end
-                                types[base].count=types[base].count+1
-                                if name~=base then types[base].mut=types[base].mut+1 end
-                            end
+                        -- v12.79q: respect kg/age filter biar count cocok ama yang ke-gift
+                        if passKgFilter(it,slot.kg) and passAgeFilter(it,slot.age) then
+                            local name=getPetName(it) local base=getBaseName(name)
+                            if not types[base] then types[base]={count=0,mut=0} end
+                            types[base].count=types[base].count+1
+                            if name~=base then types[base].mut=types[base].mut+1 end
                         end
                     end
                 end
-            end
-            scanSource(player:FindFirstChild("Backpack"))
-            scanSource(player.Character)
-            -- Garden / PetsPhysical
-            local petsPhys = workspace:FindFirstChild("PetsPhysical")
-            if petsPhys then
-                local petMover = petsPhys:FindFirstChild("PetMover")
-                if petMover then scanSource(petMover) end
-                scanSource(petsPhys)
             end
             local sorted={} for b,_ in pairs(types) do table.insert(sorted,b) end
             table.sort(sorted,function(a,b) return types[a].count>types[b].count end)
@@ -2563,54 +2725,34 @@ local connections = {}  -- track event connections biar bisa disconnect pas clos
 autoSendTask = task.spawn(function()
     local function getPetsForSlot(slot)
         local list={}
-        local seen={}
-        local function scanSrc(container)
-            if not container then return end
-            local ok,kids = pcall(function() return container:GetChildren() end)
-            if not ok or not kids then return end
-            for _,item in pairs(kids) do
+        local bp=player:FindFirstChild("Backpack")
+        if bp then
+            for _,item in pairs(bp:GetChildren()) do
                 if isPet(item) then
-                    local uuid=getPetUUID(item)
-                    local uidStr=uuid and tostring(uuid) or item.Name
-                    if uuid and not seen[uidStr] then
-                        seen[uidStr]=true
-                        -- v12.99: skip favorit kalo includeFav off (default)
-                        if not slot.includeFav and isFavorite(item) then
-                            -- skip
+                    local fullName = getPetName(item)
+                    local base = getBaseName(fullName)
+                    if slot.petTypes[base] then
+                        local mf = slot.mutationFilter or ""
+                        local mfPass
+                        if mf == "" then mfPass = true
+                        elseif mf == "__nomut__" then mfPass = (base == fullName)
                         else
-                        local fullName = getPetName(item)
-                        local base = getBaseName(fullName)
-                        if slot.petTypes[base] then
-                            local mf = slot.mutationFilter or ""
-                            local mfPass
-                            if mf == "" then mfPass = true
-                            elseif mf == "__nomut__" then mfPass = (base == fullName)
-                            else
-                                mfPass = fullName:find(mf, 1, true) ~= nil
-                                if not mfPass then
-                                    local mfAlt = mf:gsub("%s+","")
-                                    if mfAlt ~= mf then
-                                        mfPass = fullName:find(mfAlt, 1, true) ~= nil
-                                    end
+                            -- v12.79: try both formats - "Christmas Rally" matches "ChristmasRally..." too
+                            mfPass = fullName:find(mf, 1, true) ~= nil
+                            if not mfPass then
+                                local mfAlt = mf:gsub("%s+","")  -- no spaces
+                                if mfAlt ~= mf then
+                                    mfPass = fullName:find(mfAlt, 1, true) ~= nil
                                 end
                             end
-                            if mfPass and passKgFilter(item,slot.kg) and passAgeFilter(item,slot.age) then
-                                table.insert(list,{uuid=tostring(uuid),fav=isFavorite(item)})
-                            end
                         end
+                        if mfPass and passKgFilter(item,slot.kg) and passAgeFilter(item,slot.age) then
+                            local uuid=getPetUUID(item)
+                            if uuid then table.insert(list,{uuid=tostring(uuid),fav=isFavorite(item)}) end
                         end
                     end
                 end
             end
-        end
-        -- v12.99: scan SEMUA source - BP + Character + Garden
-        scanSrc(player:FindFirstChild("Backpack"))
-        scanSrc(player.Character)
-        local pp = workspace:FindFirstChild("PetsPhysical")
-        if pp then
-            local pm = pp:FindFirstChild("PetMover")
-            if pm then scanSrc(pm) end
-            scanSrc(pp)
         end
         return list
     end
@@ -2618,33 +2760,17 @@ autoSendTask = task.spawn(function()
     -- v12.79j: cek apakah pet masih match slot config (buat live re-check mid-batch)
     local function petStillMatches(uuid, slot)
         if slot.target == "" then return false end
-        local function scanSrc(container)
-            if not container then return nil end
-            local ok,kids = pcall(function() return container:GetChildren() end)
-            if not ok or not kids then return nil end
-            for _,item in pairs(kids) do
-                if isPet(item) then
-                    local u = getPetUUID(item)
-                    if u and tostring(u) == tostring(uuid) then
-                        local fullName = getPetName(item)
-                        local base = getBaseName(fullName)
-                        return slot.petTypes[base] == true
-                    end
+        local bp = player:FindFirstChild("Backpack")
+        if not bp then return false end
+        for _,item in pairs(bp:GetChildren()) do
+            if isPet(item) then
+                local u = getPetUUID(item)
+                if u and tostring(u) == tostring(uuid) then
+                    local fullName = getPetName(item)
+                    local base = getBaseName(fullName)
+                    return slot.petTypes[base] == true
                 end
             end
-            return nil
-        end
-        -- v12.99: scan SEMUA source
-        local r = scanSrc(player:FindFirstChild("Backpack"))
-        if r ~= nil then return r end
-        r = scanSrc(player.Character)
-        if r ~= nil then return r end
-        local pp = workspace:FindFirstChild("PetsPhysical")
-        if pp then
-            local pm = pp:FindFirstChild("PetMover")
-            if pm then r = scanSrc(pm); if r ~= nil then return r end end
-            r = scanSrc(pp)
-            if r ~= nil then return r end
         end
         return false -- pet udah gak di backpack
     end
@@ -2654,14 +2780,13 @@ autoSendTask = task.spawn(function()
         for slotIdx=1,3 do
             if scriptShutdown then break end
             local slot=giftSlots[slotIdx]
-            -- v12.93: rotate through slot.targets, set slot.target = next online
             local hasTargets = slot and (#slot.targets > 0 or slot.target ~= "")
             if hasTargets and (slot.autoSendGift or slot.autoSendTrade or slot.autoUnfav) then
-                -- Migrate legacy: kalo targets kosong tapi target lama isi
+                -- v13.00: migrate legacy single target -> targets array
                 if #slot.targets == 0 and slot.target ~= "" then
                     table.insert(slot.targets, slot.target)
                 end
-                -- v12.95: RANDOM pick dari online target (bukan rotasi sequential)
+                -- v13.00: pick RANDOM online target dari slot.targets
                 local activeTarget = nil
                 local onlineList = {}
                 for _, name in ipairs(slot.targets) do
@@ -3563,7 +3688,7 @@ task.spawn(function()
                     M78.collectNextStartAt = now + (M78.collectCycleMin * 60)
                     M78.setStatus(string.format("Collect: SELESAI cycle. Next %dm (total:%d)", M78.collectCycleMin, M78.collectTotalFired), C.Green)
                 else
-                    -- v12.93: revert ke pattern lama yang work - ProximityPrompt sweep aja
+                    -- v13.00: revert ke ProximityPrompt-only (CollectController kadang gak work)
                     local fruitsBefore = M78.countBp()
                     if (tick() - M78.promptsCacheT) > 3 then M78.refreshPrompts() end
                     local fired = 0
@@ -3640,6 +3765,199 @@ M78.getPlacedPetName = function(uuid)
     end
     return nil, "not_found"
 end
+
+-- v13.01: Elephant Skill Automation - State Machine + Notification Listener
+-- ====================================================================
+-- States: "leveling" (Phase 1) | "elephant" (Phase 2) | "stopped"
+-- Notifications captured from PlayerGui.Top_Notification.Frame.Notification_UI_Mobile.TextLabel
+
+M78.elephantState = "stopped"  -- current phase
+M78.elephantBlessingsThisCycle = 0  -- count blessings received in current Phase 2
+M78.elephantPetsAge40 = {}  -- track pets that hit age 40 in Phase 1 (UUID set)
+M78.elephantDonePets = {}  -- v13.07: pet yg udah lewat Sampai KG (done set)
+M78.elephantLastNotif = nil  -- last notif text (debug)
+M78.elephantLastFailAt = 0  -- timestamp last FAIL notif
+M78.elephantLastSuccessAt = 0  -- timestamp last SUCCESS notif
+
+-- v13.03: forward-declare doStart/doStop biar state machine bisa akses
+local doStart, doStop
+
+-- v13.07: lookup pet UUID berdasar nama (untuk mapping notif pet name -> UUID di teamPetUUIDs)
+M78.findUUIDByName = function(petName)
+    if not petName or petName == "" then return nil end
+    local nameStripped = petName
+    if getBaseName then nameStripped = getBaseName(petName) end
+    -- v13.17: cari di targetPetUUIDs dulu (pet yg di-grind)
+    for uuid,_ in pairs(targetPetUUIDs) do
+        local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+        if item then
+            local itemName = getPetName(item)
+            local itemBase = getBaseName(itemName)
+            if itemName == petName or itemBase == nameStripped then
+                return uuid
+            end
+        end
+    end
+    return nil
+end
+
+-- v13.03: helper - cek apakah SEMUA pet di teamPetUUIDs udah reach equipTargetLvl
+-- (filter: skip pet yang base KG > targetKG (Sampai KG) ATAU yg udah di-done set)
+M78.allLevelingPetsAtTarget = function()
+    -- v13.17: cek SEMUA targetPetUUIDs (pet yg di-grind), bukan teamPetUUIDs (support)
+    if not targetPetUUIDs or next(targetPetUUIDs) == nil then return false end
+    local anyEligible = false
+    for uuid, _ in pairs(targetPetUUIDs) do
+        if not M78.elephantDonePets[uuid] then
+            local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+            if item then
+                local baseKG = nil
+                if getBaseKG then baseKG = getBaseKG(item) end
+                if not baseKG then
+                    local kg = getKG(item)
+                    local age = getAgeFromKG(item)
+                    if kg and age and age >= 1 then
+                        baseKG = kg * 11 / (age + 10)
+                    end
+                end
+                if baseKG and baseKG > (config.targetKG or 60) then
+                    M78.elephantDonePets[uuid] = true
+                    dbg("[ele] target "..tostring(uuid):sub(1,8).." base "..string.format("%.2f",baseKG).."kg > Sampai KG "..config.targetKG..", marked DONE")
+                else
+                    anyEligible = true
+                    local age = getAgeFromKG(item)
+                    if not age or age < (config.equipTargetLvl or 40) then
+                        return false
+                    end
+                end
+            end
+        end
+    end
+    return anyEligible
+end
+
+-- v13.03: State machine monitor loop
+task.spawn(function()
+    while not scriptShutdown do
+        if autoElephantCycle then
+            if M78.elephantState == "leveling" then
+                -- v13.17: cek kalo semua targetPetUUIDs udah done (semua lewat Sampai KG)
+                local totalTgt = 0 local doneTgt = 0
+                for uuid,_ in pairs(targetPetUUIDs) do
+                    totalTgt = totalTgt + 1
+                    if M78.elephantDonePets[uuid] then doneTgt = doneTgt + 1 end
+                end
+                if totalTgt > 0 and doneTgt >= totalTgt then
+                    dbg("[ele] SEMUA Pet Target ("..totalTgt..") udah lewat Sampai KG -> AUTO STOP cycle")
+                    autoElephantCycle = false
+                    M78.elephantState = "stopped"
+                    if doStop then pcall(function() doStop("[AUTO ELE] All targets done") end) end
+                    local char = player.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hum then pcall(function() hum:UnequipTools() end) end
+                    if refreshAECBtn then pcall(refreshAECBtn) end
+                    pcall(save)
+                else
+                -- Phase 1: monitor existing leveling progress
+                if M78.allLevelingPetsAtTarget() then
+                    dbg("[ele] Phase 1 DONE - semua pet target di age "..(config.equipTargetLvl or 40).." -> Phase 2")
+                    -- Stop existing leveling
+                    if doStop then pcall(function() doStop("[AUTO ELE] Phase 1 done") end) end
+                    task.wait(1.5)
+                    -- Equip Elephant pet (first from elephantTeamUUIDs)
+                    local elephantUUID = nil
+                    for uuid, _ in pairs(elephantTeamUUIDs) do elephantUUID = uuid break end
+                    if elephantUUID then
+                        local item = findPetInBackpack(elephantUUID)
+                        if item then
+                            pcall(function() equipPet(elephantUUID) end)
+                            dbg("[ele] Phase 2: Elephant equipped ("..tostring(elephantUUID):sub(1,8)..")")
+                        else
+                            dbg("[ele] Phase 2: WARNING - Elephant pet UUID="..tostring(elephantUUID):sub(1,8).." gak ada di bp")
+                        end
+                    else
+                        dbg("[ele] Phase 2: WARNING - belum pilih Tim Elephant!")
+                    end
+                    M78.elephantBlessingsThisCycle = 0
+                    M78.elephantLastFailAt = 0
+                    M78.elephantState = "elephant"
+                end
+                end -- v13.08: end else (auto-stop check)
+            elseif M78.elephantState == "elephant" then
+                -- Phase 2: wait for FAIL notif (means cycle complete)
+                if M78.elephantLastFailAt > 0 then
+                    local age_secs = tick() - M78.elephantLastFailAt
+                    if age_secs < 60 then  -- FAIL detected within last minute
+                        dbg("[ele] Phase 2 done (FAIL received, blessings this cycle: "..M78.elephantBlessingsThisCycle..") -> Phase 1")
+                        -- Unequip elephant
+                        local char = player.Character
+                        local hum = char and char:FindFirstChildOfClass("Humanoid")
+                        if hum then pcall(function() hum:UnequipTools() end) end
+                        task.wait(0.5)
+                        -- Resume leveling
+                        if doStart then pcall(function() doStart() end) end
+                        M78.elephantLastFailAt = 0
+                        M78.elephantBlessingsThisCycle = 0
+                        M78.elephantState = "leveling"
+                    end
+                end
+            end
+        end
+        task.wait(3)
+    end
+end)
+
+-- Listener: watch Top_Notification for Elephant patterns
+task.spawn(function()
+    local function findTopNotifLabel()
+        local pg = player:FindFirstChild("PlayerGui") if not pg then return nil end
+        local top = pg:FindFirstChild("Top_Notification") if not top then return nil end
+        local fr = top:FindFirstChild("Frame") if not fr then return nil end
+        local mob = fr:FindFirstChild("Notification_UI_Mobile") if not mob then return nil end
+        return mob:FindFirstChildOfClass("TextLabel")
+    end
+
+    local hooked = nil
+    while not scriptShutdown do
+        local lbl = findTopNotifLabel()
+        if lbl and lbl ~= hooked then
+            hooked = lbl
+            pcall(function()
+                lbl:GetPropertyChangedSignal("Text"):Connect(function()
+                    local t = lbl.Text or ""
+                    if t == "" then return end
+                    M78.elephantLastNotif = t
+                    -- SUCCESS pattern: "🐘 Elephant blessed your <PET>! Age reset to 1 and gained +0.11 KG (<X> KG total)!"
+                    if t:find("Elephant blessed your", 1, true) then
+                        M78.elephantLastSuccessAt = tick()
+                        M78.elephantBlessingsThisCycle = M78.elephantBlessingsThisCycle + 1
+                        local petName = t:match("Elephant blessed your (.-)!")
+                        local newKgStr = t:match("%(([%d%.]+)%s*KG total")
+                        local newKg = tonumber(newKgStr)
+                        dbg("[ele] BLESS SUCCESS: "..(petName or "?").." -> "..(newKgStr or "?").."kg (total "..M78.elephantBlessingsThisCycle..")")
+                        -- v13.07: cek apakah pet ini udah lewat Sampai KG → mark DONE
+                        if petName and newKg then
+                            local petUUID = M78.findUUIDByName(petName)
+                            if petUUID then
+                                if newKg > (config.targetKG or 60) then
+                                    M78.elephantDonePets[petUUID] = true
+                                    dbg("[ele] pet "..petName.." ("..tostring(petUUID):sub(1,8)..") "..newKg.."kg > Sampai KG "..config.targetKG..", marked DONE")
+                                else
+                                    dbg("[ele] pet "..petName.." "..newKg.."kg <= Sampai KG "..config.targetKG..", masih aman")
+                                end
+                            end
+                        end
+                    elseif t:find("trumpeted a blessing", 1, true) and t:find("found no", 1, true) then
+                        M78.elephantLastFailAt = tick()
+                        dbg("[ele] BLESS FAIL: no eligible pet found")
+                    end
+                end)
+            end)
+            dbg("[ele] notif listener hooked")
+        end
+        task.wait(2)  -- re-scan tiap 2 detik (notif container kadang re-created)
+    end
+end)
 
 -- v12.91: Auto Boost loop - ACTIVE mode via Action.Activate (full automatic)
 -- Auto-pause kalo autoGift jalan (giftInProgress = true)
@@ -4235,6 +4553,11 @@ _G.ZenxStopSwap=stopSwapForPet
 
 local function getQueue()
     local queue={}
+    -- v13.29: kalo ada Pet Target di-pick/auto-fill, queue DISABLED - cuma grind target
+    local hasTarget = false
+    for _ in pairs(targetPetUUIDs) do hasTarget = true break end
+    if hasTarget then return queue end
+
     local bp=player:FindFirstChild("Backpack") if not bp then return queue end
     for _,item in pairs(bp:GetChildren()) do
         if isPet(item) then
@@ -4253,7 +4576,6 @@ local function getQueue()
             end
         end
     end
-    -- v12.79o: shuffle queue biar pet beda jenis ke-equip mix, gak group per jenis
     for i=#queue,2,-1 do
         local j=math.random(i)
         queue[i],queue[j]=queue[j],queue[i]
@@ -4261,7 +4583,7 @@ local function getQueue()
     return queue
 end
 
-local function doStop(reason)
+doStop = function(reason)
     isRunning=false
     if mainTask then task.cancel(mainTask) mainTask=nil end
     if monitorTask then task.cancel(monitorTask) monitorTask=nil end
@@ -4278,6 +4600,11 @@ local function doStop(reason)
             unequipPet(uuid)
             task.wait(0.1)
         end
+    end
+    -- v13.17: unequip Pet Target juga
+    for uuid,_ in pairs(targetPetUUIDs) do
+        unequipPet(uuid)
+        task.wait(0.1)
     end
     setRunning(false)
     statusLbl.Text=reason or "Dihentikan" statusLbl.TextColor3=C.Gray
@@ -4326,21 +4653,138 @@ local function pickupAllGardenPets()
         pcall(function() unequipPet(uuid) end)
     end
 
-    -- v12.79b: super tight 0.03+0.002N max 0.10 (per user 'udah gacor')
+    -- v13.05: pakai config.pickupDelay (user-configurable di tab Swap Skill)
     if #uuids>0 then
-        task.wait(math.min(0.10, 0.03+#uuids*0.002))
+        task.wait(math.min(config.pickupDelay or 0.10, 0.03+#uuids*0.002))
     end
 
     dbg("[pickup] total: "..#uuids.." pet di-pickup dari garden (rapid-fire)")
     return #uuids
 end
 
-local function doStart()
+doStart = function()
     dbg("[doStart] dipanggil")
     currentLevelingUUIDs={}
     completedPets={}
     if isRunning then dbg("[doStart] sudah running, skip") return end
-    if next(teamPetUUIDs)==nil then dbg("[doStart] FAIL: pilih tim dulu") statusLbl.Text="Pilih tim leveling dulu!" statusLbl.TextColor3=C.Red return end
+
+    -- v13.30: build maxKG cache FIRST biar getAgeFromKG works di cleanup/auto-fill
+    buildMaxKGCache()
+
+    -- v13.32: revert auto-clear (wipe manual selection). Cleanup drops stale only.
+
+    -- v13.25: helper - cek age pakai cascade (UI/tool/placed/KG estimate) - sama kayak display
+    local function getFullAge(uuid)
+        local age = nil
+        if getAgeFromUI then age = getAgeFromUI(uuid) end
+        if not age then
+            local item = findPetInBackpack(uuid)
+            if item then age = getAgeFromKG(item) end
+        end
+        if not age then
+            local placed = findPlacedPetByUUID(uuid)
+            if placed and getPlacedPetAge then age = getPlacedPetAge(placed) end
+        end
+        if not age then
+            local item = findPetInBackpack(uuid)
+            if item then
+                local kg = getKG(item)
+                if kg then
+                    local maxKG = getMaxKGForPet and getMaxKGForPet(getPetName(item))
+                    if maxKG and maxKG > 0 then
+                        age = math.max(1, math.min(100, math.floor(kg * 11 / maxKG - 10)))
+                    elseif kg >= 20 then age = 100
+                    end
+                end
+            end
+        end
+        return age
+    end
+
+    -- v13.23/25: cleanup stale targetPetUUIDs
+    do
+        local dropped = 0
+        for uuid,_ in pairs(targetPetUUIDs) do
+            local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+            if item then
+                local nm = getPetName(item)
+                local mismatch = config.petType and config.petType ~= "" and not isTargetPet(nm)
+                local age = getFullAge(uuid)  -- v13.25: full cascade
+                local agePast = age and age >= (config.equipTargetLvl or 40)
+                local kg = getKG(item)
+                local baseKG = nil
+                if kg and age and age >= 1 then baseKG = kg * 11 / (age + 10) end
+                local kgPast = baseKG and baseKG > (config.targetKG or 60)
+                if mismatch or agePast or kgPast then
+                    targetPetUUIDs[uuid] = nil
+                    targetPetInfoCache[uuid] = nil
+                    dropped = dropped + 1
+                    local reason = mismatch and "wrong jenis" or (agePast and ("age "..tostring(age).." >= "..(config.equipTargetLvl or 40)) or ("kg "..string.format("%.2f",baseKG).." > Sampai"))
+                    dbg("[cleanup-Target] drop "..tostring(uuid):sub(1,8).." ('"..nm.."', "..reason..")")
+                end
+            end
+        end
+        if dropped > 0 then pcall(save) end
+    end
+
+    -- v13.17: auto-fill targetPetUUIDs (pet yg di-grind) sampai config.petCount
+    local N = config.petCount or 1
+    local currentTgt = 0
+    for _ in pairs(targetPetUUIDs) do currentTgt = currentTgt + 1 end
+    dbg("[doStart] Jenis Pet config: '"..tostring(config.petType).."', target size "..currentTgt.."/"..N)
+    if currentTgt < N then
+        local needed = N - currentTgt
+        local bp = player:FindFirstChild("Backpack")
+        if bp then
+            dbg("[doStart] auto-fill "..needed.." pet matching Jenis Pet '"..(config.petType or "").."'")
+            local scanned = 0 local matched = 0
+            for _,item in pairs(bp:GetChildren()) do
+                if needed <= 0 then break end
+                if isPet(item) then
+                    scanned = scanned + 1
+                    local uuid = getPetUUID(item)
+                    local uuidStr = uuid and tostring(uuid) or ""
+                    if uuid and not targetPetUUIDs[uuidStr] and not teamPetUUIDs[uuidStr] then
+                        local nm = getPetName(item)
+                        local bn = getBaseName and getBaseName(nm) or nm
+                        local matchResult = isTargetPet(nm)
+                        if matchResult then
+                            -- v13.37: strict age detection - require age detected AND < target
+                            local age = getFullAge(uuidStr)
+                            if not age then age = getAgeFromKG(item) end
+                            local kg = getKG(item)
+                            local baseKG = nil
+                            if kg and age and age >= 1 then baseKG = kg * 11 / (age + 10) end
+                            local skipKG = baseKG and baseKG > (config.targetKG or 60)
+                            -- HANYA terima pet kalo age detected AND age < target AND kg OK
+                            if not age then
+                                dbg("[autoFill-Target] skip "..uuidStr:sub(1,12).." name='"..nm.."' age UNDETECTABLE")
+                            elseif age >= (config.equipTargetLvl or 40) then
+                                dbg("[autoFill-Target] skip "..uuidStr:sub(1,12).." name='"..nm.."' age="..age.." (>= target)")
+                            elseif skipKG then
+                                dbg("[autoFill-Target] skip "..uuidStr:sub(1,12).." name='"..nm.."' base="..tostring(baseKG).." (kg > Sampai)")
+                            else
+                                matched = matched + 1
+                                targetPetUUIDs[uuidStr] = true
+                                targetPetInfoCache[uuidStr] = {name=nm, info=getPetInfo(item)}
+                                needed = needed - 1
+                                dbg("[autoFill-Target] +"..uuidStr:sub(1,12).." name='"..nm.."' base='"..bn.."' age="..age)
+                            end
+                        end
+                    end
+                end
+            end
+            dbg("[autoFill-Target] scanned "..scanned.." pet, matched "..matched..", picked into target")
+            pcall(save)
+        end
+    end
+
+    -- v13.17: cek apakah ada Target atau Tim (Support optional)
+    local tgtCnt = 0 for _ in pairs(targetPetUUIDs) do tgtCnt = tgtCnt + 1 end
+    local timCnt = 0 for _ in pairs(teamPetUUIDs) do timCnt = timCnt + 1 end
+    if tgtCnt == 0 and timCnt == 0 then
+        dbg("[doStart] FAIL: pilih Pet Target/Tim dulu") statusLbl.Text="Pilih Pet Target/Tim dulu!" statusLbl.TextColor3=C.Red return
+    end
     buildMaxKGCache()
 
     statusLbl.Text="Membersihkan garden..." statusLbl.TextColor3=C.Gold
@@ -4363,16 +4807,49 @@ local function doStart()
         dbg("[doStart] garden udah kosong, gak ada yg di-pickup")
     end
 
-    statusLbl.Text="Pasang tim leveling..." statusLbl.TextColor3=C.Gold
-    -- v12.79b: rapid-fire equip team
-    local teamPlaced=0
+    statusLbl.Text="Pasang tim + target..." statusLbl.TextColor3=C.Gold
+    -- v13.41: filter pet age >= target di place time (smooth, no flicker)
+    -- Tim Support placed regardless. Pet Target dengan age >= target SKIP (rotation/Phase 2 handle)
+    local placedTotal=0
+    local skippedAge=0
     for uuid,_ in pairs(teamPetUUIDs) do
         pcall(function() equipPet(uuid) end)
-        teamPlaced=teamPlaced+1
+        placedTotal=placedTotal+1
     end
-    if teamPlaced>0 then
-        dbg("[doStart] tim "..teamPlaced.." pet di-place (rapid-fire)")
-        task.wait(math.min(0.12, 0.03+teamPlaced*0.01)) -- was 0.05+0.015N max 0.2
+    for uuid,_ in pairs(targetPetUUIDs) do
+        local ageNow = getFullAge(uuid)
+        if ageNow and ageNow >= (config.equipTargetLvl or 40) then
+            skippedAge = skippedAge + 1
+            dbg("[doStart] skip place target "..tostring(uuid):sub(1,8).." age="..tostring(ageNow).." (>= "..(config.equipTargetLvl or 40)..")")
+        else
+            pcall(function() equipPet(uuid) end)
+            placedTotal=placedTotal+1
+        end
+    end
+    if skippedAge > 0 then dbg("[doStart] "..skippedAge.." pet target skipped (age past target)") end
+    if placedTotal>0 then
+        dbg("[doStart] Tim+Target "..placedTotal.." pet di-place (rapid-fire)")
+        task.wait(math.min(config.placeDelay or 0.12, 0.03+placedTotal*0.01))
+        -- v13.12: verifikasi
+        local petsPhys = workspace:FindFirstChild("PetsPhysical")
+        local actual = 0
+        if petsPhys then
+            for _, m in ipairs(petsPhys:GetDescendants()) do
+                local uid = nil pcall(function() uid = m:GetAttribute("PET_UUID") or m:GetAttribute("UUID") end)
+                if uid then
+                    local uidStr = tostring(uid):gsub("^{",""):gsub("}$","")
+                    local checkSet = function(set)
+                        for tu,_ in pairs(set) do
+                            local tuStr = tostring(tu):gsub("^{",""):gsub("}$","")
+                            if uidStr == tuStr then return true end
+                        end
+                        return false
+                    end
+                    if checkSet(teamPetUUIDs) or checkSet(targetPetUUIDs) then actual = actual + 1 end
+                end
+            end
+        end
+        dbg("[doStart] verifikasi: "..actual.."/"..placedTotal.." pet di garden")
     end
 
     local queue=getQueue()
@@ -4401,6 +4878,85 @@ local function doStart()
 
     mainTask=task.spawn(function()
         while isRunning do equipTeam() task.wait(1) end
+    end)
+
+    -- v13.34/35/36: Pet Target rotation monitor - faster check + cached fresh pet list
+    task.spawn(function()
+        dbg("[rotate] monitor task STARTED, targetLevel="..tostring(config.equipTargetLvl))
+        local lastDbgTime = 0
+        while isRunning do
+            local toRotate = {}
+            -- v13.42: dump SETIAP target pet status tiap 5s biar bisa diagnose
+            local dumpNow = (tick() - lastDbgTime > 5)
+            if dumpNow then
+                local cnt=0 for _ in pairs(targetPetUUIDs) do cnt=cnt+1 end
+                dbg("[rotate] checking "..cnt.." target pets, target="..tostring(config.equipTargetLvl))
+                lastDbgTime = tick()
+            end
+            for uuid,_ in pairs(targetPetUUIDs) do
+                local age = getFullAge and getFullAge(uuid)
+                if not age then
+                    local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+                    if item then age = getAgeFromKG(item) end
+                end
+                if dumpNow then
+                    local item = findPetInBackpack(uuid)
+                    local nm = item and getPetName(item) or "?"
+                    local toolName = item and item.Name or "(not in bp)"
+                    dbg("[rotate] target "..tostring(uuid):sub(1,8).." age="..tostring(age).." name='"..nm.."' tool='"..toolName.."'")
+                end
+                if age and age >= (config.equipTargetLvl or 40) then
+                    table.insert(toRotate, {uuid=uuid, age=age})
+                end
+            end
+            if #toRotate > 0 then
+                -- v13.36: pre-collect SEMUA fresh pets dari bp dulu, lalu pakai
+                local freshList = {}
+                local bp = player:FindFirstChild("Backpack")
+                if bp then
+                    for _, bpItem in pairs(bp:GetChildren()) do
+                        if isPet(bpItem) then
+                            local newUuid = getPetUUID(bpItem)
+                            local newUuidStr = newUuid and tostring(newUuid) or ""
+                            if newUuid and not targetPetUUIDs[newUuidStr] and not teamPetUUIDs[newUuidStr] then
+                                local nm = getPetName(bpItem)
+                                if isTargetPet(nm) then
+                                    -- v13.37: pakai full cascade buat akurat detection
+                                    local newAge = getFullAge and getFullAge(newUuidStr)
+                                    if not newAge then newAge = getAgeFromKG(bpItem) end
+                                    -- STRICT: require age detection success AND age < target (no nil bypass)
+                                    if newAge and newAge < (config.equipTargetLvl or 40) then
+                                        table.insert(freshList, {uuid=newUuid, uuidStr=newUuidStr, name=nm, item=bpItem, age=newAge})
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                dbg("[rotate] "..#toRotate.." pet hit target, "..#freshList.." fresh pets available")
+                -- v13.39: hanya rotate kalo ADA replacement (gak buang slot kosong)
+                local maxRotate = math.min(#toRotate, #freshList)
+                if maxRotate == 0 then
+                    dbg("[rotate] no fresh replacement available, wait for Elephant Phase 2 / bless")
+                end
+                for i = 1, maxRotate do
+                    local item = toRotate[i]
+                    local uuid = item.uuid
+                    local f = freshList[i]
+                    -- v13.43: EQUIP fresh DULU, baru unequip old → no empty slot gap
+                    targetPetUUIDs[f.uuidStr] = true
+                    targetPetInfoCache[f.uuidStr] = {name=f.name, info=getPetInfo(f.item)}
+                    pcall(function() equipPet(f.uuid) end)
+                    task.wait(0.05)
+                    pcall(function() unequipPet(uuid) end)
+                    targetPetUUIDs[uuid] = nil
+                    targetPetInfoCache[uuid] = nil
+                    dbg("[rotate] "..tostring(uuid):sub(1,8).." (age "..item.age..") -> "..f.uuidStr:sub(1,8).." ("..f.name..", age "..tostring(f.age)..")")
+                end
+            end
+            task.wait(0.5)  -- v13.36: faster (was 2s)
+        end
+        dbg("[rotate] monitor task STOPPED")
     end)
 
     monitorTask=task.spawn(function()
@@ -4516,7 +5072,11 @@ local function doStart()
             end
 
             local activeNames={}
-            for uuid,_ in pairs(currentLevelingUUIDs) do
+            -- v13.21: tampilkan semua Pet Target (yg utamanya di-grind), bukan cuma currentLevelingUUIDs
+            local shownInList = {}
+            local function addPetToDisplay(uuid)
+                if shownInList[uuid] then return end
+                shownInList[uuid] = true
                 local nameStr=getPetNameFromUI(uuid)
                 if not nameStr or nameStr=="" then nameStr=getPetTypeFromUI(uuid) end
                 if not nameStr then
@@ -4524,7 +5084,7 @@ local function doStart()
                     if item then nameStr=getPetName(item) end
                 end
                 if not nameStr then
-                    local cached=teamPetInfoCache[uuid] or swapPetInfoCache[uuid]
+                    local cached=teamPetInfoCache[uuid] or swapPetInfoCache[uuid] or targetPetInfoCache[uuid]
                     nameStr=(cached and cached.name) or uuid:sub(1,8)
                 end
                 local age=getAgeFromUI(uuid)
@@ -4564,8 +5124,11 @@ local function doStart()
                     end
                 end
                 local ageStr=age and (age.."/"..toAge) or ("?/"..toAge)
+                -- v13.29: revert v13.24 - tampilkan SEMUA Pet Target, gak hide pet age >= target
                 table.insert(activeNames,nameStr.." "..ageStr)
-            end
+            end -- end addPetToDisplay
+            -- v13.22: Show ONLY Pet Target di Lvl display (gak include queue pets biar gak numpuk)
+            for uuid,_ in pairs(targetPetUUIDs) do addPetToDisplay(uuid) end
             if #activeNames>0 then
                 statusLbl.Text="Lvl: "..table.concat(activeNames,", ").." | Q:"..#available
             else
@@ -4678,4 +5241,4 @@ end)()
 -- v10.5: pas first load, langsung minimize jadi kotak Z (klik buat expand)
 setMinimized(true)
 
-print("ZenxAutoElephantRainbow "..SCRIPT_VERSION.." loaded! v12.98: revert v12.97 - no implicit MAX assumption")
+print("ZenxElephant60kg "..SCRIPT_VERSION.." loaded! v12.95: warna kuning cerah NODE HUB style")
