@@ -1,5 +1,5 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.01"
+local SCRIPT_VERSION="v13.04"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (revert implicit MAX assumption)")
 
@@ -758,9 +758,41 @@ function getBaseName(name)
 end
 
 local maxKGCache={}
+-- v13.04: persistent cache via writefile (akumulasi base weight tiap sesi)
+local CACHE_FILE = "zenx_pet_basekg_cache.json"
+local function saveCacheToFile()
+    if not writefile then return end
+    pcall(function()
+        local entries = {}
+        for k, v in pairs(maxKGCache) do
+            table.insert(entries, '  ['..string.format("%q", k)..']='..v)
+        end
+        local content = "return {\n"..table.concat(entries, ",\n").."\n}"
+        writefile(CACHE_FILE, content)
+    end)
+end
+local function loadCacheFromFile()
+    if not readfile or not isfile then return end
+    pcall(function()
+        if not isfile(CACHE_FILE) then return end
+        local content = readfile(CACHE_FILE)
+        local fn, _ = loadstring(content)
+        if fn then
+            local ok, tbl = pcall(fn)
+            if ok and type(tbl) == "table" then
+                for k, v in pairs(tbl) do
+                    maxKGCache[k] = v
+                end
+            end
+        end
+    end)
+end
+loadCacheFromFile()  -- bootstrap dari file saat sc load
+
 local function buildMaxKGCache()
-    maxKGCache={}
+    -- v13.04: gak reset, accumulate (preserve dari file + previous sessions)
     local bp=player:FindFirstChild("Backpack") if not bp then return end
+    local newEntries = 0
     for _,item in pairs(bp:GetChildren()) do
         if isPet(item) then
             local age=getAge(item) local kg=getKG(item)
@@ -771,15 +803,17 @@ local function buildMaxKGCache()
                 pcall(function() fType = item:GetAttribute("f") end)
                 if fType and type(fType) == "string" and not maxKGCache[fType] then
                     maxKGCache[fType] = maxKG
+                    newEntries = newEntries + 1
                 end
                 -- Fallback: simpan juga by name + base
                 local name=getPetName(item)
-                if not maxKGCache[name] then maxKGCache[name]=maxKG end
+                if not maxKGCache[name] then maxKGCache[name]=maxKG; newEntries=newEntries+1 end
                 local base=getBaseName(name)
-                if not maxKGCache[base] then maxKGCache[base]=maxKG end
+                if not maxKGCache[base] then maxKGCache[base]=maxKG; newEntries=newEntries+1 end
             end
         end
     end
+    if newEntries > 0 then saveCacheToFile() end
 end
 local function getMaxKGForPet(name)
     if maxKGCache[name] then return maxKGCache[name] end
