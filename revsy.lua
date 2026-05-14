@@ -1,10 +1,10 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.07"
+local SCRIPT_VERSION="v13.08"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (encoding fix: hapus unicode di source)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (fix Luau local limit 200 - APS via getgenv)")
 
 local RS = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players") 
+local Players = game:GetService("Players")
 local HS = game:GetService("HttpService")
 local TS = game:GetService("TeleportService")
 local CS = game:GetService("CollectionService")
@@ -93,130 +93,114 @@ end
 if not equipRE then equipRE = petLeadRE end
 dbg("Step 2 OK: remotes ("..tostring(equipRE.Name)..", "..tostring(petLeadRE.Name)..", CD="..(getCooldownRF and "OK" or "no")..")")
 
--- ============= APS (ActivePetsService) API -- v13.04+ =============
--- Source of truth utk Age, Mutation, Favorite, dll (lebih akurat drpd parse name/UI)
-local APS = nil
-local PetMutationMap = nil  -- code -> readable name (EV->Everchanted, A->Nightmare, dll)
-local function _loadAPS()
-    local ok, mod = pcall(function()
-        return require(RS.Modules.PetServices.ActivePetsService)
+-- ============= APS (ActivePetsService) API - v13.08 =============
+-- v13.08: dibungkus do/end + getgenv() biar gak nambah outer-scope locals (limit 200 Luau)
+do
+    local APS = nil
+    local PetMutationMap = nil
+    local _apsCache = {}
+    local _apsCacheTime = {}
+    local _datastoreCache = nil
+    local _datastoreCacheTime = 0
+    local APS_CACHE_TTL = 5
+    local DS_CACHE_TTL = 8
+
+    pcall(function()
+        APS = require(RS.Modules.PetServices.ActivePetsService)
     end)
-    if ok and type(mod) == "table" then APS = mod end
-    local ok2, mr = pcall(function()
-        return require(RS.Data.PetRegistry.PetMutationRegistry)
+    pcall(function()
+        local mr = require(RS.Data.PetRegistry.PetMutationRegistry)
+        if type(mr) == "table" and type(mr.EnumToPetMutation) == "table" then
+            PetMutationMap = mr.EnumToPetMutation
+        end
     end)
-    if ok2 and type(mr) == "table" and type(mr.EnumToPetMutation) == "table" then
-        PetMutationMap = mr.EnumToPetMutation
+    dbg("Step 2b APS: "..(APS and "OK" or "FAIL").." | MutMap: "..(PetMutationMap and "OK" or "FAIL"))
+
+    local function getPetDataAPS(uuid)
+        if not APS or not uuid then return nil end
+        local key = tostring(uuid)
+        local now = tick()
+        if _apsCache[key] and (now - (_apsCacheTime[key] or 0)) < APS_CACHE_TTL then
+            return _apsCache[key]
+        end
+        local ok, info = pcall(function() return APS:GetPetData(player.Name, key) end)
+        if ok and info and info.PetData then
+            _apsCache[key] = info
+            _apsCacheTime[key] = now
+            return info
+        end
+        return nil
     end
-end
-pcall(_loadAPS)
-dbg("Step 2b APS: "..(APS and "OK" or "FAIL").." | MutMap: "..(PetMutationMap and "OK" or "FAIL"))
 
--- Cache hasil GetPetData by UUID (refresh per ~5 detik biar gak hammer require)
-local _apsCache = {}
-local _apsCacheTime = {}
-local APS_CACHE_TTL = 5
-
-local function getPetDataAPS(uuid)
-    if not APS or not uuid then return nil end
-    local key = tostring(uuid)
-    local now = tick()
-    if _apsCache[key] and (now - (_apsCacheTime[key] or 0)) < APS_CACHE_TTL then
-        return _apsCache[key]
+    local function getAllPetsDataAPS()
+        if not APS then return {} end
+        local now = tick()
+        if _datastoreCache and (now - _datastoreCacheTime) < DS_CACHE_TTL then
+            return _datastoreCache
+        end
+        local ok, ds = pcall(function() return APS:GetPlayerDatastorePetData(player.Name) end)
+        if ok and ds and ds.PetInventory and ds.PetInventory.Data then
+            _datastoreCache = ds.PetInventory.Data
+            _datastoreCacheTime = now
+            return _datastoreCache
+        end
+        return {}
     end
-    local ok, info = pcall(function() return APS:GetPetData(player.Name, key) end)
-    if ok and info and info.PetData then
-        _apsCache[key] = info
-        _apsCacheTime[key] = now
-        return info
-    end
-    return nil
-end
 
--- Bulk loader -- sekali fetch semua pet data dari datastore (lebih efisien drpd 1-by-1)
-local _datastoreCache = nil
-local _datastoreCacheTime = 0
-local DS_CACHE_TTL = 8
-
-local function getAllPetsDataAPS()
-    if not APS then return {} end
-    local now = tick()
-    if _datastoreCache and (now - _datastoreCacheTime) < DS_CACHE_TTL then
-        return _datastoreCache
-    end
-    local ok, ds = pcall(function() return APS:GetPlayerDatastorePetData(player.Name) end)
-    if ok and ds and ds.PetInventory and ds.PetInventory.Data then
-        _datastoreCache = ds.PetInventory.Data
-        _datastoreCacheTime = now
-        return _datastoreCache
-    end
-    return {}
-end
-
-local function invalidateAPSCache(uuid)
-    if uuid then
-        _apsCache[tostring(uuid)] = nil
-        _apsCacheTime[tostring(uuid)] = nil
-    end
-    _datastoreCache = nil
-end
-
--- Helper: ambil 1 field dari PetData via uuid (paling sering dipake)
-local function getAgeAPS(uuid)
-    local info = getPetDataAPS(uuid)
-    if info and info.PetData and info.PetData.Level then
-        return info.PetData.Level
-    end
-    -- Fallback ke bulk datastore (lebih murah kalo udah cached)
-    local all = getAllPetsDataAPS()
-    local entry = all[tostring(uuid)]
-    if entry and entry.PetData and entry.PetData.Level then
-        return entry.PetData.Level
-    end
-    return nil
-end
-
-local function getMutationCodeAPS(uuid)
-    local info = getPetDataAPS(uuid)
-    if info and info.PetData then return info.PetData.MutationType end
-    local all = getAllPetsDataAPS()
-    local entry = all[tostring(uuid)]
-    if entry and entry.PetData then return entry.PetData.MutationType end
-    return nil
-end
-
-local function getMutationNameAPS(uuid)
-    local code = getMutationCodeAPS(uuid)
-    if not code then return nil end
-    if PetMutationMap and PetMutationMap[code] then return PetMutationMap[code] end
-    return code  -- fallback ke raw code kalo gak ke-map
-end
-
-local function isFavoriteAPS(uuid)
-    local info = getPetDataAPS(uuid)
-    if info and info.PetData then return info.PetData.IsFavorite == true end
-    local all = getAllPetsDataAPS()
-    local entry = all[tostring(uuid)]
-    if entry and entry.PetData then return entry.PetData.IsFavorite == true end
-    return false
-end
-
-local function getPetTypeAPS(uuid)
-    local info = getPetDataAPS(uuid)
-    if info and info.PetType then return info.PetType end
-    local all = getAllPetsDataAPS()
-    local entry = all[tostring(uuid)]
-    if entry and entry.PetType then return entry.PetType end
-    return nil
-end
-
-local function getCustomNameAPS(uuid)
-    local info = getPetDataAPS(uuid)
-    if info and info.PetData then return info.PetData.Name end
-    local all = getAllPetsDataAPS()
-    local entry = all[tostring(uuid)]
-    if entry and entry.PetData then return entry.PetData.Name end
-    return nil
+    -- Expose globally via getgenv() so we don't consume outer-scope local slots
+    getgenv().ZenxAPS = {
+        getAge = function(uuid)
+            local info = getPetDataAPS(uuid)
+            if info and info.PetData and info.PetData.Level then return info.PetData.Level end
+            local all = getAllPetsDataAPS()
+            local entry = all[tostring(uuid)]
+            if entry and entry.PetData and entry.PetData.Level then return entry.PetData.Level end
+            return nil
+        end,
+        getMutCode = function(uuid)
+            local info = getPetDataAPS(uuid)
+            if info and info.PetData then return info.PetData.MutationType end
+            local all = getAllPetsDataAPS()
+            local entry = all[tostring(uuid)]
+            if entry and entry.PetData then return entry.PetData.MutationType end
+            return nil
+        end,
+        getMutName = function(uuid)
+            local info = getPetDataAPS(uuid)
+            local code = info and info.PetData and info.PetData.MutationType
+            if not code then
+                local all = getAllPetsDataAPS()
+                local entry = all[tostring(uuid)]
+                code = entry and entry.PetData and entry.PetData.MutationType
+            end
+            if not code then return nil end
+            if PetMutationMap and PetMutationMap[code] then return PetMutationMap[code] end
+            return code
+        end,
+        isFav = function(uuid)
+            local info = getPetDataAPS(uuid)
+            if info and info.PetData then return info.PetData.IsFavorite == true end
+            local all = getAllPetsDataAPS()
+            local entry = all[tostring(uuid)]
+            if entry and entry.PetData then return entry.PetData.IsFavorite == true end
+            return false
+        end,
+        getPetType = function(uuid)
+            local info = getPetDataAPS(uuid)
+            if info and info.PetType then return info.PetType end
+            local all = getAllPetsDataAPS()
+            local entry = all[tostring(uuid)]
+            if entry and entry.PetType then return entry.PetType end
+            return nil
+        end,
+        invalidate = function(uuid)
+            if uuid then
+                _apsCache[tostring(uuid)] = nil
+                _apsCacheTime[tostring(uuid)] = nil
+            end
+            _datastoreCache = nil
+        end,
+    }
 end
 -- ============= END APS API =============
 
@@ -308,15 +292,13 @@ end
 
 local function isPet(item) return item:FindFirstChild("PetToolLocal") or item:FindFirstChild("PetToolServer") end
 local function isFavorite(item)
-    -- v13.05: PRIMARY = APS (server data, real IsFavorite flag)
+    -- v13.08: APS via getgenv().ZenxAPS (gak nambah outer local)
     if item then
         local uuid = item:GetAttribute("PET_UUID")
-        if uuid then
-            local fav = isFavoriteAPS(uuid)
-            if fav then return true end
-        end
+        local API = getgenv().ZenxAPS
+        if uuid and API and API.isFav(uuid) then return true end
     end
-    -- FALLBACK v12.79n: attribute check (legacy, jarang true tapi safety net)
+    -- FALLBACK: attribute check (legacy)
     for _,attr in ipairs({"Favorited","Favourited","Favorite","Favourite","IsFavorited","IsFavourited"}) do
         local v=item:GetAttribute(attr)
         if v==true then return true end
@@ -324,15 +306,16 @@ local function isFavorite(item)
     return false
 end
 local function getAge(item)
-    -- v13.05: PRIMARY = APS Level (server data, akurat untuk SEMUA pet termasuk mutation)
+    -- v13.08: APS via getgenv().ZenxAPS (akurat untuk SEMUA pet termasuk mutation)
     if item then
         local uuid = item:GetAttribute("PET_UUID")
-        if uuid then
-            local age = getAgeAPS(uuid)
+        local API = getgenv().ZenxAPS
+        if uuid and API then
+            local age = API.getAge(uuid)
             if age then return age end
         end
     end
-    -- FALLBACK v12.79f: parse dari name (untuk pet non-mutation, format "[Age N]")
+    -- FALLBACK: parse dari name (untuk pet non-mutation, format "[Age N]")
     for _,pat in ipairs({
         "%[Age%s+(%d+)%]","%[Age(%d+)%]",
         "%[Lv%s+(%d+)%]","%[Lv(%d+)%]",
@@ -342,7 +325,6 @@ local function getAge(item)
     }) do
         local f=item.Name:match(pat) if f then return tonumber(f) end
     end
-    -- "MAX" / "MAXED" text
     if item.Name:match("%[Age%s*MAX%]") or item.Name:match("%[MAX%]") then return 100 end
     return nil
 end
@@ -350,20 +332,8 @@ local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Nam
 local function getKG(item) return tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) end
 local function getPetUUID(item) return item:GetAttribute("PET_UUID") end
 
--- v13.05: Mutation helpers (pake APS API)
-local function getMutationCode(item)
-    if not item then return nil end
-    local uuid = item:GetAttribute("PET_UUID")
-    if not uuid then return nil end
-    return getMutationCodeAPS(uuid)
-end
-local function getMutation(item)  -- readable name (Everchanted/Nightmare/Mega/etc)
-    if not item then return nil end
-    local uuid = item:GetAttribute("PET_UUID")
-    if not uuid then return nil end
-    return getMutationNameAPS(uuid)
-end
-local function isMutated(item) return getMutationCode(item) ~= nil end
+-- v13.08: Mutation helpers dipindah ke getgenv().ZenxAPS (gak nambah outer local)
+-- Use: getgenv().ZenxAPS.getMutCode(uuid) atau .getMutName(uuid)
 
 -- v12.96: getBaseKG - cari base weight dari attribute dulu, fallback ke formula
 local function getBaseKG(item)
@@ -646,10 +616,13 @@ local function sendGiftToPlayer(targetName, petUUID)
         dbg("[gift] FAIL: player gak ada di server")
         return false
     end
-    -- v13.06: SAFETY GUARD - tolak gift pet favorit kalo protectFavorites ON
-    if petUUID and d.protectFavorites and isFavoriteAPS(petUUID) then
-        dbg("[gift] SKIP: pet favorit (protectFavorites ON) uuid="..tostring(petUUID):sub(1,8))
-        return false
+    -- v13.08: SAFETY GUARD - tolak gift pet favorit kalo protectFavorites ON
+    if petUUID and d.protectFavorites then
+        local API = getgenv().ZenxAPS
+        if API and API.isFav(petUUID) then
+            dbg("[gift] SKIP: pet favorit (protectFavorites ON) uuid="..tostring(petUUID):sub(1,8))
+            return false
+        end
     end
     -- v12.89: lock untuk pause auto-boost selama gift jalan
     if M78 then M78.giftInProgress = true end
@@ -779,24 +752,27 @@ local function sendTradeToPlayer(targetName, petUUIDs)
         for _, u in ipairs(petUUIDs) do table.insert(uuidList, u) end
     end
 
-    -- v13.06: SAFETY FILTER - buang pet favorit dari uuidList kalo protectFavorites ON
+    -- v13.08: SAFETY FILTER - buang pet favorit dari uuidList kalo protectFavorites ON
     if d.protectFavorites then
-        local filtered = {}
-        local skipped = 0
-        for _, u in ipairs(uuidList) do
-            if isFavoriteAPS(u) then
-                skipped = skipped + 1
-            else
-                table.insert(filtered, u)
+        local API = getgenv().ZenxAPS
+        if API then
+            local filtered = {}
+            local skipped = 0
+            for _, u in ipairs(uuidList) do
+                if API.isFav(u) then
+                    skipped = skipped + 1
+                else
+                    table.insert(filtered, u)
+                end
             end
-        end
-        if skipped > 0 then
-            dbg("[trade] PROTECT: skip "..skipped.." pet favorit (protectFavorites ON)")
-        end
-        uuidList = filtered
-        if #uuidList == 0 then
-            dbg("[trade] CANCEL: semua pet ke-filter (favorit)")
-            return false
+            if skipped > 0 then
+                dbg("[trade] PROTECT: skip "..skipped.." pet favorit (protectFavorites ON)")
+            end
+            uuidList = filtered
+            if #uuidList == 0 then
+                dbg("[trade] CANCEL: semua pet ke-filter (favorit)")
+                return false
+            end
         end
     end
 
@@ -846,8 +822,11 @@ local function unfavoritePet(uuid, isAuto)
         pcall(function() equipRE:FireServer(act,u,false) end)
         pcall(function() petLeadRE:FireServer(act,u,false) end)
     end
-    -- v13.06: invalidate APS cache so next isFavorite check returns fresh data
-    if invalidateAPSCache then pcall(invalidateAPSCache, uuid) end
+    -- v13.08: invalidate APS cache so next isFavorite check returns fresh data
+    do
+        local API = getgenv().ZenxAPS
+        if API and API.invalidate then pcall(API.invalidate, uuid) end
+    end
     return true
 end
 
@@ -1131,11 +1110,13 @@ end
 function getAgeFromKG(item)
     if not item then return nil end
     local uuid=getPetUUID(item)
-    -- v13.05: APS FAST PATH (server data, akurat untuk SEMUA pet)
-    -- Skip semua workaround (kg-math, UI scan) kalo APS jalan
+    -- v13.08: APS FAST PATH via getgenv().ZenxAPS (akurat untuk SEMUA pet)
     if uuid then
-        local apsAge = getAgeAPS(uuid)
-        if apsAge then return apsAge end
+        local API = getgenv().ZenxAPS
+        if API then
+            local apsAge = API.getAge(uuid)
+            if apsAge then return apsAge end
+        end
     end
     local uiAge=nil
     if uuid then uiAge=getAgeFromUI(uuid) end
