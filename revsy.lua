@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.06"
+local SCRIPT_VERSION="v13.07"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (APS integration + Protect Favorites di Auto Gift/Trade/Unfav)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (encoding fix: hapus unicode di source)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -93,10 +93,10 @@ end
 if not equipRE then equipRE = petLeadRE end
 dbg("Step 2 OK: remotes ("..tostring(equipRE.Name)..", "..tostring(petLeadRE.Name)..", CD="..(getCooldownRF and "OK" or "no")..")")
 
--- ============= APS (ActivePetsService) API — v13.04+ =============
+-- ============= APS (ActivePetsService) API -- v13.04+ =============
 -- Source of truth utk Age, Mutation, Favorite, dll (lebih akurat drpd parse name/UI)
 local APS = nil
-local PetMutationMap = nil  -- code → readable name (EV→Everchanted, A→Nightmare, dll)
+local PetMutationMap = nil  -- code -> readable name (EV->Everchanted, A->Nightmare, dll)
 local function _loadAPS()
     local ok, mod = pcall(function()
         return require(RS.Modules.PetServices.ActivePetsService)
@@ -133,7 +133,7 @@ local function getPetDataAPS(uuid)
     return nil
 end
 
--- Bulk loader — sekali fetch semua pet data dari datastore (lebih efisien drpd 1-by-1)
+-- Bulk loader -- sekali fetch semua pet data dari datastore (lebih efisien drpd 1-by-1)
 local _datastoreCache = nil
 local _datastoreCacheTime = 0
 local DS_CACHE_TTL = 8
@@ -1039,11 +1039,11 @@ local getAgeFromUI = (function()
                         local lname=d.Name:lower()
                         -- v12.79g: check label NAME (not just PET_AGE) + broader text patterns
                         if d.Name=="PET_AGE" or lname:find("age",1,true) or lname:find("lvl",1,true) or lname:find("level",1,true) then
-                            -- Label namanya age-related → ambil angka pertama
+                            -- Label namanya age-related -> ambil angka pertama
                             age=tonumber(txt:match("(%d+)"))
                             if not age and txt:lower():match("max") then age=100 end
                         else
-                            -- Label name biasa → cari pattern "Age N", "Lv N", "Level N", atau "N/100"
+                            -- Label name biasa -> cari pattern "Age N", "Lv N", "Level N", atau "N/100"
                             age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
                             if not age then age=tonumber(txt:match("[Ll][Vv]l?%.?[^%d]*(%d+)")) end
                             -- Pattern "N/100" (biasa di progress label)
@@ -2347,7 +2347,7 @@ local function buildOtherSetting()
     -- v13.06: PROTECT FAVORITES section
     div(areas[4],11)
     local t4=lbl(areas[4],"SAFETY",11,C.Teal) t4.Size=UDim2.new(1,0,0,14) t4.LayoutOrder=12
-    local _,pfTog,pfTogStroke,pfStroke=togRow(areas[4],"Protect Favorit Pet","Skip pet ⭐ favorit di Auto Gift/Trade/Unfav",13)
+    local _,pfTog,pfTogStroke,pfStroke=togRow(areas[4],"Protect Favorit Pet","Skip pet * favorit di Auto Gift/Trade/Unfav",13)
     local function setPfTog(val)
         pfTog.Text=val and "ON" or "OFF"
         pfTog.BackgroundColor3=val and C.TDim or C.Panel
@@ -2370,7 +2370,7 @@ end
 local accStatusLbl=nil
 local sendStatusLbl=nil
 
--- v12.79: Modal picker helper — floating popup overlay (replaces inline expanding pickers)
+-- v12.79: Modal picker helper -- floating popup overlay (replaces inline expanding pickers)
 -- usage: showPickerModal({title=, items={{value=,label=,selected=}}, multi=, onSelect=, emptyText=})
 local function showPickerModal(opts)
     local backdrop=mk("Frame",{Size=UDim2.new(1,0,1,0),Position=UDim2.new(0,0,0,0),BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=0.45,BorderSizePixel=0,ZIndex=100,Parent=main})
@@ -2499,7 +2499,7 @@ local function buildAutoGift()
     local function buildGiftContent(slotIdx,parent)
         local slot=giftSlots[slotIdx]
 
-        -- v12.79: Target picker → modal popup
+        -- v12.79: Target picker -> modal popup
         -- v12.93: multi-select target
         local function trText()
             local n = #slot.targets
@@ -2613,7 +2613,7 @@ local function buildAutoGift()
             return n
         end
 
-        -- v12.79: Pet Type picker → modal popup (multi-select)
+        -- v12.79: Pet Type picker -> modal popup (multi-select)
         local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=3,Parent=parent})
         corner(pickRow,6) local pickStroke=stroke(pickRow,C.Dim,1.1)
         local pickLbl=lbl(pickRow,"Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)",13,C.White)
@@ -2709,7 +2709,7 @@ local function buildAutoGift()
             })
         end)
 
-        -- v12.79: Mutation Filter picker → modal popup
+        -- v12.79: Mutation Filter picker -> modal popup
         local function mfText()
             if slot.mutationFilter == "" then return "(Semua mutasi)" end
             if slot.mutationFilter == "__nomut__" then return "[TANPA MUTASI]" end
@@ -3026,7 +3026,7 @@ autoSendTask = task.spawn(function()
                         local unfavCount=0
                         for _,pet in ipairs(matched) do
                             if pet.fav then
-                                -- v13.06: pass isAuto=true → blocked kalo protectFavorites ON
+                                -- v13.06: pass isAuto=true -> blocked kalo protectFavorites ON
                                 local ok = unfavoritePet(pet.uuid, true)
                                 if ok then
                                     print("[ZenxUnfav] slot "..slotIdx.." unfav "..pet.uuid)
@@ -3062,7 +3062,7 @@ autoSendTask = task.spawn(function()
                             local sentCount=0
                             for _,uuid in ipairs(sendable) do
                                 if not slot.autoSendGift then break end
-                                -- v12.79j: live re-check - target/petType di-clear → skip pet ini
+                                -- v12.79j: live re-check - target/petType di-clear -> skip pet ini
                                 if slot.target == "" then break end
                                 if not petStillMatches(uuid, slot) then
                                     sentCount = sentCount + 1
@@ -3620,7 +3620,7 @@ do
         })
     end)
 
-    -- v12.79o → v12.82: Pet type filter picker - sekarang pake ALL_PETS list (semua pet types)
+    -- v12.79o -> v12.82: Pet type filter picker - sekarang pake ALL_PETS list (semua pet types)
     local function countBoostTypes()
         local n = 0
         for _ in pairs(M78.boostPetTypes) do n = n + 1 end
@@ -3834,7 +3834,7 @@ task.spawn(function()
                 end
             end
         else
-            -- Toggle off → reset cycle, ready to start when toggled on
+            -- Toggle off -> reset cycle, ready to start when toggled on
             M78.feedMode = "idle"
             M78.feedNextStartAt = 0
         end
