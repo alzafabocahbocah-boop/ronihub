@@ -4,7 +4,7 @@ print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
 warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (encoding fix: hapus unicode di source)")
 
 local RS = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
+local Players = game:GetService("Players") 
 local HS = game:GetService("HttpService")
 local TS = game:GetService("TeleportService")
 local CS = game:GetService("CollectionService")
