@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.05"
+local SCRIPT_VERSION="v13.06"
 print("==== [ZenxLvl] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (APS integration: age/mutation/favorite akurat untuk mutation pets)")
+warn("[ZenxLvl] versi: "..SCRIPT_VERSION.." (APS integration + Protect Favorites di Auto Gift/Trade/Unfav)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -242,12 +242,15 @@ if not getgenv().ZenxData then
         fromAge=1,toAge=100,maxPetTarget=1,
         autoStartEnabled=false,autoRejoin=false,
         autoAccGift=false,autoAccTrade=false,
+        protectFavorites=true, -- v13.06: safety - skip favorit di Auto Gift/Trade/Unfav
     }
 elseif loaded then
     for k,v in pairs(loaded) do getgenv().ZenxData[k]=v end
 end
 local d=getgenv().ZenxData
-dbg("Step 3 OK: data loaded")
+-- v13.06: ensure flag exists kalo loaded data lama (pre-v13.06)
+if d.protectFavorites == nil then d.protectFavorites = true end
+dbg("Step 3 OK: data loaded | protectFav="..tostring(d.protectFavorites))
 
 -- v11.6: toAge declared EARLY (sebelum donesLbl spawn + _doBuildInvShow function)
 -- biar ke-capture sebagai upvalue, bukan global nil
@@ -643,6 +646,11 @@ local function sendGiftToPlayer(targetName, petUUID)
         dbg("[gift] FAIL: player gak ada di server")
         return false
     end
+    -- v13.06: SAFETY GUARD - tolak gift pet favorit kalo protectFavorites ON
+    if petUUID and d.protectFavorites and isFavoriteAPS(petUUID) then
+        dbg("[gift] SKIP: pet favorit (protectFavorites ON) uuid="..tostring(petUUID):sub(1,8))
+        return false
+    end
     -- v12.89: lock untuk pause auto-boost selama gift jalan
     if M78 then M78.giftInProgress = true end
     local function unlock() if M78 then M78.giftInProgress = false end end
@@ -771,6 +779,27 @@ local function sendTradeToPlayer(targetName, petUUIDs)
         for _, u in ipairs(petUUIDs) do table.insert(uuidList, u) end
     end
 
+    -- v13.06: SAFETY FILTER - buang pet favorit dari uuidList kalo protectFavorites ON
+    if d.protectFavorites then
+        local filtered = {}
+        local skipped = 0
+        for _, u in ipairs(uuidList) do
+            if isFavoriteAPS(u) then
+                skipped = skipped + 1
+            else
+                table.insert(filtered, u)
+            end
+        end
+        if skipped > 0 then
+            dbg("[trade] PROTECT: skip "..skipped.." pet favorit (protectFavorites ON)")
+        end
+        uuidList = filtered
+        if #uuidList == 0 then
+            dbg("[trade] CANCEL: semua pet ke-filter (favorit)")
+            return false
+        end
+    end
+
     local ok1, err1 = pcall(function()
         tradeSendReqRE:FireServer(targetPlayer)
     end)
@@ -802,7 +831,13 @@ local function sendTradeToPlayer(targetName, petUUIDs)
     return added > 0
 end
 
-local function unfavoritePet(uuid)
+local function unfavoritePet(uuid, isAuto)
+    -- v13.06: SAFETY - kalo auto-unfav (dari slot.autoUnfav loop) dan protectFavorites ON, REFUSE
+    -- isAuto=true ditandai dari panggilan auto, isAuto=false/nil = manual user action (allow)
+    if isAuto and d.protectFavorites then
+        dbg("[unfav] BLOCK: protectFavorites ON, skip auto-unfav uuid="..tostring(uuid):sub(1,8))
+        return false
+    end
     local u=fmtUUID(uuid)
     local actions={"UnfavoritePet","UnfavouritePet","ToggleFavorite","ToggleFavourite","SetFavorite","SetFavourite","Unfavorite","Unfavourite","Unfav","Unlove","ToggleLove","SetLove","ToggleHeart"}
     for _,act in ipairs(actions) do
@@ -811,6 +846,9 @@ local function unfavoritePet(uuid)
         pcall(function() equipRE:FireServer(act,u,false) end)
         pcall(function() petLeadRE:FireServer(act,u,false) end)
     end
+    -- v13.06: invalidate APS cache so next isFavorite check returns fresh data
+    if invalidateAPSCache then pcall(invalidateAPSCache, uuid) end
+    return true
 end
 
 local function passKgFilter(item,filterStr)
@@ -2305,6 +2343,25 @@ local function buildOtherSetting()
     end
     setAfkTog(antiAfk)
     afkTog.MouseButton1Click:Connect(function() antiAfk=not antiAfk setAfkTog(antiAfk) save() end)
+
+    -- v13.06: PROTECT FAVORITES section
+    div(areas[4],11)
+    local t4=lbl(areas[4],"SAFETY",11,C.Teal) t4.Size=UDim2.new(1,0,0,14) t4.LayoutOrder=12
+    local _,pfTog,pfTogStroke,pfStroke=togRow(areas[4],"Protect Favorit Pet","Skip pet ⭐ favorit di Auto Gift/Trade/Unfav",13)
+    local function setPfTog(val)
+        pfTog.Text=val and "ON" or "OFF"
+        pfTog.BackgroundColor3=val and C.TDim or C.Panel
+        pfTog.TextColor3=val and C.Gold or C.Gray
+        pfTogStroke.Color=val and C.Gold or C.Dim
+        pfStroke.Color=val and C.Gold or C.Dim
+    end
+    setPfTog(d.protectFavorites)
+    pfTog.MouseButton1Click:Connect(function()
+        d.protectFavorites = not d.protectFavorites
+        setPfTog(d.protectFavorites)
+        save()
+        dbg("[ZenxLvl] protectFavorites = "..tostring(d.protectFavorites))
+    end)
 end
 
 -- ============================================
@@ -2969,9 +3026,12 @@ autoSendTask = task.spawn(function()
                         local unfavCount=0
                         for _,pet in ipairs(matched) do
                             if pet.fav then
-                                unfavoritePet(pet.uuid)
-                                print("[ZenxUnfav] slot "..slotIdx.." unfav "..pet.uuid)
-                                unfavCount=unfavCount+1
+                                -- v13.06: pass isAuto=true → blocked kalo protectFavorites ON
+                                local ok = unfavoritePet(pet.uuid, true)
+                                if ok then
+                                    print("[ZenxUnfav] slot "..slotIdx.." unfav "..pet.uuid)
+                                    unfavCount=unfavCount+1
+                                end
                                 task.wait(0.2)
                             end
                         end
