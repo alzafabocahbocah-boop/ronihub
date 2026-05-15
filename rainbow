@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.55"
+local SCRIPT_VERSION="v13.56"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Pet Tim auto-sync ke garden tanpa stop)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (FIX teamKeeper loop dgn monitor utk pet age 50+)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1940,13 +1940,11 @@ buildTimList=function()
                                 updatePreview()
                                 syncSwapTab()
                                 save()
-                                -- v13.55: AUTO-SYNC ke garden (gak perlu stop dulu)
+                                -- v13.55+v13.56: AUTO-SYNC ke garden (gak perlu stop dulu)
+                                -- v13.56: JANGAN add ke currentLevelingUUIDs (biar monitor gak unequip pet age 50+)
+                                -- teamKeeper handle re-equip, monitor cuma track pet dari queue
                                 if nowIn then
                                     pcall(function() equipPet(cu) end)
-                                    if isRunning then
-                                        currentLevelingUUIDs[cu]=true
-                                        if equipTime then equipTime[cu]=tick() end
-                                    end
                                     dbg("[tim-sync] ON: "..cu:sub(1,8).." -> garden")
                                 else
                                     pcall(function() unequipPet(cu) end)
@@ -2042,13 +2040,10 @@ buildTimList=function()
                                     updatePreview()
                                     syncSwapTab()
                                     save()
-                                    -- v13.55: AUTO-SYNC ke garden (placed pet juga)
+                                    -- v13.55+v13.56: AUTO-SYNC ke garden (placed pet juga)
+                                    -- v13.56: JANGAN add ke currentLevelingUUIDs
                                     if nowIn then
                                         pcall(function() equipPet(cu) end)
-                                        if isRunning then
-                                            currentLevelingUUIDs[cu]=true
-                                            if equipTime then equipTime[cu]=tick() end
-                                        end
                                         dbg("[tim-sync] ON (placed): "..cu:sub(1,8).." -> garden")
                                     else
                                         pcall(function() unequipPet(cu) end)
@@ -4967,7 +4962,9 @@ startTeamKeeper=function()
         dbg("[teamKeeper] START (handle TIM only via ActivePetUI)")
         while teamKeeperShouldRun() do
             for uuid,_ in pairs(teamPetUUIDs) do
-                if not isPetInSwap(uuid) and not currentLevelingUUIDs[uuid] then
+                -- v13.56: SKIP pet yang udah completed (age >= toAge)
+                -- biar gak loop dgn monitor (monitor unequip, teamKeeper re-equip, infinite)
+                if not isPetInSwap(uuid) and not currentLevelingUUIDs[uuid] and not completedPets[uuid] then
                     if not isPetEquippedInUI(uuid) then
                         local uuidStr=tostring(uuid)
                         dbg("[teamKeeper] tim "..uuidStr:sub(1,8).." gak di UI, re-equip")
