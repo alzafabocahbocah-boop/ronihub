@@ -1,7 +1,7 @@
-\-- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.68"
+-- ============= ZENX LVL DEBUG =============
+local SCRIPT_VERSION="v13.69"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sample Tim Ele + Antrian di DEBUG STATE)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (HAPUS filter base KG di Antrian - pet selalu transfer)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1456,25 +1456,18 @@ task.spawn(function()
         end)
     end
 
-    -- Scan pet age >= toAge -> pendingElephant (filter base KG)
+    -- v13.69: Scan pet age >= toAge -> pendingElephant (NO base KG filter)
     local added = 0
-    local skippedHeavy = 0
     for uuidStr, info in pairs(livePets) do
         if info.PetData and info.PetData.Level and info.PetData.Level >= targetAge then
-            local baseW = info.PetData.BaseWeight or 0
             if not elephantTeamUUIDs[uuidStr] and not pendingElephant[uuidStr] then
-                if baseW > baseKGThreshold then
-                    skippedHeavy = skippedHeavy + 1
-                else
-                    pendingElephant[uuidStr] = true
-                    added = added + 1
-                end
+                pendingElephant[uuidStr] = true
+                added = added + 1
             end
         end
     end
-    if added > 0 or skippedHeavy > 0 then
-        dbg("[autoele] STARTUP: "..added.." pet -> Antrian Bless (base<=" .. baseKGThreshold .. "kg)"
-            ..(skippedHeavy > 0 and " | skip "..skippedHeavy.." pet (base>"..baseKGThreshold..")" or ""))
+    if added > 0 then
+        dbg("[autoele] STARTUP: "..added.." pet -> Antrian Bless")
     else
         dbg("[autoele] STARTUP: gak ada pet baru di antrian")
     end
@@ -2442,7 +2435,7 @@ local function buildTargetList()
     end)
     -- v13.50: Threshold Base KG - filter Antrian Bless
     -- Pet dengan base KG > threshold dianggap udah cukup berat, GAK masuk antrian
-    mkElephantInputRow(cfgCard, "Threshold Base KG (filter Antrian)", config.elephantBaseKGThreshold or 100, 3, function(v)
+    mkElephantInputRow(cfgCard, "Sampai KG Bless (target bless limit)", config.elephantBaseKGThreshold or 100, 3, function(v)
         config.elephantBaseKGThreshold = math.max(0.1, v)
     end)
 
@@ -5696,18 +5689,9 @@ doStart = function()
 
                 -- v13.58: helper - add target pet ke pendingElephant (Antrian) dgn base KG filter
                 local function moveToAntrian(uuid)
-                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 100
-                    local baseW = nil
-                    if getgenv().ZenxAPS then
-                        local pinfo = getgenv().ZenxAPS.getPetData(uuid)
-                        if pinfo and pinfo.PetData then baseW = pinfo.PetData.BaseWeight end
-                    end
-                    if baseW and baseW > baseKGThr then
-                        dbg("[rotate] "..tostring(uuid):sub(1,8).." base "..baseW.."kg > "..baseKGThr.."kg, SKIP antrian")
-                    else
-                        pendingElephant[uuid] = true
-                        dbg("[rotate] "..tostring(uuid):sub(1,8).." -> Antrian Bless")
-                    end
+                    -- v13.69: HAPUS filter base KG (threshold buat bless limit, bukan filter)
+                    pendingElephant[uuid] = true
+                    dbg("[rotate] "..tostring(uuid):sub(1,8).." -> Antrian Bless")
                     completedPets[uuid] = true
                 end
 
@@ -5842,30 +5826,17 @@ doStart = function()
                 end
             end
             if #toFinish > 0 then
-                local baseKGThr = (config and config.elephantBaseKGThreshold) or 100
+                -- v13.69: HAPUS filter base KG di transfer (threshold itu buat bless limit, bukan filter)
                 local moved = 0
-                local skipped = 0
                 for _, uuid in ipairs(toFinish) do
                     local normUuid = tostring(uuid):gsub("^{",""):gsub("}$","")
-                    local baseW = nil
-                    local info = livePets[normUuid]
-                    if info and info.PetData then baseW = info.PetData.BaseWeight end
-                    if not baseW and getgenv().ZenxAPS then
-                        local ok, pd = pcall(function() return getgenv().ZenxAPS.getPetData(uuid) end)
-                        if ok and pd and pd.PetData then baseW = pd.PetData.BaseWeight end
-                    end
-                    if baseW and baseW > baseKGThr then
-                        dbg("[teamDone] SKIP "..normUuid:sub(1,8).." base="..baseW.."kg > thr "..baseKGThr.."kg")
-                        skipped = skipped + 1
-                    else
-                        pendingElephant[uuid] = true
-                        dbg("[teamDone] OK "..normUuid:sub(1,8).." -> Antrian Bless (base="..tostring(baseW).."kg)")
-                        moved = moved + 1
-                    end
+                    pendingElephant[uuid] = true
+                    dbg("[teamDone] OK "..normUuid:sub(1,8).." -> Antrian Bless")
+                    moved = moved + 1
                     completedPets[uuid] = true
                     pcall(function() unequipPet(uuid) end)
                 end
-                dbg("[teamDone] PROCESS: "..moved.." pet -> Antrian Bless | "..skipped.." skipped (base > "..baseKGThr.."kg) | total toFinish="..#toFinish)
+                dbg("[teamDone] PROCESS: "..moved.." pet -> Antrian Bless | total toFinish="..#toFinish)
             end
             task.wait(1)
         end
@@ -5938,18 +5909,8 @@ doStart = function()
                                 if newAge and newAge>=toAge then
                                     dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck) -> done")
                                     completedPets[uuid]=true
-                                    -- v13.47/v13.50: BATCH MODE + base KG filter di recheck
-                                    local baseKGThr2 = (config and config.elephantBaseKGThreshold) or 100
-                                    local baseW2 = nil
-                                    if getgenv().ZenxAPS then
-                                        local pinfo2 = getgenv().ZenxAPS.getPetData(uuid)
-                                        if pinfo2 and pinfo2.PetData then baseW2 = pinfo2.PetData.BaseWeight end
-                                    end
-                                    if baseW2 and baseW2 > baseKGThr2 then
-                                        dbg("[monitor] "..uuid:sub(1,8).." base "..baseW2.."kg > "..baseKGThr2.."kg, SKIP antrian")
-                                    else
-                                        pendingElephant[uuid] = true
-                                    end
+                                    -- v13.69: HAPUS filter base KG (threshold buat bless limit, bukan filter)
+                                    pendingElephant[uuid] = true
                                     table.insert(doneList,uuid)
                                 else
                                     pcall(function() equipPet(uuid) end)
@@ -6089,20 +6050,15 @@ doStart = function()
                     local baseKGThr = (config and config.elephantBaseKGThreshold) or 100
                     local moved, skippedHeavy, skippedType = 0, 0, 0
                     for uuid, _ in pairs(pendingElephant) do
-                        local petType, baseW = nil, nil
+                        local petType = nil
                         if getgenv().ZenxAPS then
                             local pd = getgenv().ZenxAPS.getPetData(uuid)
-                            if pd then
-                                petType = pd.PetType
-                                if pd.PetData then baseW = pd.PetData.BaseWeight end
-                            end
+                            if pd then petType = pd.PetType end
                         end
+                        -- v13.69: HAPUS filter base KG (threshold itu buat bless limit, bukan filter transfer)
                         local passType = (filterType == "") or (petType == filterType) or (getBaseName and petType and getBaseName(petType) == filterType)
-                        local passKG = (not baseW) or (baseW <= baseKGThr)
                         if not passType then
                             skippedType = skippedType + 1
-                        elseif not passKG then
-                            skippedHeavy = skippedHeavy + 1
                         else
                             if not elephantTeamUUIDs[uuid] then
                                 elephantTeamUUIDs[uuid] = true
@@ -6114,7 +6070,6 @@ doStart = function()
                     if moved > 0 then pcall(save) end
                     local extraInfo = ""
                     if skippedType > 0 then extraInfo = extraInfo.." | skip "..skippedType.." beda jenis" end
-                    if skippedHeavy > 0 then extraInfo = extraInfo.." | skip "..skippedHeavy.." base>"..baseKGThr end
                     dbg("[batch-ele] DONE: "..moved.." pet -> Tim Elephant"..extraInfo)
                     statusLbl.Text="Done! "..moved.." pet -> Tim Elephant"
                 elseif pendingCount > 0 then
