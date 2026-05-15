@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.44"
+local SCRIPT_VERSION="v13.46"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (APS integration + protect favorites + garden pet detection)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (auto-pindah pet selesai leveling ke Tim Elephant)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -974,6 +974,12 @@ end
 function getAgeFromKG(item)
     if not item then return nil end
     local uuid=getPetUUID(item)
+    -- v13.44: APS FAST PATH - server data, akurat untuk SEMUA pet termasuk mutation
+    -- Bypass legacy logic kalau APS jalan (lebih cepat & akurat)
+    if uuid and getgenv().ZenxAPS then
+        local apsAge = getgenv().ZenxAPS.getAge(uuid)
+        if apsAge then return apsAge end
+    end
     local uiAge=nil
     if uuid then uiAge=getAgeFromUI(uuid) end
 
@@ -1389,6 +1395,40 @@ local targetPetUUIDs = d.targetPetUUIDs or {}  -- v13.17: Pet Target = pet yg di
 local targetPetInfoCache = d.targetPetInfoCache or {}
 local autoElephantCycle = d.autoElephantCycle or false  -- Auto Elephant Cycle toggle
 local teamPetInfoCache=d.teamPetInfoCache or {}
+
+-- v13.45: AUTO-ADD pets yang udah age >= toAge ke Tim Elephant (startup scan)
+-- Scan dari APS bulk (catch pet di Backpack + Equipped/Garden)
+task.spawn(function()
+    task.wait(2) -- biar APS sempet load
+    if not getgenv().ZenxAPS or not getgenv().ZenxAPS.api then
+        dbg("[autoele] APS gak ready, skip startup scan")
+        return
+    end
+    local targetAge = d.toAge or 50
+    local allPets = getgenv().ZenxAPS.getAllPets()
+    local added = 0
+    for uuid, info in pairs(allPets) do
+        if info.PetData and info.PetData.Level and info.PetData.Level >= targetAge then
+            local uuidStr = tostring(uuid)
+            if not elephantTeamUUIDs[uuidStr] then
+                elephantTeamUUIDs[uuidStr] = true
+                added = added + 1
+            end
+        end
+    end
+    if added > 0 then
+        dbg("[autoele] STARTUP: auto-add "..added.." pet (age>="..targetAge..") ke Tim Elephant")
+        pcall(function()
+            d.elephantTeamUUIDs = elephantTeamUUIDs
+            if writefile then
+                local enc = HS:JSONEncode(d)
+                pcall(writefile, "ZenxLvlData.json", enc)
+            end
+        end)
+    else
+        dbg("[autoele] STARTUP: gak ada pet baru (age>="..targetAge..") buat auto-add")
+    end
+end)
 
 -- v12.99: forward declare showPickerModal biar bisa dipake di cfgCard
 local showPickerModal
@@ -4717,7 +4757,8 @@ local function getQueue()
                     local name=getPetName(item)
                     if isTargetPet(name) then
                         local age=getAgeFromKG(item)
-                        if age==nil or (age>=fromAge and age<toAge) then
+                        -- v13.44 FIX: kalo age UNKNOWN, jangan equip (sebelumnya accept nil bikin pet age 50+ ikut equip)
+                        if age and age>=fromAge and age<toAge then
                             table.insert(queue,item)
                         end
                     end
@@ -5124,8 +5165,12 @@ doStart = function()
                 if item then toolAge=getAgeFromKG(item) end
                 local placedAge=nil
                 if placed then placedAge=getPlacedPetAge(placed) end
+                -- v13.44: APS sebagai source utama (akurat untuk equipped pets juga)
+                local apsAge=nil
+                if getgenv().ZenxAPS then apsAge=getgenv().ZenxAPS.getAge(uuid) end
 
                 local age=nil local source=nil
+                if apsAge and (not age or apsAge>age) then age=apsAge; source="aps" end
                 if uiAge and (not age or uiAge>age) then age=uiAge; source="ui" end
                 if toolAge and (not age or toolAge>age) then age=toolAge; source="tool" end
                 if placedAge and (not age or placedAge>age) then age=placedAge; source="placed" end
@@ -5133,6 +5178,12 @@ doStart = function()
                 if age and age>=toAge then
                     dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done")
                     completedPets[uuid]=true
+                    -- v13.45: AUTO-PINDAH ke Tim Elephant (user gak perlu manual select)
+                    if not elephantTeamUUIDs[uuid] then
+                        elephantTeamUUIDs[uuid] = true
+                        dbg("[monitor] "..uuid:sub(1,8).." -> AUTO-ADDED ke Tim Elephant")
+                        pcall(save)
+                    end
                     table.insert(doneList,uuid)
                 else
                     if (not item) and (not placed) and not uiAge then
@@ -5157,6 +5208,12 @@ doStart = function()
                                 if newAge and newAge>=toAge then
                                     dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck) -> done")
                                     completedPets[uuid]=true
+                                    -- v13.45: AUTO-PINDAH ke Tim Elephant juga di recheck path
+                                    if not elephantTeamUUIDs[uuid] then
+                                        elephantTeamUUIDs[uuid] = true
+                                        dbg("[monitor] "..uuid:sub(1,8).." -> AUTO-ADDED ke Tim Elephant (recheck)")
+                                        pcall(save)
+                                    end
                                     table.insert(doneList,uuid)
                                 else
                                     pcall(function() equipPet(uuid) end)
