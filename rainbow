@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.59"
+local SCRIPT_VERSION="v13.61"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (TEAM DONE monitor - teamPetUUIDs done -> Antrian)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (BULK APS fetch + per-pet debug log untuk teamDone)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2461,6 +2461,136 @@ local function buildTargetList()
             end)
             task.wait(2)
         end
+    end)
+
+    -- v13.49+v13.60: Pet Antrian Bless section - pet target selesai leveling, nunggu di-bless
+    -- v13.60: expose pendingElephant ke getgenv biar diagnostic bisa cek
+    getgenv().ZenxPendingElephant = pendingElephant
+    getgenv().ZenxCurrentLevelingUUIDs = currentLevelingUUIDs
+    getgenv().ZenxCompletedPets = completedPets
+
+    -- v13.60: DEBUG STATE button (atas Antrian Bless card)
+    local debugBtnRow = mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundTransparency=1,LayoutOrder=2.5,Parent=areas[2]})
+    local debugBtn = btn(debugBtnRow,"DEBUG STATE (cek diagnostik)",10,C.Panel,C.Teal)
+    debugBtn.Size = UDim2.new(1,0,1,0)
+    corner(debugBtn,5) stroke(debugBtn,C.Teal,1)
+    debugBtn.MouseButton1Click:Connect(function()
+        -- Build state text
+        local function cnt(t) local n=0 for _ in pairs(t) do n=n+1 end return n end
+        local pendingCt = cnt(pendingElephant)
+        local teamCt = cnt(teamPetUUIDs)
+        local targetCt = cnt(targetPetUUIDs)
+        local eleCt = cnt(elephantTeamUUIDs)
+        local curLvlCt = cnt(currentLevelingUUIDs)
+        local compCt = cnt(completedPets)
+        local apsOk = (getgenv().ZenxAPS and getgenv().ZenxAPS.api) and "OK" or "FAIL"
+        local apsAllCt = 0
+        local apsAge50Ct = 0
+        if getgenv().ZenxAPS then
+            local all = getgenv().ZenxAPS.getAllPets()
+            for _, info in pairs(all) do
+                apsAllCt = apsAllCt + 1
+                if info.PetData and info.PetData.Level and info.PetData.Level >= (toAge or 50) then
+                    apsAge50Ct = apsAge50Ct + 1
+                end
+            end
+        end
+
+        local lines = {
+            "=== ZENX STATE v"..(SCRIPT_VERSION or "?").." ===",
+            "isRunning: "..tostring(isRunning),
+            "toAge: "..tostring(toAge),
+            "baseKG threshold: "..tostring(config and config.elephantBaseKGThreshold or "?"),
+            "",
+            "--- COUNTS ---",
+            "teamPetUUIDs (Pet Tim): "..teamCt,
+            "targetPetUUIDs (Pet Target): "..targetCt,
+            "elephantTeamUUIDs (Tim Ele): "..eleCt,
+            "currentLevelingUUIDs (aktif): "..curLvlCt,
+            "completedPets: "..compCt,
+            "pendingElephant (Antrian): "..pendingCt,
+            "",
+            "--- APS ---",
+            "ZenxAPS: "..apsOk,
+            "APS live pets: "..apsAllCt,
+            "Pet age >= "..(toAge or 50)..": "..apsAge50Ct,
+            "",
+            "--- DIAGNOSE ---",
+        }
+
+        -- Sample 5 pets dari teamPetUUIDs dgn age
+        if teamCt > 0 then
+            table.insert(lines,"Sample teamPet:")
+            local i=0
+            for uuid,_ in pairs(teamPetUUIDs) do
+                i = i + 1 if i > 5 then break end
+                local info = "?"
+                if getgenv().ZenxAPS then
+                    local pd = getgenv().ZenxAPS.getPetData(uuid)
+                    if pd then
+                        local age = (pd.PetData and pd.PetData.Level) or "?"
+                        info = (pd.PetType or "?").." age="..tostring(age)
+                    end
+                end
+                table.insert(lines,"  "..uuid:sub(1,8).." | "..info)
+            end
+        end
+        if targetCt > 0 then
+            table.insert(lines,"Sample targetPet:")
+            local i=0
+            for uuid,_ in pairs(targetPetUUIDs) do
+                i = i + 1 if i > 5 then break end
+                local info = "?"
+                if getgenv().ZenxAPS then
+                    local pd = getgenv().ZenxAPS.getPetData(uuid)
+                    if pd then
+                        local age = (pd.PetData and pd.PetData.Level) or "?"
+                        info = (pd.PetType or "?").." age="..tostring(age)
+                    end
+                end
+                table.insert(lines,"  "..uuid:sub(1,8).." | "..info)
+            end
+        end
+
+        -- Build popup
+        local txt = table.concat(lines,"\n")
+        print("[DEBUG STATE]\n"..txt)
+
+        -- GUI popup
+        pcall(function() main:FindFirstChild("ZenxDebugPopup"):Destroy() end)
+        local pop = mk("Frame",{
+            Name = "ZenxDebugPopup",
+            Size = UDim2.new(0,400,0,400),
+            Position = UDim2.new(0.5,-200,0.5,-200),
+            BackgroundColor3 = C.Panel, BorderSizePixel = 0,
+            ZIndex = 50, Parent = main,
+        })
+        corner(pop,8) stroke(pop,C.Teal,2)
+        local titleL = lbl(pop,"DEBUG STATE",13,C.Teal)
+        titleL.Size = UDim2.new(1,-40,0,24) titleL.Position = UDim2.new(0,10,0,6) titleL.ZIndex = 51
+        local closeBtn2 = btn(pop,"X",12,C.RDim,C.Red)
+        closeBtn2.Size = UDim2.new(0,24,0,24) closeBtn2.Position = UDim2.new(1,-30,0,6) closeBtn2.ZIndex = 51
+        closeBtn2.MouseButton1Click:Connect(function() pop:Destroy() end)
+        local scrollD = mk("ScrollingFrame",{
+            Size = UDim2.new(1,-20,1,-80), Position = UDim2.new(0,10,0,34),
+            BackgroundColor3 = C.Card, BorderSizePixel = 0,
+            ScrollBarThickness = 5, CanvasSize = UDim2.new(0,0,0,#lines*14+10),
+            ZIndex = 51, Parent = pop,
+        })
+        local txtLbl = lbl(scrollD,txt,11,C.White)
+        txtLbl.Size = UDim2.new(1,-10,1,0) txtLbl.Position = UDim2.new(0,5,0,5)
+        txtLbl.TextXAlignment = Enum.TextXAlignment.Left
+        txtLbl.TextYAlignment = Enum.TextYAlignment.Top
+        txtLbl.TextWrapped = true txtLbl.ZIndex = 52 txtLbl.Font = Enum.Font.Code
+
+        local copyB = btn(pop,"COPY",12,C.TDim,C.Teal)
+        copyB.Size = UDim2.new(0,100,0,28) copyB.Position = UDim2.new(0.5,-50,1,-36)
+        copyB.ZIndex = 51 stroke(copyB,C.Teal,1.2)
+        copyB.MouseButton1Click:Connect(function()
+            if setclipboard then pcall(setclipboard,txt) end
+            copyB.Text = "COPIED"
+            task.wait(1.5) copyB.Text = "COPY"
+        end)
     end)
 
     -- v13.49: Pet Antrian Bless section - pet target selesai leveling, nunggu di-bless
@@ -5565,37 +5695,67 @@ doStart = function()
 
     -- v13.59: TEAM DONE MONITOR - pet di teamPetUUIDs yang reach age toAge -> pindah Antrian
     -- Penting: user mungkin pake Pet Tim Leveling (bukan Pet Target), need handle ini juga
+    -- v13.61: pakai bulk getAllPets (lebih reliable, gak per-pet API call yang bisa throw)
     task.spawn(function()
         dbg("[teamDone] monitor task STARTED, target="..tostring(toAge))
         local lastDumpTeam = 0
         while isRunning do
             local toFinish = {}
             local dumpNowTeam = (tick() - lastDumpTeam > 5)
+            -- v13.61: BULK fetch SEMUA pet dari APS sekali aja
+            local livePets = {}
+            if getgenv().ZenxAPS then
+                local ok, all = pcall(function() return getgenv().ZenxAPS.getAllPets() end)
+                if ok and type(all) == "table" then
+                    for u, info in pairs(all) do livePets[tostring(u)] = info end
+                end
+            end
+
             if dumpNowTeam then
                 local cnt=0 for _ in pairs(teamPetUUIDs) do cnt=cnt+1 end
                 local pCnt=0 for _ in pairs(pendingElephant) do pCnt=pCnt+1 end
                 local cCnt=0 for _ in pairs(currentLevelingUUIDs) do cCnt=cCnt+1 end
-                dbg("[teamDone] DUMP team="..cnt.." | currentLvl="..cCnt.." | pending="..pCnt)
+                local liveCnt=0 for _ in pairs(livePets) do liveCnt=liveCnt+1 end
+                dbg("[teamDone] DUMP team="..cnt.." | currentLvl="..cCnt.." | pending="..pCnt.." | apsLive="..liveCnt)
                 lastDumpTeam = tick()
             end
+
             for uuid,_ in pairs(teamPetUUIDs) do
-                if not completedPets[uuid] then  -- skip yang udah completed
+                if not completedPets[uuid] then
+                    local uuidStr = tostring(uuid)
+                    -- v13.61: ambil dari bulk livePets DULU (paling reliable)
                     local age = nil
-                    -- coba semua source
-                    if getgenv().ZenxAPS then age = getgenv().ZenxAPS.getAge(uuid) end
-                    if not age then age = getAgeFromUI(uuid) end
+                    local petType = "?"
+                    local source = "none"
+                    local info = livePets[uuidStr]
+                    if info and info.PetData then
+                        age = info.PetData.Level
+                        petType = info.PetType or "?"
+                        source = "bulkAPS"
+                    end
+                    -- fallback ke per-pet API (kalau bulk gagal)
+                    if not age and getgenv().ZenxAPS then
+                        local ok, a = pcall(function() return getgenv().ZenxAPS.getAge(uuid) end)
+                        if ok and a then age = a; source = "perPetAPS" end
+                    end
+                    if not age then
+                        local a = getAgeFromUI(uuid)
+                        if a then age = a; source = "ui" end
+                    end
                     if not age then
                         local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
                         if item and item.Parent then
                             local ok, a = pcall(function() return getAgeFromKG(item) end)
-                            if ok then age = a end
+                            if ok and a then age = a; source = "tool" end
                         end
                     end
+
+                    if dumpNowTeam then
+                        dbg("[teamDone] "..uuid:sub(1,8).." | "..petType.." | age="..tostring(age).." | src="..source)
+                    end
+
                     if age and age >= toAge then
                         table.insert(toFinish, uuid)
-                        if dumpNowTeam then
-                            dbg("[teamDone] team "..uuid:sub(1,8).." age="..age.." >= "..toAge.." -> to finish")
-                        end
                     end
                 end
             end
@@ -5605,9 +5765,11 @@ doStart = function()
                 local skipped = 0
                 for _, uuid in ipairs(toFinish) do
                     local baseW = nil
-                    if getgenv().ZenxAPS then
-                        local pinfo = getgenv().ZenxAPS.getPetData(uuid)
-                        if pinfo and pinfo.PetData then baseW = pinfo.PetData.BaseWeight end
+                    local info = livePets[tostring(uuid)]
+                    if info and info.PetData then baseW = info.PetData.BaseWeight end
+                    if not baseW and getgenv().ZenxAPS then
+                        local ok, pd = pcall(function() return getgenv().ZenxAPS.getPetData(uuid) end)
+                        if ok and pd and pd.PetData then baseW = pd.PetData.BaseWeight end
                     end
                     if baseW and baseW > baseKGThr then
                         dbg("[teamDone] "..uuid:sub(1,8).." base "..baseW.."kg > "..baseKGThr..", skip antrian")
