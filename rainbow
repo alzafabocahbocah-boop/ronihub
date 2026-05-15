@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.43"
+local SCRIPT_VERSION="v13.44"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sampai KG sebagai stop threshold, deteksi via notif)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (APS integration + protect favorites + garden pet detection)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -93,6 +93,109 @@ end
 if not equipRE then equipRE = petLeadRE end
 dbg("Step 2 OK: remotes ("..tostring(equipRE.Name)..", "..tostring(petLeadRE.Name)..", CD="..(getCooldownRF and "OK" or "no")..")")
 
+-- ============= APS (ActivePetsService) API - v13.44 =============
+-- Source of truth utk Age/Mutation/Favorite, support equipped pets (tidak hilang dari list)
+-- Pakai do-end + getgenv biar gak hit Luau 200-local limit
+do
+    local ZAPS = {api = nil, mutMap = nil}
+    local cache, cacheTime = {}, {}
+    local dsCache, dsCacheTime = nil, 0
+    local TTL, DS_TTL = 5, 8
+
+    pcall(function() ZAPS.api = require(RS.Modules.PetServices.ActivePetsService) end)
+    pcall(function()
+        local mr = require(RS.Data.PetRegistry.PetMutationRegistry)
+        if mr and mr.EnumToPetMutation then ZAPS.mutMap = mr.EnumToPetMutation end
+    end)
+
+    function ZAPS.getPetData(uuid)
+        if not ZAPS.api or not uuid then return nil end
+        local key = tostring(uuid):gsub("^{",""):gsub("}$","")
+        local now = tick()
+        if cache[key] and (now - (cacheTime[key] or 0)) < TTL then return cache[key] end
+        local ok, info = pcall(function() return ZAPS.api:GetPetData(player.Name, key) end)
+        if ok and info and info.PetData then
+            cache[key] = info; cacheTime[key] = now
+            return info
+        end
+        return nil
+    end
+
+    function ZAPS.getAllPets()
+        if not ZAPS.api then return {} end
+        local now = tick()
+        if dsCache and (now - dsCacheTime) < DS_TTL then return dsCache end
+        local ok, ds = pcall(function() return ZAPS.api:GetPlayerDatastorePetData(player.Name) end)
+        if ok and ds and ds.PetInventory and ds.PetInventory.Data then
+            dsCache = ds.PetInventory.Data; dsCacheTime = now
+            return dsCache
+        end
+        return {}
+    end
+
+    function ZAPS.invalidate(uuid)
+        if uuid then
+            local key = tostring(uuid):gsub("^{",""):gsub("}$","")
+            cache[key] = nil; cacheTime[key] = nil
+        end
+        dsCache = nil
+    end
+
+    function ZAPS.getAge(uuid)
+        local info = ZAPS.getPetData(uuid)
+        if info and info.PetData and info.PetData.Level then return info.PetData.Level end
+        local all = ZAPS.getAllPets()
+        local key = tostring(uuid):gsub("^{",""):gsub("}$","")
+        local entry = all[key]
+        if entry and entry.PetData and entry.PetData.Level then return entry.PetData.Level end
+        return nil
+    end
+
+    function ZAPS.getMutCode(uuid)
+        local info = ZAPS.getPetData(uuid)
+        if info and info.PetData then return info.PetData.MutationType end
+        local all = ZAPS.getAllPets()
+        local key = tostring(uuid):gsub("^{",""):gsub("}$","")
+        local entry = all[key]
+        if entry and entry.PetData then return entry.PetData.MutationType end
+        return nil
+    end
+
+    function ZAPS.getMutName(uuid)
+        local code = ZAPS.getMutCode(uuid)
+        if not code then return nil end
+        if ZAPS.mutMap and ZAPS.mutMap[code] then return ZAPS.mutMap[code] end
+        return code
+    end
+
+    function ZAPS.isFav(uuid)
+        local info = ZAPS.getPetData(uuid)
+        if info and info.PetData then return info.PetData.IsFavorite == true end
+        local all = ZAPS.getAllPets()
+        local key = tostring(uuid):gsub("^{",""):gsub("}$","")
+        local entry = all[key]
+        if entry and entry.PetData then return entry.PetData.IsFavorite == true end
+        return false
+    end
+
+    -- Scan ALL pets (equipped + unequipped) buat fav check
+    function ZAPS.getAllFavorites()
+        local favs = {}
+        local all = ZAPS.getAllPets()
+        for uuid, info in pairs(all) do
+            if info.PetData and info.PetData.IsFavorite then
+                favs[uuid] = info
+            end
+        end
+        return favs
+    end
+
+    getgenv().ZenxAPS = ZAPS
+end
+dbg("Step 2b APS: "..(getgenv().ZenxAPS.api and "OK" or "FAIL").." | MutMap: "..(getgenv().ZenxAPS.mutMap and "OK" or "FAIL"))
+-- ============= END APS API =============
+
+
 local DATA_FILE="ZenxLvlData.json"
 local function loadData()
     local ok,content=pcall(readfile,DATA_FILE)
@@ -115,12 +218,15 @@ if not getgenv().ZenxData then
         fromAge=1,toAge=100,maxPetTarget=1,
         autoStartEnabled=false,autoRejoin=false,
         autoAccGift=false,autoAccTrade=false,
+        protectFavorites=true, -- v13.44: SAFETY default ON - skip pet favorit di auto gift
     }
 elseif loaded then
     for k,v in pairs(loaded) do getgenv().ZenxData[k]=v end
 end
 local d=getgenv().ZenxData
-dbg("Step 3 OK: data loaded")
+-- v13.44: ensure flag exists kalo loaded data lama
+if d.protectFavorites == nil then d.protectFavorites = true end
+dbg("Step 3 OK: data loaded | protectFav="..tostring(d.protectFavorites))
 
 -- v11.6: toAge declared EARLY (sebelum donesLbl spawn + _doBuildInvShow function)
 -- biar ke-capture sebagai upvalue, bukan global nil
@@ -179,8 +285,14 @@ end
 
 local function isPet(item) return item:FindFirstChild("PetToolLocal") or item:FindFirstChild("PetToolServer") end
 local function isFavorite(item)
-    -- v12.79n: strict check - cuma attribute yg explicit favorite, hapus "d"/"Loved"/"Heart" yg ambigu
-    -- Mutated pets sering punya attribute aneh yg false-positive di check lama
+    -- v13.44: APS primary (server data, real IsFavorite flag yang akurat)
+    if item then
+        local uuid = item:GetAttribute("PET_UUID")
+        if uuid and getgenv().ZenxAPS and getgenv().ZenxAPS.isFav(uuid) then
+            return true
+        end
+    end
+    -- FALLBACK: attribute check (legacy)
     for _,attr in ipairs({"Favorited","Favourited","Favorite","Favourite","IsFavorited","IsFavourited"}) do
         local v=item:GetAttribute(attr)
         if v==true then return true end
@@ -188,7 +300,15 @@ local function isFavorite(item)
     return false
 end
 local function getAge(item)
-    -- v12.79f: expanded patterns buat handle mutated pets dengan format beda
+    -- v13.44: APS primary (Level field server-side, akurat untuk mutation pets juga)
+    if item then
+        local uuid = item:GetAttribute("PET_UUID")
+        if uuid and getgenv().ZenxAPS then
+            local age = getgenv().ZenxAPS.getAge(uuid)
+            if age then return age end
+        end
+    end
+    -- FALLBACK: parse name (untuk pet non-mutation)
     for _,pat in ipairs({
         "%[Age%s+(%d+)%]","%[Age(%d+)%]",
         "%[Lv%s+(%d+)%]","%[Lv(%d+)%]",
@@ -205,6 +325,17 @@ end
 local function getPetName(item) return item.Name:match("^(.-)%s*%[") or item.Name end
 local function getKG(item) return tonumber(item.Name:match("%[([%d%.]+)%s*[Kk][Gg]%]")) end
 local function getPetUUID(item) return item:GetAttribute("PET_UUID") end
+
+-- v13.44: Mutation helpers (pakai APS API)
+local function getMutation(item)
+    if not item then return nil end
+    local uuid = item:GetAttribute("PET_UUID")
+    if uuid and getgenv().ZenxAPS then
+        return getgenv().ZenxAPS.getMutName(uuid)
+    end
+    return nil
+end
+local function isMutated(item) return getMutation(item) ~= nil end
 
 -- v13.00: getBaseKG - cari base weight dari attribute dulu, fallback ke formula
 local function getBaseKG(item)
@@ -492,6 +623,11 @@ local function sendGiftToPlayer(targetName, petUUID)
         dbg("[gift] FAIL: player gak ada di server")
         return false
     end
+    -- v13.44: SAFETY - tolak gift pet favorit kalau protectFavorites ON
+    if petUUID and d.protectFavorites and getgenv().ZenxAPS and getgenv().ZenxAPS.isFav(petUUID) then
+        dbg("[gift] SKIP: pet favorit "..tostring(petUUID):sub(1,8).." (protectFavorites ON)")
+        return false
+    end
     -- v12.89: lock untuk pause auto-boost selama gift jalan
     if M78 then M78.giftInProgress = true end
     local function unlock() if M78 then M78.giftInProgress = false end end
@@ -746,11 +882,11 @@ local getAgeFromUI = (function()
                         local lname=d.Name:lower()
                         -- v12.79g: check label NAME (not just PET_AGE) + broader text patterns
                         if d.Name=="PET_AGE" or lname:find("age",1,true) or lname:find("lvl",1,true) or lname:find("level",1,true) then
-                            -- Label namanya age-related → ambil angka pertama
+                            -- Label namanya age-related -> ambil angka pertama
                             age=tonumber(txt:match("(%d+)"))
                             if not age and txt:lower():match("max") then age=100 end
                         else
-                            -- Label name biasa → cari pattern "Age N", "Lv N", "Level N", atau "N/100"
+                            -- Label name biasa -> cari pattern "Age N", "Lv N", "Level N", atau "N/100"
                             age=tonumber(txt:match("[Aa][Gg][Ee][^%d]*(%d+)"))
                             if not age then age=tonumber(txt:match("[Ll][Vv]l?%.?[^%d]*(%d+)")) end
                             -- Pattern "N/100" (biasa di progress label)
@@ -976,7 +1112,7 @@ local runStroke=stroke(runBtn,C.Dim,1.5)
 local stopBtn=btn(content,"STOP",12,C.Panel,C.Gray)
 stopBtn.Size=UDim2.new(0,90,0,26) stopBtn.Position=UDim2.new(0,160,0,BOT_Y)
 local stopStroke=stroke(stopBtn,C.Dim,1.5)
--- v13.01: Auto Elephant Cycle toggle - starts/stops the Phase1 ↔ Phase2 state machine
+-- v13.01: Auto Elephant Cycle toggle - starts/stops the Phase1 <-> Phase2 state machine
 local aecBtn=btn(content,"AUTO ELE: OFF",11,C.Panel,C.Gray)
 aecBtn.Size=UDim2.new(0,130,0,26) aecBtn.Position=UDim2.new(0,255,0,BOT_Y)
 local aecStroke=stroke(aecBtn,C.Dim,1.5)
@@ -2274,7 +2410,7 @@ end
 local accStatusLbl=nil
 local sendStatusLbl=nil
 
--- v12.79: Modal picker helper — floating popup overlay (replaces inline expanding pickers)
+-- v12.79: Modal picker helper -- floating popup overlay (replaces inline expanding pickers)
 -- usage: showPickerModal({title=, items={{value=,label=,selected=}}, multi=, onSelect=, emptyText=})
 showPickerModal = function(opts)
     local backdrop=mk("Frame",{Size=UDim2.new(1,0,1,0),Position=UDim2.new(0,0,0,0),BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=0.45,BorderSizePixel=0,ZIndex=100,Parent=main})
@@ -2403,7 +2539,7 @@ local function buildAutoGift()
     local function buildGiftContent(slotIdx,parent)
         local slot=giftSlots[slotIdx]
 
-        -- v12.79: Target picker → modal popup
+        -- v12.79: Target picker -> modal popup
         -- v13.00: multi-select target
         local function trText()
             local n = #slot.targets
@@ -2488,7 +2624,7 @@ local function buildAutoGift()
             return n
         end
 
-        -- v12.79: Pet Type picker → modal popup (multi-select)
+        -- v12.79: Pet Type picker -> modal popup (multi-select)
         local pickRow=mk("Frame",{Size=UDim2.new(1,0,0,32),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=3,Parent=parent})
         corner(pickRow,6) local pickStroke=stroke(pickRow,C.Dim,1.1)
         local pickLbl=lbl(pickRow,"Pilih Jenis Pet ("..countTypes().." = "..countMatching().." pet)",13,C.White)
@@ -2532,7 +2668,7 @@ local function buildAutoGift()
             })
         end)
 
-        -- v12.79: Mutation Filter picker → modal popup
+        -- v12.79: Mutation Filter picker -> modal popup
         local function mfText()
             if slot.mutationFilter == "" then return "(Semua mutasi)" end
             if slot.mutationFilter == "__nomut__" then return "[TANPA MUTASI]" end
@@ -2845,7 +2981,7 @@ autoSendTask = task.spawn(function()
                             local sentCount=0
                             for _,uuid in ipairs(sendable) do
                                 if not slot.autoSendGift then break end
-                                -- v12.79j: live re-check - target/petType di-clear → skip pet ini
+                                -- v12.79j: live re-check - target/petType di-clear -> skip pet ini
                                 if slot.target == "" then break end
                                 if not petStillMatches(uuid, slot) then
                                     sentCount = sentCount + 1
@@ -3403,7 +3539,7 @@ do
         })
     end)
 
-    -- v12.79o → v12.82: Pet type filter picker - sekarang pake ALL_PETS list (semua pet types)
+    -- v12.79o -> v12.82: Pet type filter picker - sekarang pake ALL_PETS list (semua pet types)
     local function countBoostTypes()
         local n = 0
         for _ in pairs(M78.boostPetTypes) do n = n + 1 end
@@ -3617,7 +3753,7 @@ task.spawn(function()
                 end
             end
         else
-            -- Toggle off → reset cycle, ready to start when toggled on
+            -- Toggle off -> reset cycle, ready to start when toggled on
             M78.feedMode = "idle"
             M78.feedNextStartAt = 0
         end
@@ -3935,7 +4071,7 @@ task.spawn(function()
                         local newKgStr = t:match("%(([%d%.]+)%s*KG total")
                         local newKg = tonumber(newKgStr)
                         dbg("[ele] BLESS SUCCESS: "..(petName or "?").." -> "..(newKgStr or "?").."kg (total "..M78.elephantBlessingsThisCycle..")")
-                        -- v13.07: cek apakah pet ini udah lewat Sampai KG → mark DONE
+                        -- v13.07: cek apakah pet ini udah lewat Sampai KG -> mark DONE
                         if petName and newKg then
                             local petUUID = M78.findUUIDByName(petName)
                             if petUUID then
@@ -4337,6 +4473,19 @@ end
 
 local function getFavoriteUUIDs()
     local favs={}
+    -- v13.44: APS bulk fetch -- dapet SEMUA pet (Backpack + Equipped/Garden)
+    -- Sebelumnya cuma scan Backpack, jadi pet di garden hilang dari list
+    if getgenv().ZenxAPS and getgenv().ZenxAPS.api then
+        local allFavs = getgenv().ZenxAPS.getAllFavorites()
+        for uuid, _ in pairs(allFavs) do
+            local uuidStr = tostring(uuid)
+            if not teamPetUUIDs[uuidStr] then
+                favs[uuidStr] = true
+            end
+        end
+        return favs
+    end
+    -- FALLBACK: legacy scan Backpack saja
     local bp=player:FindFirstChild("Backpack")
     if not bp then return favs end
     for _,item in pairs(bp:GetChildren()) do
@@ -4943,7 +5092,7 @@ doStart = function()
                     local item = toRotate[i]
                     local uuid = item.uuid
                     local f = freshList[i]
-                    -- v13.43: EQUIP fresh DULU, baru unequip old → no empty slot gap
+                    -- v13.43: EQUIP fresh DULU, baru unequip old -> no empty slot gap
                     targetPetUUIDs[f.uuidStr] = true
                     targetPetInfoCache[f.uuidStr] = {name=f.name, info=getPetInfo(f.item)}
                     pcall(function() equipPet(f.uuid) end)
