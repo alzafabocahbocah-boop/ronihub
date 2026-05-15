@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.61"
+local SCRIPT_VERSION="v13.63"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (BULK APS fetch + per-pet debug log untuk teamDone)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (FORCE per-pet log + reset stale completedPets)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -5696,18 +5696,32 @@ doStart = function()
     -- v13.59: TEAM DONE MONITOR - pet di teamPetUUIDs yang reach age toAge -> pindah Antrian
     -- Penting: user mungkin pake Pet Tim Leveling (bukan Pet Target), need handle ini juga
     -- v13.61: pakai bulk getAllPets (lebih reliable, gak per-pet API call yang bisa throw)
+    -- v13.63: reset completedPets utk team pets di task start + force per-pet log
     task.spawn(function()
         dbg("[teamDone] monitor task STARTED, target="..tostring(toAge))
+        -- v13.63: reset completedPets utk pet di teamPetUUIDs (in case stale dari run lama)
+        local resetCnt = 0
+        for uuid,_ in pairs(teamPetUUIDs) do
+            local normUuid = tostring(uuid):gsub("^{",""):gsub("}$","")
+            if completedPets[uuid] then completedPets[uuid] = nil; resetCnt = resetCnt + 1 end
+            if completedPets[normUuid] then completedPets[normUuid] = nil; resetCnt = resetCnt + 1 end
+        end
+        if resetCnt > 0 then dbg("[teamDone] reset "..resetCnt.." stale completedPets entries") end
+
         local lastDumpTeam = 0
         while isRunning do
             local toFinish = {}
             local dumpNowTeam = (tick() - lastDumpTeam > 5)
             -- v13.61: BULK fetch SEMUA pet dari APS sekali aja
+            -- v13.62: normalize UUID (strip braces) untuk lookup yang konsisten
             local livePets = {}
             if getgenv().ZenxAPS then
                 local ok, all = pcall(function() return getgenv().ZenxAPS.getAllPets() end)
                 if ok and type(all) == "table" then
-                    for u, info in pairs(all) do livePets[tostring(u)] = info end
+                    for u, info in pairs(all) do
+                        local nu = tostring(u):gsub("^{",""):gsub("}$","")
+                        livePets[nu] = info
+                    end
                 end
             end
 
@@ -5716,42 +5730,53 @@ doStart = function()
                 local pCnt=0 for _ in pairs(pendingElephant) do pCnt=pCnt+1 end
                 local cCnt=0 for _ in pairs(currentLevelingUUIDs) do cCnt=cCnt+1 end
                 local liveCnt=0 for _ in pairs(livePets) do liveCnt=liveCnt+1 end
-                dbg("[teamDone] DUMP team="..cnt.." | currentLvl="..cCnt.." | pending="..pCnt.." | apsLive="..liveCnt)
+                dbg("[teamDone] DUMP team="..cnt.." | currentLvl="..cCnt.." | pending="..pCnt.." | apsLive="..liveCnt.." | toAge="..toAge)
                 lastDumpTeam = tick()
             end
 
             for uuid,_ in pairs(teamPetUUIDs) do
-                if not completedPets[uuid] then
-                    local uuidStr = tostring(uuid)
-                    -- v13.61: ambil dari bulk livePets DULU (paling reliable)
+                -- v13.62: normalize untuk lookup
+                local normUuid = tostring(uuid):gsub("^{",""):gsub("}$","")
+                local isCompleted = (completedPets[uuid] or completedPets[normUuid]) and true or false
+
+                -- v13.63: ALWAYS log per-pet pas dumpNow (bahkan kalau completed)
+                if dumpNowTeam then
+                    -- ambil info biar bisa log
                     local age = nil
                     local petType = "?"
                     local source = "none"
-                    local info = livePets[uuidStr]
+                    local info = livePets[normUuid]
                     if info and info.PetData then
                         age = info.PetData.Level
                         petType = info.PetType or "?"
                         source = "bulkAPS"
                     end
-                    -- fallback ke per-pet API (kalau bulk gagal)
                     if not age and getgenv().ZenxAPS then
                         local ok, a = pcall(function() return getgenv().ZenxAPS.getAge(uuid) end)
                         if ok and a then age = a; source = "perPetAPS" end
                     end
+                    dbg("[teamDone] "..normUuid:sub(1,8).." | "..petType.." | age="..tostring(age).." | src="..source.." | done="..tostring(isCompleted).." | inPending="..tostring(pendingElephant[uuid] ~= nil or pendingElephant[normUuid] ~= nil))
+                end
+
+                if not isCompleted then
+                    -- Ambil age (mungkin udah di-ambil di log atas, tapi re-fetch supaya safe)
+                    local age = nil
+                    local info = livePets[normUuid]
+                    if info and info.PetData then age = info.PetData.Level end
+                    if not age and getgenv().ZenxAPS then
+                        local ok, a = pcall(function() return getgenv().ZenxAPS.getAge(uuid) end)
+                        if ok and a then age = a end
+                    end
                     if not age then
                         local a = getAgeFromUI(uuid)
-                        if a then age = a; source = "ui" end
+                        if a then age = a end
                     end
                     if not age then
                         local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
                         if item and item.Parent then
                             local ok, a = pcall(function() return getAgeFromKG(item) end)
-                            if ok and a then age = a; source = "tool" end
+                            if ok and a then age = a end
                         end
-                    end
-
-                    if dumpNowTeam then
-                        dbg("[teamDone] "..uuid:sub(1,8).." | "..petType.." | age="..tostring(age).." | src="..source)
                     end
 
                     if age and age >= toAge then
@@ -5764,15 +5789,16 @@ doStart = function()
                 local moved = 0
                 local skipped = 0
                 for _, uuid in ipairs(toFinish) do
+                    local normUuid = tostring(uuid):gsub("^{",""):gsub("}$","")
                     local baseW = nil
-                    local info = livePets[tostring(uuid)]
+                    local info = livePets[normUuid]
                     if info and info.PetData then baseW = info.PetData.BaseWeight end
                     if not baseW and getgenv().ZenxAPS then
                         local ok, pd = pcall(function() return getgenv().ZenxAPS.getPetData(uuid) end)
                         if ok and pd and pd.PetData then baseW = pd.PetData.BaseWeight end
                     end
                     if baseW and baseW > baseKGThr then
-                        dbg("[teamDone] "..uuid:sub(1,8).." base "..baseW.."kg > "..baseKGThr..", skip antrian")
+                        dbg("[teamDone] "..normUuid:sub(1,8).." base "..baseW.."kg > "..baseKGThr..", skip antrian")
                         skipped = skipped + 1
                     else
                         pendingElephant[uuid] = true
