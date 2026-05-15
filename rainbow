@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.48"
+local SCRIPT_VERSION="v13.49"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Jenis Pet picker di tab Elephant + filter auto-add)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Pet Antrian Bless terpisah dari Tim Elephant)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1391,52 +1391,39 @@ miniZBtn.MouseButton1Click:Connect(function() setMinimized(false) end)
 local teamPetUUIDs=d.teamPetUUIDs or {}
 -- v13.01: Tim Elephant - pet yang berfungsi sebagai Elephant (skill blesser)
 local elephantTeamUUIDs = d.elephantTeamUUIDs or {}
+-- v13.49: pendingElephant - antrian pet selesai leveling, BUKAN Tim Elephant
+local pendingElephant = {}
 local targetPetUUIDs = d.targetPetUUIDs or {}  -- v13.17: Pet Target = pet yg di-grind level/kg (separate dari Tim Support)
 local targetPetInfoCache = d.targetPetInfoCache or {}
 local autoElephantCycle = d.autoElephantCycle or false  -- Auto Elephant Cycle toggle
 local teamPetInfoCache=d.teamPetInfoCache or {}
 
--- v13.45: AUTO-ADD pets yang udah age >= toAge ke Tim Elephant (startup scan)
--- Scan dari APS bulk (catch pet di Backpack + Equipped/Garden)
--- v13.48: filter by config.elephantPetType jika di-set
+-- v13.49: STARTUP SCAN pet age >= toAge -> pendingElephant (BUKAN ke Tim Elephant)
+-- Tim Elephant = blesser pets (Peryton/Elephant) yang user pick manual
+-- pendingElephant = pet target selesai leveling, displayed sebagai "Antrian Bless"
 task.spawn(function()
-    task.wait(2) -- biar APS sempet load
+    task.wait(2)
     if not getgenv().ZenxAPS or not getgenv().ZenxAPS.api then
         dbg("[autoele] APS gak ready, skip startup scan")
         return
     end
     local targetAge = d.toAge or 50
-    local cfg = d.config or {}
-    local filterType = cfg.elephantPetType or ""
     local allPets = getgenv().ZenxAPS.getAllPets()
     local added = 0
-    local skippedFilter = 0
     for uuid, info in pairs(allPets) do
         if info.PetData and info.PetData.Level and info.PetData.Level >= targetAge then
             local uuidStr = tostring(uuid)
-            -- v13.48: filter by jenis pet jika di-set
-            local petType = info.PetType or ""
-            local typeMatch = (filterType == "") or (petType == filterType) or (getBaseName and getBaseName(petType) == filterType)
-            if not typeMatch then
-                skippedFilter = skippedFilter + 1
-            elseif not elephantTeamUUIDs[uuidStr] then
-                elephantTeamUUIDs[uuidStr] = true
+            -- Jangan tambah pet yang udah di Tim Elephant (blesser - user yang pick)
+            if not elephantTeamUUIDs[uuidStr] and not pendingElephant[uuidStr] then
+                pendingElephant[uuidStr] = true
                 added = added + 1
             end
         end
     end
     if added > 0 then
-        dbg("[autoele] STARTUP: auto-add "..added.." pet (age>="..targetAge..") ke Tim Elephant"..(filterType ~= "" and " [filter: "..filterType.."]" or ""))
-        if skippedFilter > 0 then dbg("[autoele] skipped "..skippedFilter.." pet karena beda jenis") end
-        pcall(function()
-            d.elephantTeamUUIDs = elephantTeamUUIDs
-            if writefile then
-                local enc = HS:JSONEncode(d)
-                pcall(writefile, "ZenxLvlData.json", enc)
-            end
-        end)
+        dbg("[autoele] STARTUP: "..added.." pet age>="..targetAge.." -> Antrian Bless")
     else
-        dbg("[autoele] STARTUP: gak ada pet baru (age>="..targetAge..") buat auto-add"..(filterType ~= "" and " [filter: "..filterType.."]" or ""))
+        dbg("[autoele] STARTUP: gak ada pet baru di antrian")
     end
 end)
 
@@ -1494,8 +1481,6 @@ local isAR=false local arTask=nil
 local arTog2,arTogStroke2,arStroke2,cdLbl2
 local currentLevelingUUIDs={}
 local completedPets={}
--- v13.47: pendingElephant - pet yang udah selesai leveling tapi nunggu batch transfer ke Tim Elephant
-local pendingElephant={}
 
 local swapPerPet=d.swapPerPet or {}
 local swapPetInfoCache=d.swapPetInfoCache or {}
@@ -2271,6 +2256,92 @@ local function buildTargetList()
                 local lastNotif=M78.elephantLastNotif or "-"
                 if #lastNotif>80 then lastNotif=lastNotif:sub(1,77).."..." end
                 lastLbl.Text="Last notif: "..lastNotif
+            end)
+            task.wait(2)
+        end
+    end)
+
+    -- v13.49: Pet Antrian Bless section - pet target selesai leveling, nunggu di-bless
+    local antrianCard=mk("Frame",{Size=UDim2.new(1,0,0,140),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=3,Parent=areas[2]})
+    corner(antrianCard,6) stroke(antrianCard,C.Gold,1.2)
+    mk("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingTop=UDim.new(0,4),PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,4),Parent=antrianCard})
+
+    local antrianHdr=lbl(antrianCard,"Pet Antrian Bless (0 pet)",11,C.Gold)
+    antrianHdr.Size=UDim2.new(1,0,0,16) antrianHdr.Position=UDim2.new(0,0,0,0)
+
+    local antrianScroll=mk("ScrollingFrame",{
+        Size=UDim2.new(1,0,1,-22),
+        Position=UDim2.new(0,0,0,20),
+        BackgroundTransparency=1,
+        BorderSizePixel=0,
+        ScrollBarThickness=4,
+        ScrollBarImageColor3=C.Gold,
+        CanvasSize=UDim2.new(0,0,0,0),
+        Parent=antrianCard,
+    })
+    mk("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,3),Parent=antrianScroll})
+
+    -- Live refresh antrian list
+    task.spawn(function()
+        local lastSig = ""
+        while antrianCard and antrianCard.Parent and not scriptShutdown do
+            pcall(function()
+                -- Build signature buat detect perubahan
+                local sigParts = {}
+                for uuid, _ in pairs(pendingElephant) do
+                    table.insert(sigParts, tostring(uuid):sub(1,8))
+                end
+                table.sort(sigParts)
+                local sig = table.concat(sigParts, "|")
+
+                if sig ~= lastSig then
+                    lastSig = sig
+                    -- Clear existing rows
+                    for _, c in pairs(antrianScroll:GetChildren()) do
+                        if c:IsA("Frame") then c:Destroy() end
+                    end
+
+                    local count = 0
+                    local lo = 1
+                    for uuid, _ in pairs(pendingElephant) do
+                        count = count + 1
+                        local row = mk("Frame",{
+                            Size=UDim2.new(1,-4,0,22),
+                            BackgroundColor3=C.Panel,
+                            BorderSizePixel=0,
+                            LayoutOrder=lo,
+                            Parent=antrianScroll,
+                        })
+                        corner(row,4)
+
+                        -- Ambil nama + age
+                        local petType, age = "?", "?"
+                        if getgenv().ZenxAPS then
+                            local info = getgenv().ZenxAPS.getPetData(uuid)
+                            if info then
+                                petType = info.PetType or "?"
+                                if info.PetData and info.PetData.Level then
+                                    age = tostring(info.PetData.Level)
+                                end
+                            end
+                        end
+                        local rowLbl = lbl(row, petType.." [age "..age.."]", 10, C.White)
+                        rowLbl.Size=UDim2.new(1,-30,1,0) rowLbl.Position=UDim2.new(0,6,0,0)
+                        rowLbl.TextXAlignment=Enum.TextXAlignment.Left
+
+                        -- Tombol remove dari antrian
+                        local cuid = uuid
+                        local rmBtn = btn(row, "X", 10, C.RDim, C.Red)
+                        rmBtn.Size = UDim2.new(0,20,0,16) rmBtn.Position = UDim2.new(1,-24,0.5,-8)
+                        rmBtn.MouseButton1Click:Connect(function()
+                            pendingElephant[cuid] = nil
+                            lastSig = ""  -- force refresh
+                        end)
+                        lo = lo + 1
+                    end
+                    antrianHdr.Text = "Pet Antrian Bless ("..count.." pet)"
+                    antrianScroll.CanvasSize = UDim2.new(0,0,0,count * 25 + 5)
+                end
             end)
             task.wait(2)
         end
@@ -5447,39 +5518,12 @@ doStart = function()
                 for _ in pairs(pendingElephant) do pendingCount = pendingCount + 1 end
 
                 if pendingCount > 0 and activeCount == 0 and #available == 0 then
-                    -- ALL TARGET DONE - batch move ke Tim Elephant
-                    -- v13.48: filter by config.elephantPetType jika di-set
-                    local filterType = (config and config.elephantPetType) or ""
-                    local moved = 0
-                    local skipped = 0
-                    for uuid, _ in pairs(pendingElephant) do
-                        local pass = true
-                        if filterType ~= "" then
-                            local petType = ""
-                            if getgenv().ZenxAPS then
-                                local info = getgenv().ZenxAPS.getPetData(uuid)
-                                if info and info.PetType then petType = info.PetType end
-                            end
-                            if petType == "" then
-                                -- fallback ambil dari tool name kalau ada
-                                local it = findPetInBackpack(uuid)
-                                if it then petType = getBaseName(getPetName(it)) end
-                            end
-                            pass = (petType == filterType) or (getBaseName and getBaseName(petType) == filterType)
-                        end
-                        if pass and not elephantTeamUUIDs[uuid] then
-                            elephantTeamUUIDs[uuid] = true
-                            moved = moved + 1
-                        elseif not pass then
-                            skipped = skipped + 1
-                        end
-                        pendingElephant[uuid] = nil
-                    end
-                    pcall(save)
-                    dbg("[batch-ele] SEMUA target selesai -> "..moved.." pet pindah ke Tim Elephant"..(skipped > 0 and " ("..skipped.." skipped: beda jenis)" or ""))
-                    statusLbl.Text="Done! "..moved.." pet -> Tim Elephant"
+                    -- v13.49: SEMUA target selesai - tapi JANGAN pindah ke Tim Elephant
+                    -- Tim Elephant = blesser pets (user pick manual)
+                    -- pendingElephant = Antrian Bless, displayed sebagai section terpisah di Elephant tab
+                    statusLbl.Text="Done! "..pendingCount.." pet di Antrian Bless"
                 elseif pendingCount > 0 then
-                    statusLbl.Text="Tunggu sisa pet... Q:"..#available.." | Pending Ele:"..pendingCount
+                    statusLbl.Text="Tunggu sisa... Q:"..#available.." | Antrian:"..pendingCount
                 else
                     statusLbl.Text="Tunggu pet target... Q:"..#available
                 end
