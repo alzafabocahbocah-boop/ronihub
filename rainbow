@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.50"
+local SCRIPT_VERSION="v13.51"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Antrian Bless terpisah + filter Base KG)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Tim Elephant picker filter HANYA pet favorit)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -10,7 +10,7 @@ local TS = game:GetService("TeleportService")
 local CS = game:GetService("CollectionService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui",10)
-print("[ZenxLvl] step 1 OK - services loaded")  
+print("[ZenxLvl] step 1 OK - services loaded")
 
 -- ============= MULTI-PARENT GUI HELPER =============
 local function safeParent(scrgui)
@@ -2007,8 +2007,18 @@ buildTimList=function()
     local elephantBtnCover = mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=elephantPickerRow})
 
     elephantBtnCover.MouseButton1Click:Connect(function()
-        -- Build pet list dari backpack (pet apapun bisa jadi Elephant)
+        -- v13.51: HANYA pet favorit yang muncul di picker Tim Elephant
+        -- (Tim Elephant = blesser pet, biasanya yang istimewa/favorit)
         local items = {}
+        local seenUUID = {}
+
+        -- Bulk fetch favorit dari APS (paling akurat - dari datastore, termasuk pet di garden)
+        local apsFavs = {}
+        if getgenv().ZenxAPS and getgenv().ZenxAPS.getAllFavorites then
+            local ok, favs = pcall(function() return getgenv().ZenxAPS.getAllFavorites() end)
+            if ok and type(favs) == "table" then apsFavs = favs end
+        end
+
         pcall(function()
             local bp = player:FindFirstChild("Backpack")
             if bp then
@@ -2017,33 +2027,61 @@ buildTimList=function()
                         local u = getPetUUID(it)
                         if u then
                             local uuidStr = tostring(u)
-                            local name = getPetName(it)
-                            local kg = getKG(it) or 0
-                            local age = getAgeFromKG(it)
-                            local lbl_txt = name.."  ["..string.format("%.2fkg",kg)..(age and " age "..age or "").."]"
-                            table.insert(items,{value=uuidStr, label=lbl_txt, selected=(elephantTeamUUIDs[uuidStr]==true)})
+                            -- Filter: HANYA favorit (cek APS dulu, fallback ke isFavorite tool attr)
+                            local isFav = apsFavs[uuidStr] == true or isFavorite(it)
+                            if isFav and not seenUUID[uuidStr] then
+                                seenUUID[uuidStr] = true
+                                local name = getPetName(it)
+                                local kg = getKG(it) or 0
+                                local age = getAgeFromKG(it)
+                                local lbl_txt = string.char(0xE2,0x99,0xA5).." "..name.."  ["..string.format("%.2fkg",kg)..(age and " age "..age or "").."]"
+                                table.insert(items,{value=uuidStr, label=lbl_txt, selected=(elephantTeamUUIDs[uuidStr]==true)})
+                            end
                         end
                     end
                 end
             end
         end)
-        -- Plus placed pets juga
+
+        -- Plus placed pets yang juga favorit
         pcall(function()
             for _, part in ipairs(workspace:GetDescendants()) do
                 if part:IsA("Part") and part.Name == "PetMover" then
                     local u = part:GetAttribute("UUID")
                     if u then
                         local uuidStr = tostring(u)
-                        if not items[uuidStr] then
+                        if apsFavs[uuidStr] == true and not seenUUID[uuidStr] then
+                            seenUUID[uuidStr] = true
                             local placedName = M78 and M78.getPlacedPetName and M78.getPlacedPetName(uuidStr) or "PlacedPet"
-                            table.insert(items,{value=uuidStr, label=placedName.." (placed)", selected=(elephantTeamUUIDs[uuidStr]==true)})
+                            local lbl_txt = string.char(0xE2,0x99,0xA5).." "..placedName.." (placed)"
+                            table.insert(items,{value=uuidStr, label=lbl_txt, selected=(elephantTeamUUIDs[uuidStr]==true)})
                         end
                     end
                 end
             end
         end)
+
+        -- Plus pet yang udah di Tim Elephant (mungkin dulu di-add manual sebelum filter, biar bisa di-uncheck)
+        for uuid,_ in pairs(elephantTeamUUIDs) do
+            if not seenUUID[uuid] then
+                seenUUID[uuid] = true
+                local info = "?"
+                if getgenv().ZenxAPS then
+                    local pd = getgenv().ZenxAPS.getPetData(uuid)
+                    if pd then
+                        local nm = pd.PetType or "Pet"
+                        local age = (pd.PetData and pd.PetData.Level) or "?"
+                        info = nm.." (di garden) [age "..tostring(age).."]"
+                    end
+                end
+                local isFav = apsFavs[uuid] == true
+                local prefix = isFav and (string.char(0xE2,0x99,0xA5).." ") or "(non-fav) "
+                table.insert(items,{value=uuid, label=prefix..info, selected=true})
+            end
+        end
+
         if #items == 0 then
-            table.insert(items,{value="__empty__", label="(belum ada pet di bp/placed)", selected=false})
+            table.insert(items,{value="__empty__", label="(belum ada pet di-love. Tekan icon love di game)", selected=false})
         end
         -- v13.47: SORT - pet yang udah ke-pilih taruk paling atas
         table.sort(items, function(a, b)
@@ -2052,12 +2090,33 @@ buildTimList=function()
             return (a.label or "") < (b.label or "")
         end)
         showPickerModal({
-            title = "Pilih Tim Elephant - multi-select",
+            title = "Pilih Tim Elephant - HANYA pet favorit",
             items = items, multi = true,
             onSelect = function(value, selected)
                 if not value or value == "" or value == "__empty__" then return end
-                if selected then elephantTeamUUIDs[value] = true
-                else elephantTeamUUIDs[value] = nil end
+                if selected then
+                    -- v13.51: GUARD - cuma boleh ke-add kalo pet favorit
+                    local isFav = apsFavs[value] == true
+                    if not isFav then
+                        -- cek backpack juga (fallback)
+                        local bp = player:FindFirstChild("Backpack")
+                        if bp then
+                            for _, it in pairs(bp:GetChildren()) do
+                                if isPet(it) and tostring(getPetUUID(it)) == value then
+                                    isFav = isFavorite(it)
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    if not isFav then
+                        dbg("[ele-picker] BLOCKED: "..value:sub(1,8).." bukan pet favorit")
+                        return
+                    end
+                    elephantTeamUUIDs[value] = true
+                else
+                    elephantTeamUUIDs[value] = nil
+                end
                 elephantLbl.Text = "Pilih Tim Elephant  ("..elephantCount().." dipilih)"
                 elPickStroke.Color = elephantCount() > 0 and C.Teal or C.Dim
                 save()
