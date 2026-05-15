@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.56"
+local SCRIPT_VERSION="v13.57"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (FIX teamKeeper loop dgn monitor utk pet age 50+)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (BATCH TRANSFER Antrian -> Tim Elephant + relax cleanup)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1423,19 +1423,16 @@ task.spawn(function()
     end
     dbg("[cleanup] inventory ada "..livePetCount.." pet")
 
-    -- v13.54: AUTO-CLEANUP elephantTeamUUIDs
+    -- v13.54+v13.57: AUTO-CLEANUP elephantTeamUUIDs
     -- (1) Hapus UUID yang udah gak ada di inventory (pet di-trade/sold)
-    -- (2) Hapus UUID yang bukan favorit (Tim Elephant = blesser favorit only)
+    -- v13.57: NON-fav filter di-hapus - biar pet leveling non-fav bisa di-add via batch
+    --         User control fav-only via picker manual aja, container bebas
     local removedDead = 0
-    local removedNonFav = 0
     for uuid, _ in pairs(elephantTeamUUIDs) do
         local info = livePets[tostring(uuid)]
         if not info then
             elephantTeamUUIDs[uuid] = nil
             removedDead = removedDead + 1
-        elseif not (info.PetData and info.PetData.IsFavorite) then
-            elephantTeamUUIDs[uuid] = nil
-            removedNonFav = removedNonFav + 1
         end
     end
 
@@ -1448,8 +1445,8 @@ task.spawn(function()
         end
     end
 
-    if removedDead > 0 or removedNonFav > 0 or removedAntrian > 0 then
-        dbg("[cleanup] Tim Elephant: -"..removedDead.." mati, -"..removedNonFav.." non-favorit | Antrian: -"..removedAntrian.." mati")
+    if removedDead > 0 or removedAntrian > 0 then
+        dbg("[cleanup] Tim Elephant: -"..removedDead.." mati | Antrian: -"..removedAntrian.." mati")
         pcall(function()
             d.elephantTeamUUIDs = elephantTeamUUIDs
             if writefile then
@@ -5747,10 +5744,41 @@ doStart = function()
                 for _ in pairs(pendingElephant) do pendingCount = pendingCount + 1 end
 
                 if pendingCount > 0 and activeCount == 0 and #available == 0 then
-                    -- v13.49: SEMUA target selesai - tapi JANGAN pindah ke Tim Elephant
-                    -- Tim Elephant = blesser pets (user pick manual)
-                    -- pendingElephant = Antrian Bless, displayed sebagai section terpisah di Elephant tab
-                    statusLbl.Text="Done! "..pendingCount.." pet di Antrian Bless"
+                    -- v13.57: BATCH TRANSFER (revert v13.49) - pet di Antrian SEMUA pindah ke Tim Elephant
+                    -- Tim Elephant skarang = pet siap bless (target pet yang udah age 50)
+                    -- Filter base KG juga di-apply
+                    local filterType = (config and config.elephantPetType) or ""
+                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 3.5
+                    local moved, skippedHeavy, skippedType = 0, 0, 0
+                    for uuid, _ in pairs(pendingElephant) do
+                        local petType, baseW = nil, nil
+                        if getgenv().ZenxAPS then
+                            local pd = getgenv().ZenxAPS.getPetData(uuid)
+                            if pd then
+                                petType = pd.PetType
+                                if pd.PetData then baseW = pd.PetData.BaseWeight end
+                            end
+                        end
+                        local passType = (filterType == "") or (petType == filterType) or (getBaseName and petType and getBaseName(petType) == filterType)
+                        local passKG = (not baseW) or (baseW <= baseKGThr)
+                        if not passType then
+                            skippedType = skippedType + 1
+                        elseif not passKG then
+                            skippedHeavy = skippedHeavy + 1
+                        else
+                            if not elephantTeamUUIDs[uuid] then
+                                elephantTeamUUIDs[uuid] = true
+                                moved = moved + 1
+                            end
+                        end
+                        pendingElephant[uuid] = nil
+                    end
+                    if moved > 0 then pcall(save) end
+                    local extraInfo = ""
+                    if skippedType > 0 then extraInfo = extraInfo.." | skip "..skippedType.." beda jenis" end
+                    if skippedHeavy > 0 then extraInfo = extraInfo.." | skip "..skippedHeavy.." base>"..baseKGThr end
+                    dbg("[batch-ele] DONE: "..moved.." pet -> Tim Elephant"..extraInfo)
+                    statusLbl.Text="Done! "..moved.." pet -> Tim Elephant"
                 elseif pendingCount > 0 then
                     statusLbl.Text="Tunggu sisa... Q:"..#available.." | Antrian:"..pendingCount
                 else
