@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.58"
+local SCRIPT_VERSION="v13.59"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (FIX rotate populate pendingElephant - target done pet -> Antrian)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (TEAM DONE monitor - teamPetUUIDs done -> Antrian)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -5561,6 +5561,69 @@ doStart = function()
             task.wait(0.5)  -- v13.36: faster (was 2s)
         end
         dbg("[rotate] monitor task STOPPED")
+    end)
+
+    -- v13.59: TEAM DONE MONITOR - pet di teamPetUUIDs yang reach age toAge -> pindah Antrian
+    -- Penting: user mungkin pake Pet Tim Leveling (bukan Pet Target), need handle ini juga
+    task.spawn(function()
+        dbg("[teamDone] monitor task STARTED, target="..tostring(toAge))
+        local lastDumpTeam = 0
+        while isRunning do
+            local toFinish = {}
+            local dumpNowTeam = (tick() - lastDumpTeam > 5)
+            if dumpNowTeam then
+                local cnt=0 for _ in pairs(teamPetUUIDs) do cnt=cnt+1 end
+                local pCnt=0 for _ in pairs(pendingElephant) do pCnt=pCnt+1 end
+                local cCnt=0 for _ in pairs(currentLevelingUUIDs) do cCnt=cCnt+1 end
+                dbg("[teamDone] DUMP team="..cnt.." | currentLvl="..cCnt.." | pending="..pCnt)
+                lastDumpTeam = tick()
+            end
+            for uuid,_ in pairs(teamPetUUIDs) do
+                if not completedPets[uuid] then  -- skip yang udah completed
+                    local age = nil
+                    -- coba semua source
+                    if getgenv().ZenxAPS then age = getgenv().ZenxAPS.getAge(uuid) end
+                    if not age then age = getAgeFromUI(uuid) end
+                    if not age then
+                        local item = findPetInBackpack(uuid) or findPlacedPetByUUID(uuid)
+                        if item and item.Parent then
+                            local ok, a = pcall(function() return getAgeFromKG(item) end)
+                            if ok then age = a end
+                        end
+                    end
+                    if age and age >= toAge then
+                        table.insert(toFinish, uuid)
+                        if dumpNowTeam then
+                            dbg("[teamDone] team "..uuid:sub(1,8).." age="..age.." >= "..toAge.." -> to finish")
+                        end
+                    end
+                end
+            end
+            if #toFinish > 0 then
+                local baseKGThr = (config and config.elephantBaseKGThreshold) or 3.5
+                local moved = 0
+                local skipped = 0
+                for _, uuid in ipairs(toFinish) do
+                    local baseW = nil
+                    if getgenv().ZenxAPS then
+                        local pinfo = getgenv().ZenxAPS.getPetData(uuid)
+                        if pinfo and pinfo.PetData then baseW = pinfo.PetData.BaseWeight end
+                    end
+                    if baseW and baseW > baseKGThr then
+                        dbg("[teamDone] "..uuid:sub(1,8).." base "..baseW.."kg > "..baseKGThr..", skip antrian")
+                        skipped = skipped + 1
+                    else
+                        pendingElephant[uuid] = true
+                        moved = moved + 1
+                    end
+                    completedPets[uuid] = true
+                    pcall(function() unequipPet(uuid) end)
+                end
+                dbg("[teamDone] "..moved.." pet -> Antrian Bless ("..skipped.." skipped base>"..baseKGThr..")")
+            end
+            task.wait(1)
+        end
+        dbg("[teamDone] task STOPPED")
     end)
 
     monitorTask=task.spawn(function()
