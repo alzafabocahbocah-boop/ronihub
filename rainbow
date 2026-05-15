@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.65"
+local SCRIPT_VERSION="v13.67"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (teamKeeper + swapKeeper hanya jalan kalau isRunning)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (FIX threshold 3.5kg -> 100 biar pet heavy masuk Antrian)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1411,7 +1411,7 @@ task.spawn(function()
     end
     local targetAge = d.toAge or 50
     local cfg = d.config or {}
-    local baseKGThreshold = cfg.elephantBaseKGThreshold or 3.5
+    local baseKGThreshold = cfg.elephantBaseKGThreshold or 100
     local allPets = getgenv().ZenxAPS.getAllPets()
 
     -- v13.54: Build set UUID yang masih hidup di inventory
@@ -1493,7 +1493,12 @@ config.pickupDelay = config.pickupDelay or 0.10  -- v13.05
 config.placeDelay = config.placeDelay or 0.12  -- v13.05
 config.elephantPetCount = config.elephantPetCount or 1  -- v13.06: target jumlah Tim Elephant
 config.elephantPetType = config.elephantPetType or ""    -- v13.48: filter jenis pet utk Tim Elephant
-config.elephantBaseKGThreshold = config.elephantBaseKGThreshold or 3.5  -- v13.50: filter base KG utk Antrian Bless
+config.elephantBaseKGThreshold = config.elephantBaseKGThreshold or 100  -- v13.50: filter base KG utk Antrian Bless
+-- v13.67: force-upgrade saved value 3.5 (old default) ke 100 biar gak block pet heavy
+if config.elephantBaseKGThreshold == 3.5 then
+    config.elephantBaseKGThreshold = 100
+    print("[v13.67] threshold lama 3.5 -> 100 (gak block pet)")
+end
 -- v13.12: sync toAge dgn equipTargetLvl (existing leveling pakai toAge utk stop)
 toAge = math.max(1, math.min(100, config.equipTargetLvl or 100))
 d.toAge = toAge
@@ -2437,7 +2442,7 @@ local function buildTargetList()
     end)
     -- v13.50: Threshold Base KG - filter Antrian Bless
     -- Pet dengan base KG > threshold dianggap udah cukup berat, GAK masuk antrian
-    mkElephantInputRow(cfgCard, "Threshold Base KG (filter Antrian)", config.elephantBaseKGThreshold or 3.5, 3, function(v)
+    mkElephantInputRow(cfgCard, "Threshold Base KG (filter Antrian)", config.elephantBaseKGThreshold or 100, 3, function(v)
         config.elephantBaseKGThreshold = math.max(0.1, v)
     end)
 
@@ -5164,6 +5169,8 @@ _G.ZenxStopTeamKeeper=stopTeamKeeper
 -- GLOBAL POLLER (FRIEND-7)
 -- ============================================
 local function pollerShouldRun()
+    -- v13.66: HANYA jalan kalau isRunning (gak swap-equip kalo belum START)
+    if not isRunning then return false end
     for _,cfg in pairs(swapPerPet) do
         if cfg.enabled then return true end
     end
@@ -5653,7 +5660,7 @@ doStart = function()
 
                 -- v13.58: helper - add target pet ke pendingElephant (Antrian) dgn base KG filter
                 local function moveToAntrian(uuid)
-                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 3.5
+                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 100
                     local baseW = nil
                     if getgenv().ZenxAPS then
                         local pinfo = getgenv().ZenxAPS.getPetData(uuid)
@@ -5710,14 +5717,14 @@ doStart = function()
     -- v13.63: reset completedPets utk team pets di task start + force per-pet log
     task.spawn(function()
         dbg("[teamDone] monitor task STARTED, target="..tostring(toAge))
-        -- v13.63: reset completedPets utk pet di teamPetUUIDs (in case stale dari run lama)
+        -- v13.63+v13.67: reset completedPets utk pet di teamPetUUIDs (force re-process biar pakai threshold baru)
         local resetCnt = 0
         for uuid,_ in pairs(teamPetUUIDs) do
             local normUuid = tostring(uuid):gsub("^{",""):gsub("}$","")
             if completedPets[uuid] then completedPets[uuid] = nil; resetCnt = resetCnt + 1 end
             if completedPets[normUuid] then completedPets[normUuid] = nil; resetCnt = resetCnt + 1 end
         end
-        if resetCnt > 0 then dbg("[teamDone] reset "..resetCnt.." stale completedPets entries") end
+        if resetCnt > 0 then dbg("[teamDone] reset "..resetCnt.." completedPets entries (force re-process)") end
 
         local lastDumpTeam = 0
         while isRunning do
@@ -5741,7 +5748,8 @@ doStart = function()
                 local pCnt=0 for _ in pairs(pendingElephant) do pCnt=pCnt+1 end
                 local cCnt=0 for _ in pairs(currentLevelingUUIDs) do cCnt=cCnt+1 end
                 local liveCnt=0 for _ in pairs(livePets) do liveCnt=liveCnt+1 end
-                dbg("[teamDone] DUMP team="..cnt.." | currentLvl="..cCnt.." | pending="..pCnt.." | apsLive="..liveCnt.." | toAge="..toAge)
+                local thr = (config and config.elephantBaseKGThreshold) or 100
+                dbg("[teamDone] DUMP team="..cnt.." | currentLvl="..cCnt.." | pending="..pCnt.." | apsLive="..liveCnt.." | toAge="..toAge.." | baseKGThr="..thr)
                 lastDumpTeam = tick()
             end
 
@@ -5756,17 +5764,19 @@ doStart = function()
                     local age = nil
                     local petType = "?"
                     local source = "none"
+                    local baseW = nil
                     local info = livePets[normUuid]
                     if info and info.PetData then
                         age = info.PetData.Level
                         petType = info.PetType or "?"
+                        baseW = info.PetData.BaseWeight
                         source = "bulkAPS"
                     end
                     if not age and getgenv().ZenxAPS then
                         local ok, a = pcall(function() return getgenv().ZenxAPS.getAge(uuid) end)
                         if ok and a then age = a; source = "perPetAPS" end
                     end
-                    dbg("[teamDone] "..normUuid:sub(1,8).." | "..petType.." | age="..tostring(age).." | src="..source.." | done="..tostring(isCompleted).." | inPending="..tostring(pendingElephant[uuid] ~= nil or pendingElephant[normUuid] ~= nil))
+                    dbg("[teamDone] "..normUuid:sub(1,8).." | "..petType.." | age="..tostring(age).." | base="..tostring(baseW).."kg | src="..source.." | done="..tostring(isCompleted).." | inPending="..tostring(pendingElephant[uuid] ~= nil or pendingElephant[normUuid] ~= nil))
                 end
 
                 if not isCompleted then
@@ -5796,7 +5806,7 @@ doStart = function()
                 end
             end
             if #toFinish > 0 then
-                local baseKGThr = (config and config.elephantBaseKGThreshold) or 3.5
+                local baseKGThr = (config and config.elephantBaseKGThreshold) or 100
                 local moved = 0
                 local skipped = 0
                 for _, uuid in ipairs(toFinish) do
@@ -5809,16 +5819,17 @@ doStart = function()
                         if ok and pd and pd.PetData then baseW = pd.PetData.BaseWeight end
                     end
                     if baseW and baseW > baseKGThr then
-                        dbg("[teamDone] "..normUuid:sub(1,8).." base "..baseW.."kg > "..baseKGThr..", skip antrian")
+                        dbg("[teamDone] SKIP "..normUuid:sub(1,8).." base="..baseW.."kg > thr "..baseKGThr.."kg")
                         skipped = skipped + 1
                     else
                         pendingElephant[uuid] = true
+                        dbg("[teamDone] OK "..normUuid:sub(1,8).." -> Antrian Bless (base="..tostring(baseW).."kg)")
                         moved = moved + 1
                     end
                     completedPets[uuid] = true
                     pcall(function() unequipPet(uuid) end)
                 end
-                dbg("[teamDone] "..moved.." pet -> Antrian Bless ("..skipped.." skipped base>"..baseKGThr..")")
+                dbg("[teamDone] PROCESS: "..moved.." pet -> Antrian Bless | "..skipped.." skipped (base > "..baseKGThr.."kg) | total toFinish="..#toFinish)
             end
             task.wait(1)
         end
@@ -5856,7 +5867,7 @@ doStart = function()
                     completedPets[uuid]=true
                     -- v13.47: BATCH MODE - jangan langsung add ke Tim Elephant
                     -- v13.50: filter base KG threshold - pet base>threshold gak masuk antrian
-                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 3.5
+                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 100
                     local baseW = nil
                     if getgenv().ZenxAPS then
                         local pinfo = getgenv().ZenxAPS.getPetData(uuid)
@@ -5892,7 +5903,7 @@ doStart = function()
                                     dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck) -> done")
                                     completedPets[uuid]=true
                                     -- v13.47/v13.50: BATCH MODE + base KG filter di recheck
-                                    local baseKGThr2 = (config and config.elephantBaseKGThreshold) or 3.5
+                                    local baseKGThr2 = (config and config.elephantBaseKGThreshold) or 100
                                     local baseW2 = nil
                                     if getgenv().ZenxAPS then
                                         local pinfo2 = getgenv().ZenxAPS.getPetData(uuid)
@@ -6039,7 +6050,7 @@ doStart = function()
                     -- Tim Elephant skarang = pet siap bless (target pet yang udah age 50)
                     -- Filter base KG juga di-apply
                     local filterType = (config and config.elephantPetType) or ""
-                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 3.5
+                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 100
                     local moved, skippedHeavy, skippedType = 0, 0, 0
                     for uuid, _ in pairs(pendingElephant) do
                         local petType, baseW = nil, nil
@@ -6154,29 +6165,25 @@ if autoStartEnabled then doStart() end
     end
 
     -- v10.4: auto-equip semua swap pet yg saved ON (sblm nunggu START)
+    -- v13.66: REMOVED - gak auto-equip sebelum user klik START
+    -- Pet swap akan di-equip pas user toggle ON manual (dgn gate isRunning) atau pas START
     local enabledList={}
     for uuid,cfg in pairs(swapPerPet) do
         if cfg.enabled then table.insert(enabledList, uuid) end
     end
     if #enabledList>0 then
-        dbg("[init] auto-equip "..#enabledList.." swap pet + start poller (saved swap-ON)")
-        task.spawn(function()
-            for _,uuid in ipairs(enabledList) do
-                pcall(function() equipPet(uuid) end)
-                task.wait(0.05)
-            end
-        end)
-        startGlobalPoller()
-        startSwapKeeper()
+        dbg("[init] "..#enabledList.." swap pet saved ON - tunggu user klik START dulu")
+        -- v13.66: gak auto-equip dan gak start poller - tunggu user START
     end
 end)()
 
 ;(function()
+    -- v13.66: REMOVED - gak auto-start teamKeeper di init
+    -- teamKeeper akan start pas user toggle pet tim atau klik START
     local hasTeam=false
     for _ in pairs(teamPetUUIDs) do hasTeam=true break end
     if hasTeam then
-        dbg("[init] auto-start teamKeeper (team only)")
-        startTeamKeeper()
+        dbg("[init] "..(function() local n=0 for _ in pairs(teamPetUUIDs) do n=n+1 end return n end)().." pet tim saved - tunggu user klik START dulu")
     end
 end)()
 
