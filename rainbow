@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.64"
+local SCRIPT_VERSION="v13.65"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (gak auto-equip ke garden sebelum START)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (teamKeeper + swapKeeper hanya jalan kalau isRunning)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -5085,6 +5085,8 @@ end
 local teamKeeperTask=nil
 
 teamKeeperShouldRun=function()
+    -- v13.65: HANYA jalan kalau isRunning (gak auto-equip kalo belum START)
+    if not isRunning then return false end
     for _ in pairs(teamPetUUIDs) do return true end
     return false
 end
@@ -5109,14 +5111,16 @@ startTeamKeeper=function()
             end
             task.wait(0.5)
         end
-        dbg("[teamKeeper] STOP (gak ada team)")
+        dbg("[teamKeeper] STOP")
         teamKeeperTask=nil
     end)
 end
 
 -- v10.4: swap keeper - re-equip swap pet yg ke-pickup manual (gak perlu START)
+-- v13.65: HANYA jalan kalau isRunning (gak auto-equip kalo belum START)
 local swapKeeperTask=nil
 local function swapKeeperShouldRun()
+    if not isRunning then return false end
     for _,cfg in pairs(swapPerPet) do
         if cfg.enabled then return true end
     end
