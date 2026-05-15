@@ -1,7 +1,7 @@
-=-- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.52"
+-- ============= ZENX LVL DEBUG =============
+local SCRIPT_VERSION="v13.53"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (FIX picker filter favorit - apsFavs check bug)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (safety pcall + simplified IIFE)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2007,6 +2007,7 @@ buildTimList=function()
     local elephantBtnCover = mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=elephantPickerRow})
 
     elephantBtnCover.MouseButton1Click:Connect(function()
+        local pickerOk, pickerErr = pcall(function()
         -- v13.51: HANYA pet favorit yang muncul di picker Tim Elephant
         -- v13.52 FIX: APS getAllFavorites() return info objects, bukan true bool
         --             Plus pet favorit kebanyakan di GARDEN, bukan backpack - pakai APS sebagai source utama
@@ -2019,7 +2020,9 @@ buildTimList=function()
             local ok, favs = pcall(function() return getgenv().ZenxAPS.getAllFavorites() end)
             if ok and type(favs) == "table" then apsFavs = favs end
         end
-        dbg("[ele-picker] apsFavs count: "..(function() local n=0 for _ in pairs(apsFavs) do n=n+1 end return n end)())
+        local favCount = 0
+        for _ in pairs(apsFavs) do favCount = favCount + 1 end
+        dbg("[ele-picker] apsFavs count: "..favCount)
 
         -- 1. Iterate Backpack DULU (data real-time KG/age)
         pcall(function()
@@ -2118,6 +2121,11 @@ buildTimList=function()
                 save()
             end,
         })
+        end) -- v13.53: end pcall wrapper
+        if not pickerOk then
+            dbg("[ele-picker] ERROR: "..tostring(pickerErr))
+            warn("[ZenxElephant] picker error: "..tostring(pickerErr))
+        end
     end)
 
     -- v13.17: Pilih Pet Target picker - pet yang DI-GRIND (kg/age)
