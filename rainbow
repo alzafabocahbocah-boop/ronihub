@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.49"
+local SCRIPT_VERSION="v13.50"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Pet Antrian Bless terpisah dari Tim Elephant)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Antrian Bless terpisah + filter Base KG)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1401,6 +1401,7 @@ local teamPetInfoCache=d.teamPetInfoCache or {}
 -- v13.49: STARTUP SCAN pet age >= toAge -> pendingElephant (BUKAN ke Tim Elephant)
 -- Tim Elephant = blesser pets (Peryton/Elephant) yang user pick manual
 -- pendingElephant = pet target selesai leveling, displayed sebagai "Antrian Bless"
+-- v13.50: filter by base KG threshold - pet dengan baseWeight > threshold di-skip
 task.spawn(function()
     task.wait(2)
     if not getgenv().ZenxAPS or not getgenv().ZenxAPS.api then
@@ -1408,20 +1409,29 @@ task.spawn(function()
         return
     end
     local targetAge = d.toAge or 50
+    local cfg = d.config or {}
+    local baseKGThreshold = cfg.elephantBaseKGThreshold or 3.5
     local allPets = getgenv().ZenxAPS.getAllPets()
     local added = 0
+    local skippedHeavy = 0
     for uuid, info in pairs(allPets) do
         if info.PetData and info.PetData.Level and info.PetData.Level >= targetAge then
             local uuidStr = tostring(uuid)
+            local baseW = info.PetData.BaseWeight or 0
             -- Jangan tambah pet yang udah di Tim Elephant (blesser - user yang pick)
             if not elephantTeamUUIDs[uuidStr] and not pendingElephant[uuidStr] then
-                pendingElephant[uuidStr] = true
-                added = added + 1
+                if baseW > baseKGThreshold then
+                    skippedHeavy = skippedHeavy + 1
+                else
+                    pendingElephant[uuidStr] = true
+                    added = added + 1
+                end
             end
         end
     end
-    if added > 0 then
-        dbg("[autoele] STARTUP: "..added.." pet age>="..targetAge.." -> Antrian Bless")
+    if added > 0 or skippedHeavy > 0 then
+        dbg("[autoele] STARTUP: "..added.." pet -> Antrian Bless (base<=" .. baseKGThreshold .. "kg)"
+            ..(skippedHeavy > 0 and " | skip "..skippedHeavy.." pet (base>"..baseKGThreshold..")" or ""))
     else
         dbg("[autoele] STARTUP: gak ada pet baru di antrian")
     end
@@ -1440,6 +1450,7 @@ config.pickupDelay = config.pickupDelay or 0.10  -- v13.05
 config.placeDelay = config.placeDelay or 0.12  -- v13.05
 config.elephantPetCount = config.elephantPetCount or 1  -- v13.06: target jumlah Tim Elephant
 config.elephantPetType = config.elephantPetType or ""    -- v13.48: filter jenis pet utk Tim Elephant
+config.elephantBaseKGThreshold = config.elephantBaseKGThreshold or 3.5  -- v13.50: filter base KG utk Antrian Bless
 -- v13.12: sync toAge dgn equipTargetLvl (existing leveling pakai toAge utk stop)
 toAge = math.max(1, math.min(100, config.equipTargetLvl or 100))
 d.toAge = toAge
@@ -2236,6 +2247,11 @@ local function buildTargetList()
     mkElephantInputRow(cfgCard, "Jumlah Pet Target di Elephant", config.elephantPetCount, 2, function(v)
         config.elephantPetCount = math.max(1, v)
     end)
+    -- v13.50: Threshold Base KG - filter Antrian Bless
+    -- Pet dengan base KG > threshold dianggap udah cukup berat, GAK masuk antrian
+    mkElephantInputRow(cfgCard, "Threshold Base KG (filter Antrian)", config.elephantBaseKGThreshold or 3.5, 3, function(v)
+        config.elephantBaseKGThreshold = math.max(0.1, v)
+    end)
 
     -- Status info card
     local statusCard=mk("Frame",{Size=UDim2.new(1,0,0,72),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=2,Parent=areas[2]})
@@ -2314,18 +2330,20 @@ local function buildTargetList()
                         })
                         corner(row,4)
 
-                        -- Ambil nama + age
-                        local petType, age = "?", "?"
+                        -- Ambil nama + age + base kg
+                        local petType, age, baseKG = "?", "?", nil
                         if getgenv().ZenxAPS then
                             local info = getgenv().ZenxAPS.getPetData(uuid)
                             if info then
                                 petType = info.PetType or "?"
-                                if info.PetData and info.PetData.Level then
-                                    age = tostring(info.PetData.Level)
+                                if info.PetData then
+                                    if info.PetData.Level then age = tostring(info.PetData.Level) end
+                                    if info.PetData.BaseWeight then baseKG = info.PetData.BaseWeight end
                                 end
                             end
                         end
-                        local rowLbl = lbl(row, petType.." [age "..age.."]", 10, C.White)
+                        local txt = petType.." [age "..age..(baseKG and (" | base "..string.format("%.2f",baseKG).."kg") or "").."]"
+                        local rowLbl = lbl(row, txt, 10, C.White)
                         rowLbl.Size=UDim2.new(1,-30,1,0) rowLbl.Position=UDim2.new(0,6,0,0)
                         rowLbl.TextXAlignment=Enum.TextXAlignment.Left
 
@@ -5358,8 +5376,18 @@ doStart = function()
                     dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done")
                     completedPets[uuid]=true
                     -- v13.47: BATCH MODE - jangan langsung add ke Tim Elephant
-                    -- Simpan dulu ke pendingElephant, batch move pas SEMUA target pet selesai
-                    pendingElephant[uuid] = true
+                    -- v13.50: filter base KG threshold - pet base>threshold gak masuk antrian
+                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 3.5
+                    local baseW = nil
+                    if getgenv().ZenxAPS then
+                        local pinfo = getgenv().ZenxAPS.getPetData(uuid)
+                        if pinfo and pinfo.PetData then baseW = pinfo.PetData.BaseWeight end
+                    end
+                    if baseW and baseW > baseKGThr then
+                        dbg("[monitor] "..uuid:sub(1,8).." base "..baseW.."kg > "..baseKGThr.."kg, SKIP antrian")
+                    else
+                        pendingElephant[uuid] = true
+                    end
                     table.insert(doneList,uuid)
                 else
                     if (not item) and (not placed) and not uiAge then
@@ -5384,8 +5412,18 @@ doStart = function()
                                 if newAge and newAge>=toAge then
                                     dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck) -> done")
                                     completedPets[uuid]=true
-                                    -- v13.47: BATCH MODE juga di recheck path
-                                    pendingElephant[uuid] = true
+                                    -- v13.47/v13.50: BATCH MODE + base KG filter di recheck
+                                    local baseKGThr2 = (config and config.elephantBaseKGThreshold) or 3.5
+                                    local baseW2 = nil
+                                    if getgenv().ZenxAPS then
+                                        local pinfo2 = getgenv().ZenxAPS.getPetData(uuid)
+                                        if pinfo2 and pinfo2.PetData then baseW2 = pinfo2.PetData.BaseWeight end
+                                    end
+                                    if baseW2 and baseW2 > baseKGThr2 then
+                                        dbg("[monitor] "..uuid:sub(1,8).." base "..baseW2.."kg > "..baseKGThr2.."kg, SKIP antrian")
+                                    else
+                                        pendingElephant[uuid] = true
+                                    end
                                     table.insert(doneList,uuid)
                                 else
                                     pcall(function() equipPet(uuid) end)
