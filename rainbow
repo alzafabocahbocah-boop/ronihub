@@ -1,7 +1,7 @@
--- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.67"
+\-- ============= ZENX LVL DEBUG =============
+local SCRIPT_VERSION="v13.68"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (FIX threshold 3.5kg -> 100 biar pet heavy masuk Antrian)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Sample Tim Ele + Antrian di DEBUG STATE)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -2556,6 +2556,42 @@ local function buildTargetList()
                     end
                 end
                 table.insert(lines,"  "..uuid:sub(1,8).." | "..info)
+            end
+        end
+        -- v13.68: tambah Sample Tim Ele dan Antrian biar user bisa confirm transfer
+        if eleCt > 0 then
+            table.insert(lines,"Sample Tim Ele:")
+            local i=0
+            for uuid,_ in pairs(elephantTeamUUIDs) do
+                i = i + 1 if i > 5 then break end
+                local nu = tostring(uuid):gsub("^{",""):gsub("}$","")
+                local info = "?"
+                if getgenv().ZenxAPS then
+                    local pd = getgenv().ZenxAPS.getPetData(uuid)
+                    if pd then
+                        local age = (pd.PetData and pd.PetData.Level) or "?"
+                        local bw = (pd.PetData and pd.PetData.BaseWeight) or "?"
+                        info = (pd.PetType or "?").." age="..tostring(age).." base="..tostring(bw)
+                    end
+                end
+                table.insert(lines,"  "..nu:sub(1,8).." | "..info)
+            end
+        end
+        if pendingCt > 0 then
+            table.insert(lines,"Sample Antrian:")
+            local i=0
+            for uuid,_ in pairs(pendingElephant) do
+                i = i + 1 if i > 5 then break end
+                local nu = tostring(uuid):gsub("^{",""):gsub("}$","")
+                local info = "?"
+                if getgenv().ZenxAPS then
+                    local pd = getgenv().ZenxAPS.getPetData(uuid)
+                    if pd then
+                        local age = (pd.PetData and pd.PetData.Level) or "?"
+                        info = (pd.PetType or "?").." age="..tostring(age)
+                    end
+                end
+                table.insert(lines,"  "..nu:sub(1,8).." | "..info)
             end
         end
 
