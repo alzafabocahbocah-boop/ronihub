@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.57"
+local SCRIPT_VERSION="v13.58"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (BATCH TRANSFER Antrian -> Tim Elephant + relax cleanup)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (FIX rotate populate pendingElephant - target done pet -> Antrian)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -5509,11 +5509,27 @@ doStart = function()
                     end
                 end
                 dbg("[rotate] "..#toRotate.." pet hit target, "..#freshList.." fresh pets available")
+
+                -- v13.58: helper - add target pet ke pendingElephant (Antrian) dgn base KG filter
+                local function moveToAntrian(uuid)
+                    local baseKGThr = (config and config.elephantBaseKGThreshold) or 3.5
+                    local baseW = nil
+                    if getgenv().ZenxAPS then
+                        local pinfo = getgenv().ZenxAPS.getPetData(uuid)
+                        if pinfo and pinfo.PetData then baseW = pinfo.PetData.BaseWeight end
+                    end
+                    if baseW and baseW > baseKGThr then
+                        dbg("[rotate] "..tostring(uuid):sub(1,8).." base "..baseW.."kg > "..baseKGThr.."kg, SKIP antrian")
+                    else
+                        pendingElephant[uuid] = true
+                        dbg("[rotate] "..tostring(uuid):sub(1,8).." -> Antrian Bless")
+                    end
+                    completedPets[uuid] = true
+                end
+
                 -- v13.39: hanya rotate kalo ADA replacement (gak buang slot kosong)
                 local maxRotate = math.min(#toRotate, #freshList)
-                if maxRotate == 0 then
-                    dbg("[rotate] no fresh replacement available, wait for Elephant Phase 2 / bless")
-                end
+                -- ROTATE: replace done target with fresh, old -> Antrian
                 for i = 1, maxRotate do
                     local item = toRotate[i]
                     local uuid = item.uuid
@@ -5526,7 +5542,20 @@ doStart = function()
                     pcall(function() unequipPet(uuid) end)
                     targetPetUUIDs[uuid] = nil
                     targetPetInfoCache[uuid] = nil
+                    moveToAntrian(uuid)  -- v13.58: old pet ke Antrian Bless
                     dbg("[rotate] "..tostring(uuid):sub(1,8).." (age "..item.age..") -> "..f.uuidStr:sub(1,8).." ("..f.name..", age "..tostring(f.age)..")")
+                end
+                -- v13.58: SISA done target tanpa fresh replacement -> juga ke Antrian (biar batch transfer bisa trigger)
+                if maxRotate < #toRotate then
+                    dbg("[rotate] "..(#toRotate - maxRotate).." pet done tanpa fresh, langsung ke Antrian")
+                    for i = maxRotate + 1, #toRotate do
+                        local item = toRotate[i]
+                        local uuid = item.uuid
+                        pcall(function() unequipPet(uuid) end)
+                        targetPetUUIDs[uuid] = nil
+                        targetPetInfoCache[uuid] = nil
+                        moveToAntrian(uuid)
+                    end
                 end
             end
             task.wait(0.5)  -- v13.36: faster (was 2s)
