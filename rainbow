@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.46"
+local SCRIPT_VERSION="v13.47"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (auto-pindah pet selesai leveling ke Tim Elephant)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (batch ele transfer + swap-skill ele section + picker selected on top)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1483,6 +1483,8 @@ local isAR=false local arTask=nil
 local arTog2,arTogStroke2,arStroke2,cdLbl2
 local currentLevelingUUIDs={}
 local completedPets={}
+-- v13.47: pendingElephant - pet yang udah selesai leveling tapi nunggu batch transfer ke Tim Elephant
+local pendingElephant={}
 
 local swapPerPet=d.swapPerPet or {}
 local swapPetInfoCache=d.swapPetInfoCache or {}
@@ -2036,6 +2038,12 @@ buildTimList=function()
         if #items == 0 then
             table.insert(items,{value="__empty__", label="(belum ada pet di bp/placed)", selected=false})
         end
+        -- v13.47: SORT - pet yang udah ke-pilih taruk paling atas
+        table.sort(items, function(a, b)
+            if a.selected and not b.selected then return true end
+            if not a.selected and b.selected then return false end
+            return (a.label or "") < (b.label or "")
+        end)
         showPickerModal({
             title = "Pilih Tim Elephant - multi-select",
             items = items, multi = true,
@@ -2251,6 +2259,7 @@ buildSwapList=function()
 
     local timRows={}
     local favRows={}
+    local eleRows={}  -- v13.47: Tim Elephant rows untuk Swap Skill
     local seen={}
     local bp=player:FindFirstChild("Backpack")
     local favCountTotal=0
@@ -2265,6 +2274,7 @@ buildSwapList=function()
                     local info=getPetInfo(item)
                     local isFav=isFavorite(item)
                     local inTim=teamPetUUIDs[uuidStr]==true
+                    local inEle=elephantTeamUUIDs[uuidStr]==true  -- v13.47
                     if isFav then favCountTotal=favCountTotal+1 end
 
                     swapPetInfoCache[uuidStr]={name=name,info=info}
@@ -2272,6 +2282,10 @@ buildSwapList=function()
                     if inTim then
                         seen[uuidStr]=true
                         table.insert(timRows,{uuid=uuidStr,info=info,isFav=isFav})
+                    elseif inEle then
+                        -- v13.47: pet di Tim Elephant tapi gak di Tim Leveling
+                        seen[uuidStr]=true
+                        table.insert(eleRows,{uuid=uuidStr,info=info,isFav=isFav})
                     elseif showAllPetsSwap or isFav then
                         seen[uuidStr]=true
                         table.insert(favRows,{uuid=uuidStr,info=info,isFav=isFav})
@@ -2287,6 +2301,16 @@ buildSwapList=function()
             local cached=teamPetInfoCache[uuid] or swapPetInfoCache[uuid]
             local info=(cached and cached.info or uuid:sub(1,8).."...").." (di garden)"
             table.insert(timRows,{uuid=uuid,info=info,isFav=false})
+        end
+    end
+
+    -- v13.47: scan elephantTeamUUIDs juga (pet di garden / equipped)
+    for uuid,_ in pairs(elephantTeamUUIDs) do
+        if not seen[uuid] then
+            seen[uuid]=true
+            local cached=teamPetInfoCache[uuid] or swapPetInfoCache[uuid]
+            local info=(cached and cached.info or uuid:sub(1,8).."...").." (di garden)"
+            table.insert(eleRows,{uuid=uuid,info=info,isFav=false})
         end
     end
 
@@ -2360,6 +2384,20 @@ buildSwapList=function()
         e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=lo lo=lo+1
     else
         for _,r in ipairs(timRows) do
+            makeRow(areas[3],r,lo) lo=lo+1
+        end
+    end
+
+    mk("Frame",{Size=UDim2.new(1,0,0,8),BackgroundTransparency=1,LayoutOrder=lo,Parent=areas[3]}) lo=lo+1
+    div(areas[3],lo) lo=lo+1
+
+    -- v13.47: section Pet Tim Elephant
+    makeSectionHeader("Pet Tim Elephant",#eleRows,countEnabled(eleRows),lo,C.Gold) lo=lo+1
+    if #eleRows==0 then
+        local e=lbl(areas[3],"Belum ada pet di Tim Elephant. Pilih di tab ELEPHANT.",12,C.Gray,Enum.TextXAlignment.Center)
+        e.Size=UDim2.new(1,0,0,22) e.LayoutOrder=lo e.TextWrapped=true lo=lo+1
+    else
+        for _,r in ipairs(eleRows) do
             makeRow(areas[3],r,lo) lo=lo+1
         end
     end
@@ -5178,12 +5216,9 @@ doStart = function()
                 if age and age>=toAge then
                     dbg("[monitor] "..uuid:sub(1,8).." age "..age..">="..toAge.." ("..source..") -> done")
                     completedPets[uuid]=true
-                    -- v13.45: AUTO-PINDAH ke Tim Elephant (user gak perlu manual select)
-                    if not elephantTeamUUIDs[uuid] then
-                        elephantTeamUUIDs[uuid] = true
-                        dbg("[monitor] "..uuid:sub(1,8).." -> AUTO-ADDED ke Tim Elephant")
-                        pcall(save)
-                    end
+                    -- v13.47: BATCH MODE - jangan langsung add ke Tim Elephant
+                    -- Simpan dulu ke pendingElephant, batch move pas SEMUA target pet selesai
+                    pendingElephant[uuid] = true
                     table.insert(doneList,uuid)
                 else
                     if (not item) and (not placed) and not uiAge then
@@ -5208,12 +5243,8 @@ doStart = function()
                                 if newAge and newAge>=toAge then
                                     dbg("[monitor] "..uuid:sub(1,8).." age "..newAge.." (recheck) -> done")
                                     completedPets[uuid]=true
-                                    -- v13.45: AUTO-PINDAH ke Tim Elephant juga di recheck path
-                                    if not elephantTeamUUIDs[uuid] then
-                                        elephantTeamUUIDs[uuid] = true
-                                        dbg("[monitor] "..uuid:sub(1,8).." -> AUTO-ADDED ke Tim Elephant (recheck)")
-                                        pcall(save)
-                                    end
+                                    -- v13.47: BATCH MODE juga di recheck path
+                                    pendingElephant[uuid] = true
                                     table.insert(doneList,uuid)
                                 else
                                     pcall(function() equipPet(uuid) end)
@@ -5338,7 +5369,31 @@ doStart = function()
             if #activeNames>0 then
                 statusLbl.Text="Lvl: "..table.concat(activeNames,", ").." | Q:"..#available
             else
-                statusLbl.Text="Tunggu pet target... Q:"..#available
+                -- v13.47: BATCH MOVE - kalo queue kosong + gak ada pet leveling + ada pendingElephant
+                -- Itu artinya SEMUA target pet udah selesai leveling, batch pindah ke Tim Elephant
+                local activeCount = 0
+                for _ in pairs(currentLevelingUUIDs) do activeCount = activeCount + 1 end
+                local pendingCount = 0
+                for _ in pairs(pendingElephant) do pendingCount = pendingCount + 1 end
+
+                if pendingCount > 0 and activeCount == 0 and #available == 0 then
+                    -- ALL TARGET DONE - batch move ke Tim Elephant
+                    local moved = 0
+                    for uuid, _ in pairs(pendingElephant) do
+                        if not elephantTeamUUIDs[uuid] then
+                            elephantTeamUUIDs[uuid] = true
+                            moved = moved + 1
+                        end
+                        pendingElephant[uuid] = nil
+                    end
+                    pcall(save)
+                    dbg("[batch-ele] SEMUA target selesai -> "..moved.." pet pindah ke Tim Elephant")
+                    statusLbl.Text="Done! "..moved.." pet -> Tim Elephant"
+                elseif pendingCount > 0 then
+                    statusLbl.Text="Tunggu sisa pet... Q:"..#available.." | Pending Ele:"..pendingCount
+                else
+                    statusLbl.Text="Tunggu pet target... Q:"..#available
+                end
             end
             statusLbl.TextColor3=C.Teal
 
