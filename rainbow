@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.47"
+local SCRIPT_VERSION="v13.48"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (batch ele transfer + swap-skill ele section + picker selected on top)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Jenis Pet picker di tab Elephant + filter auto-add)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1398,6 +1398,7 @@ local teamPetInfoCache=d.teamPetInfoCache or {}
 
 -- v13.45: AUTO-ADD pets yang udah age >= toAge ke Tim Elephant (startup scan)
 -- Scan dari APS bulk (catch pet di Backpack + Equipped/Garden)
+-- v13.48: filter by config.elephantPetType jika di-set
 task.spawn(function()
     task.wait(2) -- biar APS sempet load
     if not getgenv().ZenxAPS or not getgenv().ZenxAPS.api then
@@ -1405,19 +1406,28 @@ task.spawn(function()
         return
     end
     local targetAge = d.toAge or 50
+    local cfg = d.config or {}
+    local filterType = cfg.elephantPetType or ""
     local allPets = getgenv().ZenxAPS.getAllPets()
     local added = 0
+    local skippedFilter = 0
     for uuid, info in pairs(allPets) do
         if info.PetData and info.PetData.Level and info.PetData.Level >= targetAge then
             local uuidStr = tostring(uuid)
-            if not elephantTeamUUIDs[uuidStr] then
+            -- v13.48: filter by jenis pet jika di-set
+            local petType = info.PetType or ""
+            local typeMatch = (filterType == "") or (petType == filterType) or (getBaseName and getBaseName(petType) == filterType)
+            if not typeMatch then
+                skippedFilter = skippedFilter + 1
+            elseif not elephantTeamUUIDs[uuidStr] then
                 elephantTeamUUIDs[uuidStr] = true
                 added = added + 1
             end
         end
     end
     if added > 0 then
-        dbg("[autoele] STARTUP: auto-add "..added.." pet (age>="..targetAge..") ke Tim Elephant")
+        dbg("[autoele] STARTUP: auto-add "..added.." pet (age>="..targetAge..") ke Tim Elephant"..(filterType ~= "" and " [filter: "..filterType.."]" or ""))
+        if skippedFilter > 0 then dbg("[autoele] skipped "..skippedFilter.." pet karena beda jenis") end
         pcall(function()
             d.elephantTeamUUIDs = elephantTeamUUIDs
             if writefile then
@@ -1426,7 +1436,7 @@ task.spawn(function()
             end
         end)
     else
-        dbg("[autoele] STARTUP: gak ada pet baru (age>="..targetAge..") buat auto-add")
+        dbg("[autoele] STARTUP: gak ada pet baru (age>="..targetAge..") buat auto-add"..(filterType ~= "" and " [filter: "..filterType.."]" or ""))
     end
 end)
 
@@ -1442,6 +1452,7 @@ config.elephantThresholdKG = config.elephantThresholdKG or 6.05  -- v13.01
 config.pickupDelay = config.pickupDelay or 0.10  -- v13.05
 config.placeDelay = config.placeDelay or 0.12  -- v13.05
 config.elephantPetCount = config.elephantPetCount or 1  -- v13.06: target jumlah Tim Elephant
+config.elephantPetType = config.elephantPetType or ""    -- v13.48: filter jenis pet utk Tim Elephant
 -- v13.12: sync toAge dgn equipTargetLvl (existing leveling pakai toAge utk stop)
 toAge = math.max(1, math.min(100, config.equipTargetLvl or 100))
 d.toAge = toAge
@@ -2173,6 +2184,65 @@ local function buildTargetList()
         end)
         return box
     end
+    -- v13.48: Jenis Pet picker untuk Elephant - filter pet type yang masuk Tim Elephant
+    local jpEleRow=mk("Frame",{Size=UDim2.new(1,0,0,26),BackgroundColor3=C.Card,BorderSizePixel=0,LayoutOrder=0,Parent=cfgCard})
+    corner(jpEleRow,5) stroke(jpEleRow,C.Dim,1)
+    lbl(jpEleRow,"Jenis Pet",11,C.Gray).Size=UDim2.new(0.45,0,1,0)
+    local jpEleBtn=btn(jpEleRow,(config.elephantPetType ~= "" and config.elephantPetType) or "Pilih...",11,C.Panel,C.Gold)
+    jpEleBtn.Size=UDim2.new(0,140,0,20) jpEleBtn.Position=UDim2.new(1,-146,0.5,-10)
+    jpEleBtn.TextXAlignment=Enum.TextXAlignment.Center
+    corner(jpEleBtn,5) stroke(jpEleBtn,C.Dim,1)
+    jpEleBtn.MouseButton1Click:Connect(function()
+        local items = {}
+        local seen = {}
+        -- Scan PetAnimations folder utk daftar pet types resmi
+        pcall(function()
+            local petAnims = RS:FindFirstChild("Assets") and RS.Assets:FindFirstChild("Animations") and RS.Assets.Animations:FindFirstChild("PetAnimations")
+            if petAnims then
+                for _, c in pairs(petAnims:GetChildren()) do
+                    if not seen[c.Name] then
+                        seen[c.Name] = true
+                        table.insert(items, {value=c.Name, label=c.Name, selected=(c.Name == config.elephantPetType)})
+                    end
+                end
+            end
+        end)
+        -- Plus pet types dari Backpack
+        pcall(function()
+            local bp = player:FindFirstChild("Backpack")
+            if bp then
+                for _, it in pairs(bp:GetChildren()) do
+                    if isPet and isPet(it) then
+                        local base = getBaseName and getBaseName(getPetName and getPetName(it) or it.Name) or it.Name
+                        if base and base ~= "" and not seen[base] then
+                            seen[base] = true
+                            table.insert(items, {value=base, label=base.." (bp)", selected=(base == config.elephantPetType)})
+                        end
+                    end
+                end
+            end
+        end)
+        -- Tambah opsi "(semua)" buat reset filter
+        table.insert(items, 1, {value="", label="(semua jenis - tanpa filter)", selected=(not config.elephantPetType or config.elephantPetType == "")})
+        table.sort(items, function(a,b)
+            if a.value == "" then return true end
+            if b.value == "" then return false end
+            if a.selected and not b.selected then return true end
+            if not a.selected and b.selected then return false end
+            return a.label < b.label
+        end)
+        showPickerModal({
+            title = "Pilih Jenis Pet (Elephant)",
+            items = items, multi = false,
+            onSelect = function(value)
+                if value == "__empty__" then return end
+                config.elephantPetType = value or ""
+                save()
+                jpEleBtn.Text = (value ~= "" and value) or "Pilih..."
+            end,
+        })
+    end)
+
     mkElephantInputRow(cfgCard, "Equip Pet Target Level", config.equipTargetLvl, 1, function(v)
         config.equipTargetLvl = math.max(1, v)
         toAge = math.max(1, math.min(100, v))
@@ -5378,16 +5448,35 @@ doStart = function()
 
                 if pendingCount > 0 and activeCount == 0 and #available == 0 then
                     -- ALL TARGET DONE - batch move ke Tim Elephant
+                    -- v13.48: filter by config.elephantPetType jika di-set
+                    local filterType = (config and config.elephantPetType) or ""
                     local moved = 0
+                    local skipped = 0
                     for uuid, _ in pairs(pendingElephant) do
-                        if not elephantTeamUUIDs[uuid] then
+                        local pass = true
+                        if filterType ~= "" then
+                            local petType = ""
+                            if getgenv().ZenxAPS then
+                                local info = getgenv().ZenxAPS.getPetData(uuid)
+                                if info and info.PetType then petType = info.PetType end
+                            end
+                            if petType == "" then
+                                -- fallback ambil dari tool name kalau ada
+                                local it = findPetInBackpack(uuid)
+                                if it then petType = getBaseName(getPetName(it)) end
+                            end
+                            pass = (petType == filterType) or (getBaseName and getBaseName(petType) == filterType)
+                        end
+                        if pass and not elephantTeamUUIDs[uuid] then
                             elephantTeamUUIDs[uuid] = true
                             moved = moved + 1
+                        elseif not pass then
+                            skipped = skipped + 1
                         end
                         pendingElephant[uuid] = nil
                     end
                     pcall(save)
-                    dbg("[batch-ele] SEMUA target selesai -> "..moved.." pet pindah ke Tim Elephant")
+                    dbg("[batch-ele] SEMUA target selesai -> "..moved.." pet pindah ke Tim Elephant"..(skipped > 0 and " ("..skipped.." skipped: beda jenis)" or ""))
                     statusLbl.Text="Done! "..moved.." pet -> Tim Elephant"
                 elseif pendingCount > 0 then
                     statusLbl.Text="Tunggu sisa pet... Q:"..#available.." | Pending Ele:"..pendingCount
