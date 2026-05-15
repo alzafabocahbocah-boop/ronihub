@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.53"
+local SCRIPT_VERSION="v13.55"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (safety pcall + simplified IIFE)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (Pet Tim auto-sync ke garden tanpa stop)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1402,6 +1402,7 @@ local teamPetInfoCache=d.teamPetInfoCache or {}
 -- Tim Elephant = blesser pets (Peryton/Elephant) yang user pick manual
 -- pendingElephant = pet target selesai leveling, displayed sebagai "Antrian Bless"
 -- v13.50: filter by base KG threshold - pet dengan baseWeight > threshold di-skip
+-- v13.54: AUTO-CLEANUP dead UUIDs + Tim Elephant filter HANYA favorit
 task.spawn(function()
     task.wait(2)
     if not getgenv().ZenxAPS or not getgenv().ZenxAPS.api then
@@ -1412,13 +1413,58 @@ task.spawn(function()
     local cfg = d.config or {}
     local baseKGThreshold = cfg.elephantBaseKGThreshold or 3.5
     local allPets = getgenv().ZenxAPS.getAllPets()
+
+    -- v13.54: Build set UUID yang masih hidup di inventory
+    local livePets = {}
+    local livePetCount = 0
+    for uuid, info in pairs(allPets) do
+        livePets[tostring(uuid)] = info
+        livePetCount = livePetCount + 1
+    end
+    dbg("[cleanup] inventory ada "..livePetCount.." pet")
+
+    -- v13.54: AUTO-CLEANUP elephantTeamUUIDs
+    -- (1) Hapus UUID yang udah gak ada di inventory (pet di-trade/sold)
+    -- (2) Hapus UUID yang bukan favorit (Tim Elephant = blesser favorit only)
+    local removedDead = 0
+    local removedNonFav = 0
+    for uuid, _ in pairs(elephantTeamUUIDs) do
+        local info = livePets[tostring(uuid)]
+        if not info then
+            elephantTeamUUIDs[uuid] = nil
+            removedDead = removedDead + 1
+        elseif not (info.PetData and info.PetData.IsFavorite) then
+            elephantTeamUUIDs[uuid] = nil
+            removedNonFav = removedNonFav + 1
+        end
+    end
+
+    -- v13.54: AUTO-CLEANUP pendingElephant dari UUID mati
+    local removedAntrian = 0
+    for uuid, _ in pairs(pendingElephant) do
+        if not livePets[tostring(uuid)] then
+            pendingElephant[uuid] = nil
+            removedAntrian = removedAntrian + 1
+        end
+    end
+
+    if removedDead > 0 or removedNonFav > 0 or removedAntrian > 0 then
+        dbg("[cleanup] Tim Elephant: -"..removedDead.." mati, -"..removedNonFav.." non-favorit | Antrian: -"..removedAntrian.." mati")
+        pcall(function()
+            d.elephantTeamUUIDs = elephantTeamUUIDs
+            if writefile then
+                local enc = HS:JSONEncode(d)
+                pcall(writefile, "ZenxLvlData.json", enc)
+            end
+        end)
+    end
+
+    -- Scan pet age >= toAge -> pendingElephant (filter base KG)
     local added = 0
     local skippedHeavy = 0
-    for uuid, info in pairs(allPets) do
+    for uuidStr, info in pairs(livePets) do
         if info.PetData and info.PetData.Level and info.PetData.Level >= targetAge then
-            local uuidStr = tostring(uuid)
             local baseW = info.PetData.BaseWeight or 0
-            -- Jangan tambah pet yang udah di Tim Elephant (blesser - user yang pick)
             if not elephantTeamUUIDs[uuidStr] and not pendingElephant[uuidStr] then
                 if baseW > baseKGThreshold then
                     skippedHeavy = skippedHeavy + 1
@@ -1827,6 +1873,13 @@ buildTimList=function()
                     buildPickerContent(pickSearch.Text) updatePreview()
                     syncSwapTab()
                     save()
+                    -- v13.55: AUTO-SYNC unequip pet dari garden
+                    pcall(function() unequipPet(cu) end)
+                    if isRunning then
+                        currentLevelingUUIDs[cu]=nil
+                        if equipTime then equipTime[cu]=nil end
+                    end
+                    dbg("[tim-sync] X-remove: "..cu:sub(1,8).." -> ambil dari garden")
                     if teamKeeperShouldRun and not teamKeeperShouldRun() then if stopTeamKeeper then stopTeamKeeper() end end
                 end)
             end
@@ -1887,6 +1940,22 @@ buildTimList=function()
                                 updatePreview()
                                 syncSwapTab()
                                 save()
+                                -- v13.55: AUTO-SYNC ke garden (gak perlu stop dulu)
+                                if nowIn then
+                                    pcall(function() equipPet(cu) end)
+                                    if isRunning then
+                                        currentLevelingUUIDs[cu]=true
+                                        if equipTime then equipTime[cu]=tick() end
+                                    end
+                                    dbg("[tim-sync] ON: "..cu:sub(1,8).." -> garden")
+                                else
+                                    pcall(function() unequipPet(cu) end)
+                                    if isRunning then
+                                        currentLevelingUUIDs[cu]=nil
+                                        if equipTime then equipTime[cu]=nil end
+                                    end
+                                    dbg("[tim-sync] OFF: "..cu:sub(1,8).." -> ambil dari garden")
+                                end
                                 if nowIn then if startTeamKeeper then startTeamKeeper() end else
                                     if teamKeeperShouldRun and not teamKeeperShouldRun() then if stopTeamKeeper then stopTeamKeeper() end end
                                 end
@@ -1914,6 +1983,13 @@ buildTimList=function()
                         buildPickerContent(pickSearch.Text) updatePreview()
                         syncSwapTab()
                         save()
+                        -- v13.55: AUTO-SYNC unequip dari garden
+                        pcall(function() unequipPet(cu) end)
+                        if isRunning then
+                            currentLevelingUUIDs[cu]=nil
+                            if equipTime then equipTime[cu]=nil end
+                        end
+                        dbg("[tim-sync] OFF-garden: "..cu:sub(1,8).." -> ambil dari garden")
                         if teamKeeperShouldRun and not teamKeeperShouldRun() then if stopTeamKeeper then stopTeamKeeper() end end
                     end)
                 end
@@ -1966,6 +2042,22 @@ buildTimList=function()
                                     updatePreview()
                                     syncSwapTab()
                                     save()
+                                    -- v13.55: AUTO-SYNC ke garden (placed pet juga)
+                                    if nowIn then
+                                        pcall(function() equipPet(cu) end)
+                                        if isRunning then
+                                            currentLevelingUUIDs[cu]=true
+                                            if equipTime then equipTime[cu]=tick() end
+                                        end
+                                        dbg("[tim-sync] ON (placed): "..cu:sub(1,8).." -> garden")
+                                    else
+                                        pcall(function() unequipPet(cu) end)
+                                        if isRunning then
+                                            currentLevelingUUIDs[cu]=nil
+                                            if equipTime then equipTime[cu]=nil end
+                                        end
+                                        dbg("[tim-sync] OFF (placed): "..cu:sub(1,8).." -> ambil dari garden")
+                                    end
                                 end)
                             end
                         end
@@ -2005,6 +2097,45 @@ buildTimList=function()
     local elephantArrow = lbl(elephantPickerRow, "v", 11, C.Teal, Enum.TextXAlignment.Right)
     elephantArrow.Size = UDim2.new(0,20,1,0) elephantArrow.Position = UDim2.new(1,-24,0,0)
     local elephantBtnCover = mk("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",AutoButtonColor=false,Parent=elephantPickerRow})
+
+    -- v13.54: tombol CLEAR Tim Elephant manual (safety net buat purge legacy 260 pet)
+    local clearEleRow = mk("Frame",{Name="ZenxClearEleRow",Size=UDim2.new(1,0,0,24),BackgroundTransparency=1,LayoutOrder=2,Parent=areas[2]})
+    local clearEleBtn = btn(clearEleRow, "Clear Tim Elephant (hapus SEMUA)", 10, C.RDim, C.Red)
+    clearEleBtn.Size = UDim2.new(1,0,1,0)
+    corner(clearEleBtn, 5) stroke(clearEleBtn, C.Red, 1.2)
+    local clearArmed = false
+    local clearResetTask = nil
+    clearEleBtn.MouseButton1Click:Connect(function()
+        if not clearArmed then
+            local n = 0
+            for _ in pairs(elephantTeamUUIDs) do n = n + 1 end
+            if n == 0 then
+                clearEleBtn.Text = "Tim Elephant udah kosong"
+                task.delay(2, function() clearEleBtn.Text = "Clear Tim Elephant (hapus SEMUA)" end)
+                return
+            end
+            clearArmed = true
+            clearEleBtn.Text = "YAKIN? Klik lagi utk hapus "..n.." pet"
+            if clearResetTask then task.cancel(clearResetTask) end
+            clearResetTask = task.delay(3, function()
+                clearArmed = false
+                clearEleBtn.Text = "Clear Tim Elephant (hapus SEMUA)"
+            end)
+        else
+            local n = 0
+            for _ in pairs(elephantTeamUUIDs) do n = n + 1 end
+            elephantTeamUUIDs = {}
+            d.elephantTeamUUIDs = elephantTeamUUIDs
+            pcall(save)
+            elephantLbl.Text = "Pilih Tim Elephant  (0 dipilih)"
+            elPickStroke.Color = C.Dim
+            clearEleBtn.Text = "Cleared! "..n.." pet di-hapus"
+            dbg("[clear-ele] hapus "..n.." pet dari Tim Elephant")
+            clearArmed = false
+            if clearResetTask then task.cancel(clearResetTask) end
+            task.delay(2, function() clearEleBtn.Text = "Clear Tim Elephant (hapus SEMUA)" end)
+        end
+    end)
 
     elephantBtnCover.MouseButton1Click:Connect(function()
         local pickerOk, pickerErr = pcall(function()
