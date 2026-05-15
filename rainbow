@@ -1,7 +1,7 @@
 -- ============= ZENX LVL DEBUG =============
-local SCRIPT_VERSION="v13.63"
+local SCRIPT_VERSION="v13.64"
 print("==== [ZenxElephant60kg] SCRIPT MULAI LOAD ("..SCRIPT_VERSION..") ====")
-warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (FORCE per-pet log + reset stale completedPets)")
+warn("[ZenxElephant60kg] versi: "..SCRIPT_VERSION.." (gak auto-equip ke garden sebelum START)")
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -1937,19 +1937,20 @@ buildTimList=function()
                                 updatePreview()
                                 syncSwapTab()
                                 save()
-                                -- v13.55+v13.56: AUTO-SYNC ke garden (gak perlu stop dulu)
-                                -- v13.56: JANGAN add ke currentLevelingUUIDs (biar monitor gak unequip pet age 50+)
-                                -- teamKeeper handle re-equip, monitor cuma track pet dari queue
+                                -- v13.55+v13.56+v13.64: AUTO-SYNC ke garden HANYA KALAU isRunning
+                                -- (kalau belum START, gak usah equip - biar gak bingungin user)
                                 if nowIn then
-                                    pcall(function() equipPet(cu) end)
-                                    dbg("[tim-sync] ON: "..cu:sub(1,8).." -> garden")
-                                else
-                                    pcall(function() unequipPet(cu) end)
                                     if isRunning then
+                                        pcall(function() equipPet(cu) end)
+                                        dbg("[tim-sync] ON: "..cu:sub(1,8).." -> garden")
+                                    end
+                                else
+                                    if isRunning then
+                                        pcall(function() unequipPet(cu) end)
                                         currentLevelingUUIDs[cu]=nil
                                         if equipTime then equipTime[cu]=nil end
+                                        dbg("[tim-sync] OFF: "..cu:sub(1,8).." -> ambil dari garden")
                                     end
-                                    dbg("[tim-sync] OFF: "..cu:sub(1,8).." -> ambil dari garden")
                                 end
                                 if nowIn then if startTeamKeeper then startTeamKeeper() end else
                                     if teamKeeperShouldRun and not teamKeeperShouldRun() then if stopTeamKeeper then stopTeamKeeper() end end
@@ -2037,18 +2038,19 @@ buildTimList=function()
                                     updatePreview()
                                     syncSwapTab()
                                     save()
-                                    -- v13.55+v13.56: AUTO-SYNC ke garden (placed pet juga)
-                                    -- v13.56: JANGAN add ke currentLevelingUUIDs
+                                    -- v13.55+v13.56+v13.64: AUTO-SYNC ke garden HANYA KALAU isRunning
                                     if nowIn then
-                                        pcall(function() equipPet(cu) end)
-                                        dbg("[tim-sync] ON (placed): "..cu:sub(1,8).." -> garden")
-                                    else
-                                        pcall(function() unequipPet(cu) end)
                                         if isRunning then
+                                            pcall(function() equipPet(cu) end)
+                                            dbg("[tim-sync] ON (placed): "..cu:sub(1,8).." -> garden")
+                                        end
+                                    else
+                                        if isRunning then
+                                            pcall(function() unequipPet(cu) end)
                                             currentLevelingUUIDs[cu]=nil
                                             if equipTime then equipTime[cu]=nil end
+                                            dbg("[tim-sync] OFF (placed): "..cu:sub(1,8).." -> ambil dari garden")
                                         end
-                                        dbg("[tim-sync] OFF (placed): "..cu:sub(1,8).." -> ambil dari garden")
                                     end
                                 end)
                             end
@@ -2831,9 +2833,14 @@ buildSwapList=function()
             save()
             if p.enabled then
                 -- v10.4: auto-equip pet ke garden biar cooldown ke-track (gak nunggu START)
-                pcall(function() equipPet(p.uuid) end)
-                if startGlobalPoller then startGlobalPoller() end
-                startSwapKeeper()
+                -- v13.64: HANYA equip kalau isRunning (gak auto-equip sebelum START)
+                if isRunning then
+                    pcall(function() equipPet(p.uuid) end)
+                    if startGlobalPoller then startGlobalPoller() end
+                    startSwapKeeper()
+                else
+                    dbg("[swap-sync] toggle ON tapi belum RUNNING - gak auto-equip "..tostring(p.uuid):sub(1,8))
+                end
             end
         end)
     end
