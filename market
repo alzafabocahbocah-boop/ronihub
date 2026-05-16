@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.22"
-local VERSION_DATE = "force-stream"
+local VERSION = "8.23"
+local VERSION_DATE = "auto-tp-unlist"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -369,7 +369,7 @@ retryBox.TextSize = 15
 
 -- START toggle button (bottom-left, no separate STOP)
 local startBtn = Instance.new("TextButton")
-startBtn.Size = UDim2.new(0, 220, 0, 42) startBtn.Position = UDim2.new(0, 0, 0, 370)
+startBtn.Size = UDim2.new(0, 200, 0, 42) startBtn.Position = UDim2.new(0, 0, 0, 370)
 startBtn.BackgroundColor3 = C.card startBtn.AutoButtonColor = false
 startBtn.Text = "⚡ START" startBtn.TextColor3 = C.textDim
 startBtn.Font = FB startBtn.TextSize = 16 startBtn.Parent = listingPanel
@@ -378,6 +378,21 @@ local startStroke = Instance.new("UIStroke", startBtn)
 startStroke.Color = C.accent startStroke.Thickness = 1.5
 startStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 startStroke.Transparency = 0.4
+
+-- UNLIST ALL button next to START
+local unlistAllListingBtn = Instance.new("TextButton")
+unlistAllListingBtn.Size = UDim2.new(0, 180, 0, 42)
+unlistAllListingBtn.Position = UDim2.new(0, 210, 0, 370)
+unlistAllListingBtn.BackgroundColor3 = C.card unlistAllListingBtn.AutoButtonColor = false
+unlistAllListingBtn.Text = "📋 UNLIST ALL" unlistAllListingBtn.TextColor3 = C.danger
+unlistAllListingBtn.Font = FB unlistAllListingBtn.TextSize = 14
+unlistAllListingBtn.Parent = listingPanel
+Instance.new("UICorner", unlistAllListingBtn).CornerRadius = UDim.new(0, 8)
+local unlistAllStroke = Instance.new("UIStroke", unlistAllListingBtn)
+unlistAllStroke.Color = C.danger unlistAllStroke.Thickness = 1.5
+unlistAllStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+unlistAllStroke.Transparency = 0.4
+
 -- Dummy stopBtn variable so handler bindings below don't crash (we wire StartBtn to do both)
 local stopBtn = startBtn
 
@@ -2004,18 +2019,53 @@ end)
 
 -- ===== UNLIST ALL =====
 local function unlistAllInternal()
+    setStats("[1/5] Cari TradeWorld...", C.accent)
+    L("┌─ UNLIST ALL START ─────────")
+    L("│ STEP 1: Cari TradeWorld di Workspace")
+
     local TW = Workspace:FindFirstChild("TradeWorld")
     if not TW then
-        L("[ERR] TradeWorld gak ada — pergi ke Trade World dulu")
+        L("│ ✗ TradeWorld gak ada")
+        setStats("FAIL: TradeWorld gak ada", C.danger)
         return 0
     end
     local Booths = TW:FindFirstChild("Booths")
     if not Booths then
-        L("[ERR] TradeWorld.Booths gak ada")
+        L("│ ✗ TradeWorld.Booths gak ada")
+        setStats("FAIL: Booths folder gak ada", C.danger)
         return 0
     end
+    L("│ ✓ Booths folder OK ("..#Booths:GetChildren().." booths)")
 
-    -- Force stream all booths first (biar tools-nya ke-load)
+    -- STEP 2: Auto-TP to first booth (force player near booths)
+    setStats("[2/5] TP ke booth area...", C.accent)
+    L("│ STEP 2: TP ke trade booth area")
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local tpDone = false
+        for _, booth in ipairs(Booths:GetChildren()) do
+            local part = booth:FindFirstChildWhichIsA("BasePart", true)
+            if part then
+                local oldPos = hrp.Position
+                hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0)
+                local dist = (oldPos - part.Position).Magnitude
+                L("│ ✓ TP "..math.floor(dist).." studs ke booth "..booth.Name:sub(1,8))
+                tpDone = true
+                break
+            end
+        end
+        if not tpDone then
+            L("│ ⚠ Gak nemu booth dengan BasePart untuk TP")
+        end
+    else
+        L("│ ⚠ Character/HRP gak ada, skip TP")
+    end
+    task.wait(0.5)
+
+    -- STEP 3: Force stream all booth areas
+    setStats("[3/5] Force-stream booth...", C.accent)
+    L("│ STEP 3: Force-stream semua area booth")
     local boothPositions = {}
     for _, booth in ipairs(Booths:GetChildren()) do
         if booth:IsA("Model") or booth:IsA("Folder") then
@@ -2036,57 +2086,68 @@ local function unlistAllInternal()
             if pos then table.insert(boothPositions, pos) end
         end
     end
-    L("Force-streaming "..#boothPositions.." booth areas...")
+    L("│ Force-streaming "..#boothPositions.." areas...")
     for _, pos in ipairs(boothPositions) do
         pcall(function() player:RequestStreamAroundAsync(pos) end)
     end
-    task.wait(2.5)
+    L("│ Wait 3s biar streaming load...")
+    task.wait(3)
 
-    -- Collect ALL listings from ALL booths
-    -- Server akan reject yang bukan punya kita
+    -- STEP 4: Collect all listings across all booths
+    setStats("[4/5] Scan booth listings...", C.accent)
+    L("│ STEP 4: Collect semua listings")
     local allListings = {}
+    local boothsWithTools = 0
     for _, booth in ipairs(Booths:GetChildren()) do
         if booth:IsA("Model") or booth:IsA("Folder") then
             local di = booth:FindFirstChild("DynamicInstances")
             if di then
+                local hadTool = false
                 for _, tool in ipairs(di:GetChildren()) do
                     if tool:IsA("Tool") then
+                        hadTool = true
                         local uuid = tool.Name:gsub("[{}]", "")
                         table.insert(allListings, {
-                            uuid = uuid,
-                            tool = tool,
-                            di = di,
-                            booth = booth,
+                            uuid = uuid, tool = tool, di = di, booth = booth,
                         })
                     end
                 end
+                if hadTool then boothsWithTools = boothsWithTools + 1 end
             end
         end
     end
+    L("│ Booths dengan tools: "..boothsWithTools)
+    L("│ Total listings: "..#allListings)
 
-    L("Total listings di server: "..#allListings)
-    L("Mulai coba unlist (yang bukan punya kita akan ke-reject)...")
     if #allListings == 0 then
-        L("[INFO] 0 listings — TP ke booth dulu biar streaming load")
+        L("│ ✗ 0 listings ditemukan")
+        L("│ Kemungkinan: booth-mu kosong / streaming gagal")
+        L("└─────────────────────────")
+        setStats("0 listings — booth kosong?", C.danger)
         return 0
     end
+
+    -- STEP 5: Brute-force unlist (server akan reject yang bukan punya kita)
+    setStats("[5/5] Unlist 0/"..#allListings.."...", C.accent)
+    L("│ STEP 5: Coba unlist (server reject yang bukan punya kita)")
 
     local removed = 0
     local myBooth = nil
     local tested = 0
     for _, item in ipairs(allListings) do
-        if stopReq then break end
+        if stopReq then
+            L("│ ⛔ STOP requested")
+            break
+        end
 
-        -- After we found our booth, skip other booths (optimization)
+        -- After finding our booth, skip listings di booth lain
         if myBooth and item.booth ~= myBooth then
-            -- skip — bukan booth kita
+            -- skip
         else
             tested = tested + 1
-            -- Send the remove request
             pcall(function() removeRE:InvokeServer(item.uuid) end)
-
-            -- Verify by checking if tool actually gone
             task.wait(0.35)
+            -- Verify tool gone
             local stillThere = false
             for _, t in ipairs(item.di:GetChildren()) do
                 if t:IsA("Tool") and t.Name:gsub("[{}]", "") == item.uuid then
@@ -2094,41 +2155,39 @@ local function unlistAllInternal()
                     break
                 end
             end
-
             if not stillThere then
                 removed = removed + 1
                 if not myBooth then
                     myBooth = item.booth
-                    L("✓ Booth-mu: "..item.booth.Name:sub(1, 12).."...")
+                    L("│ ✓ Booth-mu KETEMU: "..item.booth.Name:sub(1, 12).."...")
                 end
-                L("["..removed.."] ✅ "..item.uuid:sub(1, 12).."...")
-            else
-                -- Failed — not ours OR server rejected
-                if not myBooth and tested >= 10 and removed == 0 then
-                    -- Tested 10, no success yet — maybe stop and warn user
-                    -- Actually keep trying — booth might be after this
-                end
+                L("│ ["..removed.."] ✅ "..item.uuid:sub(1, 12).."...")
+                setStats("Unlisting "..removed.."...", C.accent)
             end
             task.wait(0.15)
         end
     end
 
+    L("│ Selesai. Removed: "..removed.."/"..tested)
+    L("└─────────────────────────")
+
     if removed == 0 then
-        L("[WARN] 0 berhasil di-unlist — kemungkinan:")
-        L("  • Booth kosong (kamu belum list pet apapun)")
-        L("  • Streaming aktif, tool kamu gak ke-load")
-        L("  • Coba TP ke booth-mu di game, terus run lagi")
+        setStats("0 unlisted — booth-mu kosong?", C.danger)
+    else
+        setStats("✅ Unlisted "..removed.." pets", C.success)
     end
     return removed
 end
-unlistBtn.MouseButton1Click:Connect(function()
+local function runUnlistAll()
     task.spawn(function()
+        stopReq = false
         L("")
-        L("==== UNLIST ALL ====")
         local n = unlistAllInternal()
-        L("Removed: "..n)
+        L("Final removed: "..n)
     end)
-end)
+end
+unlistBtn.MouseButton1Click:Connect(runUnlistAll)
+unlistAllListingBtn.MouseButton1Click:Connect(runUnlistAll)
 
 -- ===== CLAIM BOOTH =====
 local function tryClaim()
