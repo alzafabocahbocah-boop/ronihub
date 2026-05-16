@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.20"
-local VERSION_DATE = "2025-12-15"
+local VERSION = "8.22"
+local VERSION_DATE = "force-stream"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2006,10 +2006,7 @@ end)
 local function unlistAllInternal()
     local TW = Workspace:FindFirstChild("TradeWorld")
     if not TW then
-        L("[ERR] TradeWorld gak ada di Workspace — kamu lagi di mana?")
-        local tops = {}
-        for _, c in ipairs(Workspace:GetChildren()) do table.insert(tops, c.Name) end
-        L("Workspace top: "..table.concat(tops, ", "):sub(1, 120))
+        L("[ERR] TradeWorld gak ada — pergi ke Trade World dulu")
         return 0
     end
     local Booths = TW:FindFirstChild("Booths")
@@ -2018,71 +2015,109 @@ local function unlistAllInternal()
         return 0
     end
 
-    -- Find my booth: scan booth tools, find any that has PET_UUID + OWNER matching me
-    -- OR: just find booth that has any tools (since user only has 1 booth)
-    -- Better: iterate ALL booths and unlist tools that have UUIDs (we'll try removing all of mine)
-    local myBooth = findMyBooth(Booths)
-    if not myBooth then
-        -- Fallback: try to find by character position
-        L("[INFO] findMyBooth gagal, cari via tools yang ada PET_UUID-nya")
-        for _, b in ipairs(Booths:GetChildren()) do
-            if b:IsA("Model") or b:IsA("Folder") then
-                local di = b:FindFirstChild("DynamicInstances")
-                if di and #di:GetChildren() > 0 then
-                    -- Check if any tool has my pet UUID? Hard to verify.
-                    -- For now, give up — user can manually run unlist
-                    L("  booth "..b.Name:sub(1,12).." punya "..#di:GetChildren().." tools")
+    -- Force stream all booths first (biar tools-nya ke-load)
+    local boothPositions = {}
+    for _, booth in ipairs(Booths:GetChildren()) do
+        if booth:IsA("Model") or booth:IsA("Folder") then
+            local pos = nil
+            local defaultModel = booth:FindFirstChild("Default")
+            if defaultModel then
+                if defaultModel:IsA("Model") and defaultModel.PrimaryPart then
+                    pos = defaultModel.PrimaryPart.Position
+                else
+                    local part = defaultModel:FindFirstChildWhichIsA("BasePart", true)
+                    if part then pos = part.Position end
+                end
+            end
+            if not pos then
+                local part = booth:FindFirstChildWhichIsA("BasePart", true)
+                if part then pos = part.Position end
+            end
+            if pos then table.insert(boothPositions, pos) end
+        end
+    end
+    L("Force-streaming "..#boothPositions.." booth areas...")
+    for _, pos in ipairs(boothPositions) do
+        pcall(function() player:RequestStreamAroundAsync(pos) end)
+    end
+    task.wait(2.5)
+
+    -- Collect ALL listings from ALL booths
+    -- Server akan reject yang bukan punya kita
+    local allListings = {}
+    for _, booth in ipairs(Booths:GetChildren()) do
+        if booth:IsA("Model") or booth:IsA("Folder") then
+            local di = booth:FindFirstChild("DynamicInstances")
+            if di then
+                for _, tool in ipairs(di:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local uuid = tool.Name:gsub("[{}]", "")
+                        table.insert(allListings, {
+                            uuid = uuid,
+                            tool = tool,
+                            di = di,
+                            booth = booth,
+                        })
+                    end
                 end
             end
         end
-        L("[ERR] Booth-mu gak nemu — coba claim booth dulu, atau cek di-area trade")
+    end
+
+    L("Total listings di server: "..#allListings)
+    L("Mulai coba unlist (yang bukan punya kita akan ke-reject)...")
+    if #allListings == 0 then
+        L("[INFO] 0 listings — TP ke booth dulu biar streaming load")
         return 0
     end
 
-    L("Booth-mu: "..myBooth.Name:sub(1, 24))
-    local di = myBooth:FindFirstChild("DynamicInstances")
-    if not di then
-        L("[ERR] DynamicInstances gak ada")
-        return 0
-    end
-
-    -- Gather all listings — use tool's NAME (which is "{listingUUID}")
-    local listings = {}
-    for _, t in ipairs(di:GetChildren()) do
-        if t:IsA("Tool") then
-            -- Tool name format: "{uuid}" — strip braces
-            local listingUUID = t.Name:gsub("[{}]", "")
-            table.insert(listings, {
-                uuid = listingUUID,
-                name = t.Name,
-                tool = t,
-            })
-        end
-    end
-    L("Pet di booth: "..#listings)
-    if #listings == 0 then return 0 end
-
-    -- Confirmed format from remote spy: RemoveListing:InvokeServer(uuid_clean)
     local removed = 0
-    for i, item in ipairs(listings) do
+    local myBooth = nil
+    local tested = 0
+    for _, item in ipairs(allListings) do
         if stopReq then break end
-        local rets = {pcall(function() return removeRE:InvokeServer(item.uuid) end)}
-        -- Verify by checking if tool is gone after small wait
-        task.wait(0.3)
-        local stillThere = false
-        for _, t in ipairs(di:GetChildren()) do
-            if t:IsA("Tool") and t.Name:gsub("[{}]", "") == item.uuid then
-                stillThere = true
-                break
-            end
-        end
-        if not stillThere then
-            removed = removed + 1
-            L("["..i.."/"..#listings.."] ✅ "..item.uuid:sub(1, 12).."...")
+
+        -- After we found our booth, skip other booths (optimization)
+        if myBooth and item.booth ~= myBooth then
+            -- skip — bukan booth kita
         else
-            L("["..i.."/"..#listings.."] ❌ "..item.uuid:sub(1, 12).."... (pcall="..tostring(rets[1]).." ret="..tostring(rets[2])..")")
+            tested = tested + 1
+            -- Send the remove request
+            pcall(function() removeRE:InvokeServer(item.uuid) end)
+
+            -- Verify by checking if tool actually gone
+            task.wait(0.35)
+            local stillThere = false
+            for _, t in ipairs(item.di:GetChildren()) do
+                if t:IsA("Tool") and t.Name:gsub("[{}]", "") == item.uuid then
+                    stillThere = true
+                    break
+                end
+            end
+
+            if not stillThere then
+                removed = removed + 1
+                if not myBooth then
+                    myBooth = item.booth
+                    L("✓ Booth-mu: "..item.booth.Name:sub(1, 12).."...")
+                end
+                L("["..removed.."] ✅ "..item.uuid:sub(1, 12).."...")
+            else
+                -- Failed — not ours OR server rejected
+                if not myBooth and tested >= 10 and removed == 0 then
+                    -- Tested 10, no success yet — maybe stop and warn user
+                    -- Actually keep trying — booth might be after this
+                end
+            end
+            task.wait(0.15)
         end
-        task.wait(0.3)
+    end
+
+    if removed == 0 then
+        L("[WARN] 0 berhasil di-unlist — kemungkinan:")
+        L("  • Booth kosong (kamu belum list pet apapun)")
+        L("  • Streaming aktif, tool kamu gak ke-load")
+        L("  • Coba TP ke booth-mu di game, terus run lagi")
     end
     return removed
 end
@@ -2403,6 +2438,37 @@ local function scanBoothListings()
         L("======= SCAN END (FAIL) =======")
         return
     end
+
+    -- =========== FORCE STREAMING around all booths ===========
+    -- Game pake StreamingEnabled, jadi tools di booth jauh gak ke-load.
+    -- Pake RequestStreamAroundAsync biar server load semua area booth.
+    local boothPositions = {}
+    for _, booth in ipairs(Booths:GetChildren()) do
+        if booth:IsA("Model") or booth:IsA("Folder") then
+            local pos = nil
+            -- Try various ways to find booth position
+            local defaultModel = booth:FindFirstChild("Default")
+            if defaultModel then
+                if defaultModel:IsA("Model") and defaultModel.PrimaryPart then
+                    pos = defaultModel.PrimaryPart.Position
+                else
+                    local part = defaultModel:FindFirstChildWhichIsA("BasePart", true)
+                    if part then pos = part.Position end
+                end
+            end
+            if not pos then
+                local part = booth:FindFirstChildWhichIsA("BasePart", true)
+                if part then pos = part.Position end
+            end
+            if pos then table.insert(boothPositions, pos) end
+        end
+    end
+    L("Force-streaming "..#boothPositions.." booth areas...")
+    for _, pos in ipairs(boothPositions) do
+        pcall(function() player:RequestStreamAroundAsync(pos) end)
+    end
+    L("Wait 3 detik biar streaming load semua tools...")
+    task.wait(3)
 
     local boothCount, dynCount, toolCount, mineCount = 0, 0, 0, 0
     local plantCount, petCount, otherCount = 0, 0, 0
