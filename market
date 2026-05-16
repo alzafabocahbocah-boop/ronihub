@@ -1,6 +1,9 @@
 -- ZENX MARKET v8 — NodeHub style
--- Left sidebar: Market | List Harga | Snipe (coming soon)
+-- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
+
+local VERSION = "8.20"
+local VERSION_DATE = "2025-12-15"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -55,7 +58,7 @@ logoLbl.TextXAlignment = Enum.TextXAlignment.Left logoLbl.Parent = titleBar
 local titleLbl = Instance.new("TextLabel")
 titleLbl.Size = UDim2.new(0.7, 0, 1, 0) titleLbl.Position = UDim2.new(0, 50, 0, 0)
 titleLbl.BackgroundTransparency = 1
-titleLbl.Text = "| ZENX HUB | Grow A Garden MARKET | V8"
+titleLbl.Text = "| ZENX HUB | Grow A Garden MARKET | v"..VERSION.." | "..VERSION_DATE
 titleLbl.TextColor3 = C.accent titleLbl.Font = FB titleLbl.TextSize = 16
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left titleLbl.Parent = titleBar
 
@@ -389,9 +392,49 @@ plPad.Parent = pricePanel
 lblOf(pricePanel, "💰  LIST HARGA (Rules)", 0, 0, 400, 28, C.accent, 18, FB)
 lblOf(pricePanel, "Sama kayak rules di Listing — bisa tambah & edit harga di sini.", 0, 32, 700, 20, C.textDim, 13)
 
--- Rules display
+-- ===== BACKPACK STATS CARD =====
+-- Forward declare labels (used by refreshBackpackStats later)
+local lhPetCount, lhFavCount, lhCapacity
+do
+    local statsCardLH = Instance.new("Frame")
+    statsCardLH.Size = UDim2.new(1, 0, 0, 56) statsCardLH.Position = UDim2.new(0, 0, 0, 56)
+    statsCardLH.BackgroundColor3 = C.card statsCardLH.BorderSizePixel = 0
+    statsCardLH.Parent = pricePanel
+    Instance.new("UICorner", statsCardLH).CornerRadius = UDim.new(0, 8)
+    local statsStroke = Instance.new("UIStroke", statsCardLH)
+    statsStroke.Color = C.accent statsStroke.Thickness = 1 statsStroke.Transparency = 0.6
+
+    lhPetCount = Instance.new("TextLabel")
+    lhPetCount.Size = UDim2.new(0.33, -8, 1, 0) lhPetCount.Position = UDim2.new(0, 12, 0, 0)
+    lhPetCount.BackgroundTransparency = 1
+    lhPetCount.Text = "🐾  PET\n0"
+    lhPetCount.TextColor3 = C.text lhPetCount.Font = FB lhPetCount.TextSize = 13
+    lhPetCount.TextXAlignment = Enum.TextXAlignment.Left
+    lhPetCount.TextYAlignment = Enum.TextYAlignment.Center
+    lhPetCount.RichText = true lhPetCount.Parent = statsCardLH
+
+    lhFavCount = Instance.new("TextLabel")
+    lhFavCount.Size = UDim2.new(0.33, -8, 1, 0) lhFavCount.Position = UDim2.new(0.33, 4, 0, 0)
+    lhFavCount.BackgroundTransparency = 1
+    lhFavCount.Text = "⭐  FAV\n0"
+    lhFavCount.TextColor3 = C.text lhFavCount.Font = FB lhFavCount.TextSize = 13
+    lhFavCount.TextXAlignment = Enum.TextXAlignment.Left
+    lhFavCount.TextYAlignment = Enum.TextYAlignment.Center
+    lhFavCount.RichText = true lhFavCount.Parent = statsCardLH
+
+    lhCapacity = Instance.new("TextLabel")
+    lhCapacity.Size = UDim2.new(0.33, -8, 1, 0) lhCapacity.Position = UDim2.new(0.66, 4, 0, 0)
+    lhCapacity.BackgroundTransparency = 1
+    lhCapacity.Text = "📦  CAPACITY\n? / ?"
+    lhCapacity.TextColor3 = C.text lhCapacity.Font = FB lhCapacity.TextSize = 13
+    lhCapacity.TextXAlignment = Enum.TextXAlignment.Left
+    lhCapacity.TextYAlignment = Enum.TextYAlignment.Center
+    lhCapacity.RichText = true lhCapacity.Parent = statsCardLH
+end
+
+-- Rules display (shifted down by 70px for stats card)
 local priceScroll = Instance.new("ScrollingFrame")
-priceScroll.Size = UDim2.new(1, 0, 0, 270) priceScroll.Position = UDim2.new(0, 0, 0, 62)
+priceScroll.Size = UDim2.new(1, 0, 0, 200) priceScroll.Position = UDim2.new(0, 0, 0, 124)
 priceScroll.BackgroundColor3 = C.card priceScroll.BorderSizePixel = 0
 priceScroll.ScrollBarThickness = 4 priceScroll.Parent = pricePanel
 Instance.new("UICorner", priceScroll).CornerRadius = UDim.new(0, 8)
@@ -1412,7 +1455,85 @@ typeDrop.MouseButton1Click:Connect(populateModalList)
 
 -- ===== PET INVENTORY BROWSER =====
 local perTypePrices = {}  -- keep for compat with startBtn
-local function refreshPriceList() end  -- no-op (List Harga now uses rebuildRulesUI)
+local refreshBackpackStats  -- forward declare
+
+do
+    -- Detect inventory capacity (Grow A Garden uses leaderstats or player attribute)
+    local function getInventoryCapacity()
+        for _, attr in ipairs({"MaxInventory", "InventoryCapacity", "MaxPets", "PetCapacity", "MaxStorage", "BackpackSize"}) do
+            local v = player:GetAttribute(attr)
+            if v and tonumber(v) then return tonumber(v) end
+        end
+        local ls = player:FindFirstChild("leaderstats")
+        if ls then
+            for _, c in ipairs(ls:GetChildren()) do
+                if c.Name:find("[Cc]apacity") or c.Name:find("[Mm]ax") then
+                    if c:IsA("ValueBase") then return tonumber(c.Value) end
+                end
+            end
+        end
+        for _, name in ipairs({"Data", "Stats", "PlayerData"}) do
+            local d = player:FindFirstChild(name)
+            if d then
+                for _, c in ipairs(d:GetChildren()) do
+                    if c.Name:find("[Cc]apacity") or c.Name:find("[Mm]ax[Ii]nv") then
+                        if c:IsA("ValueBase") then return tonumber(c.Value) end
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    -- Refresh stats card in List Harga tab
+    refreshBackpackStats = function()
+        local bp = player:FindFirstChild("Backpack")
+        if not bp then return end
+        local total, favCount = 0, 0
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") then
+                local itemType = t:GetAttribute("ItemType") or t:GetAttribute("PetType")
+                if itemType == "Pet" then
+                    total = total + 1
+                    if t:GetAttribute("IsFavorite") == true or t:GetAttribute("Favorite") == true then
+                        favCount = favCount + 1
+                    end
+                end
+            end
+        end
+        local nonFav = total - favCount
+        lhPetCount.Text = "🐾  PET\n<font color='rgb(255,215,0)'>"..total.."</font> <font color='rgb(160,160,160)'>("..nonFav.." non-fav)</font>"
+        lhFavCount.Text = "⭐  FAV\n<font color='rgb(255,215,0)'>"..favCount.."</font>"
+        local cap = getInventoryCapacity()
+        if cap then
+            local pct = math.floor(total / cap * 100)
+            local color = pct >= 90 and "rgb(220,80,90)" or (pct >= 70 and "rgb(255,165,0)" or "rgb(80,200,130)")
+            lhCapacity.Text = "📦  CAPACITY\n<font color='"..color.."'>"..total.." / "..cap.."</font> <font color='rgb(160,160,160)'>("..pct.."%)</font>"
+        else
+            lhCapacity.Text = "📦  CAPACITY\n<font color='rgb(255,215,0)'>"..total.."</font> / <font color='rgb(160,160,160)'>?</font>"
+        end
+    end
+
+    -- Auto refresh on backpack changes
+    local function setupBackpackHooks()
+        local bp = player:FindFirstChild("Backpack")
+        if not bp then return end
+        bp.ChildAdded:Connect(refreshBackpackStats)
+        bp.ChildRemoved:Connect(refreshBackpackStats)
+    end
+    setupBackpackHooks()
+    player.CharacterAdded:Connect(function() task.wait(1) setupBackpackHooks() refreshBackpackStats() end)
+
+    -- Periodic refresh (every 5s)
+    task.spawn(function()
+        while gui.Parent do
+            task.wait(5)
+            pcall(refreshBackpackStats)
+        end
+    end)
+end
+
+local function refreshPriceList() if refreshBackpackStats then refreshBackpackStats() end end
 
 -- ===== START AUTO LIST (toggle) =====
 local stopReq = false
@@ -2179,6 +2300,7 @@ skinPickBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ===== SNIPE SCANNER =====
+local function setupSnipeScanner()
 local MUTATIONS = {
     "Nightmare","Rainbow","Venom","Golden","Everchanted","Mythic","UFO",
     "Albino","Amethyst","Angora","Apple","Arctic","Cyber","Frosted","Magma",
@@ -2445,28 +2567,41 @@ local function renderSnipe()
     snScroll.CanvasSize = UDim2.new(0, 0, 0, snScrollLayout.AbsoluteContentSize.Y + 8)
 end
 
-snRefreshBtn.MouseButton1Click:Connect(function()
-    snCountLbl.Text = "Scanning..."
-    task.spawn(function()
-        scanBoothListings()
-        renderSnipe()
+do
+    snRefreshBtn.MouseButton1Click:Connect(function()
+        snCountLbl.Text = "Scanning..."
+        task.spawn(function()
+            scanBoothListings()
+            renderSnipe()
+        end)
     end)
-end)
-for _, b in ipairs({snSearch, snMinAge, snMaxAge, snMinKg, snMaxKg, snMinPrice, snMaxPrice}) do
-    b:GetPropertyChangedSignal("Text"):Connect(renderSnipe)
+    for _, b in ipairs({snSearch, snMinAge, snMaxAge, snMinKg, snMaxKg, snMinPrice, snMaxPrice}) do
+        b:GetPropertyChangedSignal("Text"):Connect(renderSnipe)
+    end
 end
 
+end  -- end setupSnipeScanner function
+setupSnipeScanner()
+
 -- ===== INIT =====
-L("==== ZENX MARKET v8 ready ====")
-L("Style: NodeHub-like, sidebar + sub-tabs")
+L("════════════════════════════════════")
+L("  ZENX MARKET v"..VERSION)
+L("  Build: "..VERSION_DATE)
+L("════════════════════════════════════")
 L("")
 L("Tab kiri:")
 L("  • MARKET (default) - Listing/Rejoin/Misc")
-L("  • LIST HARGA - rules with editable price")
-L("  • SNIPE - manual scan booth listings")
+L("  • LIST HARGA - rules + backpack stats")
+L("  • SNIPE - manual scan + auto (soon)")
+L("")
+L("Cek tab LIST HARGA buat liat:")
+L("  - Total pet di backpack")
+L("  - Fav count")
+L("  - Inventory capacity")
 
 populateModalList()
 refreshPriceList()
+refreshBackpackStats()  -- initial stats load
 task.spawn(function()
     task.wait(1)
     tryClaim()
