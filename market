@@ -358,7 +358,7 @@ addRuleBtn.TextSize = 14
 
 -- Inputs row 2: Delay | Retry (MAX dipindah jadi per-rule)
 lblOf(listingPanel, "DELAY", 0, 298, 60, 18, C.textDim, 12, FB)
-local delayBox = boxOf(listingPanel, 0, 318, 100, 34, "3")
+local delayBox = boxOf(listingPanel, 0, 318, 100, 34, "1.5")
 delayBox.TextSize = 15
 lblOf(listingPanel, "RETRY", 112, 298, 60, 18, C.textDim, 12, FB)
 local retryBox = boxOf(listingPanel, 112, 318, 100, 34, "2")
@@ -1221,8 +1221,37 @@ local function findMyBooth(Booths)
 end
 
 local function listPet(uuidBraced, price)
+    -- Unequip pet first if currently equipped (game won't let you list equipped pets)
+    local char = player.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            for _, t in ipairs(char:GetChildren()) do
+                if t:IsA("Tool") then
+                    local u = t:GetAttribute("PET_UUID")
+                    if u and ("{"..tostring(u):gsub("[{}]", "").."}") == uuidBraced then
+                        hum:UnequipTools()
+                        task.wait(0.15)
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    -- Try with braced UUID first (most common format)
     local rets = {pcall(function() return createRE:InvokeServer("Pet", uuidBraced, price) end)}
     if rets[1] and rets[2] == true and rets[3] then return true, rets[3] end
+
+    -- Try without braces as fallback
+    local clean = uuidBraced:gsub("[{}]", "")
+    rets = {pcall(function() return createRE:InvokeServer("Pet", clean, price) end)}
+    if rets[1] and rets[2] == true and rets[3] then return true, rets[3] end
+
+    -- Some games return just the listing UUID (truthy non-bool)
+    if rets[1] and rets[2] and rets[2] ~= false then
+        return true, tostring(rets[2])
+    end
     return false
 end
 
@@ -1549,17 +1578,46 @@ startBtn.MouseButton1Click:Connect(function()
                 L("["..sukses.."] "..p.type.." (base "..string.format("%.1f", p.wt).."kg, cur "..string.format("%.1f", p.currentKg).."kg) @ "..rule.price..mlInfo)
                 local ok, id = listPet(p.braced, rule.price)
                 if ok then
-                    sukses = sukses + 1
-                    if ruleIdx > 0 then ruleCount[ruleIdx] = ruleCount[ruleIdx] + 1 end
-                    L("   ✅ "..id:sub(1,12).."...")
-                    if autoRejoinN > 0 and sukses % autoRejoinN == 0 then
+                    -- VERIFY: poll booth for pet to actually appear (max 3s)
+                    local verified = false
+                    local TW = Workspace:FindFirstChild("TradeWorld")
+                    local Booths = TW and TW:FindFirstChild("Booths")
+                    local mineBooth = Booths and findMyBooth(Booths)
+                    if mineBooth then
+                        local cleanUuid = p.braced:gsub("[{}]", "")
+                        for tries = 1, 6 do  -- 6 × 0.5s = 3s max
+                            local di = mineBooth:FindFirstChild("DynamicInstances")
+                            if di then
+                                for _, tool in ipairs(di:GetChildren()) do
+                                    local tu = tostring(tool:GetAttribute("PET_UUID") or "")
+                                    if tu:gsub("[{}]", "") == cleanUuid then
+                                        verified = true
+                                        break
+                                    end
+                                end
+                            end
+                            if verified then break end
+                            task.wait(0.5)
+                        end
+                    end
+
+                    if verified then
+                        sukses = sukses + 1
+                        if ruleIdx > 0 then ruleCount[ruleIdx] = ruleCount[ruleIdx] + 1 end
+                        L("   ✅ "..tostring(id):sub(1,12).."... [verified di booth]")
+                    else
+                        L("   ⚠ remote sukses tapi pet GAK MUNCUL di booth — retry")
+                        if p.tries < maxRetry then table.insert(todo, p) else fail = fail + 1 end
+                    end
+
+                    if autoRejoinN > 0 and verified and sukses % autoRejoinN == 0 then
                         L("   🔄 AUTO-REJOIN setelah "..sukses.." sukses")
                         task.wait(1)
                         pcall(function() TeleportService:Teleport(game.PlaceId, player) end)
                         return
                     end
                 else
-                    L("   ❌")
+                    L("   ❌ list call gagal")
                     if p.tries < maxRetry then table.insert(todo, p) else fail = fail + 1 end
                 end
                 i = i + 1
@@ -1676,25 +1734,89 @@ end)
 -- ===== UNLIST ALL =====
 local function unlistAllInternal()
     local TW = Workspace:FindFirstChild("TradeWorld")
-    local Booths = TW and TW:FindFirstChild("Booths")
-    if not Booths then return 0 end
+    if not TW then
+        L("[ERR] TradeWorld gak ada di Workspace — kamu lagi di mana?")
+        local tops = {}
+        for _, c in ipairs(Workspace:GetChildren()) do table.insert(tops, c.Name) end
+        L("Workspace top: "..table.concat(tops, ", "):sub(1, 120))
+        return 0
+    end
+    local Booths = TW:FindFirstChild("Booths")
+    if not Booths then
+        L("[ERR] TradeWorld.Booths gak ada")
+        return 0
+    end
+
     local mine = findMyBooth(Booths)
-    if not mine then return 0 end
+    if not mine then
+        L("[ERR] Booth-mu gak nemu. Cek:")
+        local boothCount, ownedCount = 0, 0
+        for _, b in ipairs(Booths:GetChildren()) do
+            if b:IsA("Model") then
+                boothCount = boothCount + 1
+                local di = b:FindFirstChild("DynamicInstances")
+                if di then
+                    for _, t in ipairs(di:GetChildren()) do
+                        if t:IsA("Tool") then
+                            local own = t:GetAttribute("OWNER") or "?"
+                            if own ~= "?" then ownedCount = ownedCount + 1 end
+                            if string.find(string.lower(own), string.lower(player.Name:sub(1,6))) then
+                                L("  Match partial: '"..own.."' di booth "..b.Name:sub(1,20))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        L("  Total booths: "..boothCount..", owned (any): "..ownedCount)
+        L("  Player name yg dicari: '"..player.Name.."'")
+        return 0
+    end
+
+    L("Booth-mu ditemukan: "..mine.Name:sub(1, 24))
     local di = mine:FindFirstChild("DynamicInstances")
-    if not di then return 0 end
+    if not di then
+        L("[ERR] DynamicInstances gak ada di booth-mu")
+        return 0
+    end
+
     local listings = {}
     for _, t in ipairs(di:GetChildren()) do
-        if t:IsA("Tool") then table.insert(listings, tostring(t:GetAttribute("PET_UUID") or t.Name)) end
-    end
-    local removed = 0
-    for _, uuid in ipairs(listings) do
-        local clean = uuid:gsub("^{",""):gsub("}$","")
-        local braced = "{"..clean.."}"
-        for _, args in ipairs({{"Pet", braced}, {braced}, {"Pet", clean}, {clean}}) do
-            local rets = {pcall(function() return removeRE:InvokeServer(table.unpack(args)) end)}
-            if rets[1] and rets[2] == true then removed = removed + 1; break end
+        if t:IsA("Tool") then
+            local uuid = tostring(t:GetAttribute("PET_UUID") or t.Name)
+            table.insert(listings, {uuid=uuid, name=t.Name})
         end
-        task.wait(0.5)
+    end
+    L("Pet di booth: "..#listings)
+    if #listings == 0 then return 0 end
+
+    local removed = 0
+    for i, item in ipairs(listings) do
+        if stopReq then break end
+        local clean = item.uuid:gsub("^{",""):gsub("}$","")
+        local braced = "{"..clean.."}"
+        local success = false
+        -- Try multiple arg formats
+        for _, args in ipairs({
+            {"Pet", braced},
+            {"Pet", clean},
+            {braced},
+            {clean},
+        }) do
+            local rets = {pcall(function() return removeRE:InvokeServer(table.unpack(args)) end)}
+            -- Accept true OR any truthy non-false return
+            if rets[1] and rets[2] and rets[2] ~= false then
+                success = true
+                break
+            end
+        end
+        if success then
+            removed = removed + 1
+            L("["..i.."/"..#listings.."] ✅ "..item.name:sub(1, 30))
+        else
+            L("["..i.."/"..#listings.."] ❌ "..item.name:sub(1, 30))
+        end
+        task.wait(0.4)
     end
     return removed
 end
