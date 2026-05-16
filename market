@@ -1145,25 +1145,54 @@ local function getPetType(t) return tostring(t:GetAttribute("f") or "?") end
 
 -- Current weight (parsed from name like "Peryton [6.4 KG]")
 local function getCurrentKg(t)
-    return tonumber(string.match(t.Name, "%[(%d+%.?%d*)%s*KG%]")) or 0
+    return tonumber(string.match(t.Name, "%[([%d%.]+)%s*[Kk][Gg]%]")) or 0
 end
 
--- Base weight (at age 1) — try multiple attribute names
-local BASE_KG_ATTRS = {"bw", "BW", "BaseWeight", "baseWeight", "BaseKG", "baseKG", "BASE_WEIGHT", "b", "base_weight", "OriginalKG", "OriginalWeight"}
+-- Get age from name (multiple patterns)
+local function getAge(t)
+    local name = t.Name
+    -- Try API first (Zenx APS)
+    local uuid = t:GetAttribute("PET_UUID")
+    if uuid and getgenv and getgenv().ZenxAPS and getgenv().ZenxAPS.getAge then
+        local age = getgenv().ZenxAPS.getAge(uuid)
+        if age then return age end
+    end
+    -- Parse patterns
+    for _, pat in ipairs({
+        "%[Age%s+(%d+)%]", "%[Age(%d+)%]",
+        "%[Lv%s+(%d+)%]", "%[Lv(%d+)%]",
+        "%[Level%s+(%d+)%]", "%[Level(%d+)%]",
+        "%[Lvl%s+(%d+)%]", "%[Lvl(%d+)%]",
+        "Age%s*[:=]%s*(%d+)",
+    }) do
+        local m = name:match(pat)
+        if m then return tonumber(m) end
+    end
+    if name:match("%[Age%s*MAX%]") or name:match("%[MAX%]") then return 100 end
+    return 1  -- safe default
+end
+
+-- Base weight (at age 1) — try attributes, fallback to FORMULA: baseKG = kg * 11 / (age + 10)
+local BASE_KG_ATTRS = {
+    "BASE_KG","PET_BASE_KG","BaseKG","BaseWeight",
+    "PET_BASE_WEIGHT","BASE_WEIGHT","PET_KG_BASE",
+    "StartingWeight","STARTING_KG",
+}
 local function getBaseKg(t)
+    -- Try attribute lookup first
     for _, attr in ipairs(BASE_KG_ATTRS) do
-        local v = t:GetAttribute(attr)
-        if v then
-            local n = tonumber(v)
-            if n and n > 0 then return n, attr end
+        local ok, v = pcall(function() return t:GetAttribute(attr) end)
+        if ok and v and type(v) == "number" and v > 0 then
+            return v, attr
         end
     end
+    -- Fallback: formula baseKG = kg * 11 / (age + 10)
+    local kg = getCurrentKg(t)
+    local age = getAge(t)
+    if kg > 0 and age and age >= 1 then
+        return kg * 11 / (age + 10), "formula"
+    end
     return nil
-end
-
--- Get age from name "[Age N]"
-local function getAge(t)
-    return tonumber(string.match(t.Name, "%[Age%s+(%d+)%]")) or 1
 end
 
 local function getBoothState(b)
@@ -1441,10 +1470,13 @@ startBtn.MouseButton1Click:Connect(function()
         for tp, c in pairs(typeCount) do typesStr = typesStr..tp.."="..c.." " end
         L("Non-fav by type: "..typesStr)
         if baseAttrFound then
-            L("✅ Base weight attribute: '"..baseAttrFound.."'")
+            if baseAttrFound == "formula" then
+                L("✅ Base KG via FORMULA: baseKG = currentKG × 11 / (age + 10)")
+            else
+                L("✅ Base KG via attribute: '"..baseAttrFound.."'")
+            end
         else
-            L("⚠ Base weight attr TIDAK ditemukan — cari di [DUMP] di atas")
-            L("⚠ Pakai current weight untuk filter")
+            L("⚠ Base KG tidak bisa dihitung — pakai current weight")
         end
 
         -- Build todo + match rules (using BASE weight if available)
