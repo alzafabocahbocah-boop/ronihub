@@ -1009,15 +1009,38 @@ snPad.Parent = snManualPanel
 lblOf(snManualPanel, "🎯  SNIPE MANUAL", 0, 0, 400, 28, C.accent, 18, FB)
 lblOf(snManualPanel, "Scan semua pet yang dijual di booth server ini.", 0, 32, 600, 20, C.textDim, 13)
 
--- Refresh + counter row
-snRefreshBtn = btnOf(snManualPanel, 0, 60, 140, 32, "🔄 MUAT ULANG", C.accent)
-snRefreshBtn.TextSize = 13
+-- Refresh + TP + counter row
+snRefreshBtn = btnOf(snManualPanel, 0, 60, 120, 32, "🔄 MUAT ULANG", C.accent)
+snRefreshBtn.TextSize = 12
+local snTpBtn = btnOf(snManualPanel, 128, 60, 100, 32, "🗺 TP TRADE", C.success)
+snTpBtn.TextColor3 = Color3.new(1,1,1) snTpBtn.TextSize = 12
 snCountLbl = Instance.new("TextLabel")
-snCountLbl.Size = UDim2.new(1, -160, 0, 32) snCountLbl.Position = UDim2.new(0, 152, 0, 60)
+snCountLbl.Size = UDim2.new(1, -240, 0, 32) snCountLbl.Position = UDim2.new(0, 236, 0, 60)
 snCountLbl.BackgroundTransparency = 1
 snCountLbl.Text = "Klik MUAT ULANG buat scan"
-snCountLbl.TextColor3 = C.textDim snCountLbl.Font = FM snCountLbl.TextSize = 13
+snCountLbl.TextColor3 = C.textDim snCountLbl.Font = FM snCountLbl.TextSize = 12
 snCountLbl.TextXAlignment = Enum.TextXAlignment.Left snCountLbl.Parent = snManualPanel
+
+-- TP handler (move character to Trade World camera point)
+snTpBtn.MouseButton1Click:Connect(function()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local tradeCam = Workspace:FindFirstChild("TradeworldCamPart")
+        or Workspace:FindFirstChild("LoadingCamPart")
+    if tradeCam and tradeCam:IsA("BasePart") then
+        hrp.CFrame = tradeCam.CFrame + Vector3.new(0, 5, 0)
+    else
+        -- Fallback: TP to first booth
+        local TW = Workspace:FindFirstChild("TradeWorld")
+        local Booths = TW and TW:FindFirstChild("Booths")
+        local firstBooth = Booths and Booths:GetChildren()[1]
+        if firstBooth then
+            local prim = firstBooth.PrimaryPart or firstBooth:FindFirstChildWhichIsA("BasePart")
+            if prim then hrp.CFrame = prim.CFrame + Vector3.new(0, 5, 0) end
+        end
+    end
+end)
 
 -- Search box
 snSearch = Instance.new("TextBox")
@@ -2260,6 +2283,8 @@ local function scanBoothListings()
     end
 
     local boothCount, dynCount, toolCount, mineCount = 0, 0, 0, 0
+    local plantCount, petCount, otherCount = 0, 0, 0
+    local firstToolDumped = false
     for _, booth in ipairs(Booths:GetChildren()) do
         if booth:IsA("Model") or booth:IsA("Folder") then
             boothCount = boothCount + 1
@@ -2269,45 +2294,66 @@ local function scanBoothListings()
                 for _, tool in ipairs(di:GetChildren()) do
                     if tool:IsA("Tool") then
                         toolCount = toolCount + 1
-                        -- Owner detection (multiple possible attribute names)
+
+                        -- Dump structure of first tool encountered (one time only)
+                        if not firstToolDumped then
+                            firstToolDumped = true
+                            L("--- Sample Tool dari booth ---")
+                            L("  Name: "..tool.Name:sub(1, 36))
+                            local attrs = {}
+                            for k, v in pairs(tool:GetAttributes()) do
+                                table.insert(attrs, k.."="..tostring(v):sub(1,15))
+                            end
+                            L("  Attrs("..#attrs.."): "..table.concat(attrs, ", "):sub(1, 200))
+                            local kids = {}
+                            for _, c in ipairs(tool:GetChildren()) do
+                                table.insert(kids, c.ClassName.."'"..c.Name.."'")
+                            end
+                            L("  Kids: "..table.concat(kids, ", "):sub(1, 150))
+                        end
+
+                        -- Filter: pet vs plant via ItemType attribute
+                        local itemType = tool:GetAttribute("ItemType")
+                            or tool:GetAttribute("PetType")
+                            or tool:GetAttribute("itemType")
+
+                        if itemType == "Pet" then petCount = petCount + 1
+                        elseif itemType then plantCount = plantCount + 1
+                        else otherCount = otherCount + 1 end
+
+                        -- Owner detection
                         local owner = tool:GetAttribute("OWNER")
                             or tool:GetAttribute("Owner")
-                            or tool:GetAttribute("owner")
                             or tool:GetAttribute("a")
                             or tool:GetAttribute("Seller")
                             or "?"
+
                         if owner == player.Name then
                             mineCount = mineCount + 1
-                        else
-                            -- Type: try f attribute first, then DisplayName, then Item_String child
-                            local pType = tostring(
-                                tool:GetAttribute("f")
-                                or tool:GetAttribute("DisplayName")
-                                or "?"
-                            )
-                            local itemStr = tool:FindFirstChild("Item_String")
-                            if pType == "?" and itemStr and itemStr:IsA("StringValue") then
-                                pType = tostring(itemStr.Value)
-                            end
+                        elseif itemType == "Pet" then  -- ONLY scan pets (skip plants)
+                            local pType = tostring(tool:GetAttribute("f") or "?")
 
-                            -- Weight: child NumberValue first, then attribute, then parse name
+                            -- Weight from name or child or attribute
                             local kg = 0
-                            local wChild = tool:FindFirstChild("Weight") or tool:FindFirstChild("weight")
+                            local wChild = tool:FindFirstChild("Weight")
                             if wChild and wChild:IsA("ValueBase") then
                                 kg = tonumber(wChild.Value) or 0
-                            else
+                            end
+                            if kg == 0 then
                                 kg = tonumber(string.match(tool.Name, "%[([%d%.]+)%s*[Kk][Gg]%]")) or 0
                             end
 
-                            -- Age: child first, then name parse
+                            -- Age (best effort — most pet names don't have it)
                             local age = 0
-                            local aChild = tool:FindFirstChild("Age") or tool:FindFirstChild("age")
+                            local aChild = tool:FindFirstChild("Age")
                             if aChild and aChild:IsA("ValueBase") then
                                 age = tonumber(aChild.Value) or 0
-                            else
+                            end
+                            if age == 0 then
                                 age = tonumber(string.match(tool.Name, "%[Age%s+(%d+)%]")) or 0
                             end
 
+                            -- Mutation from name (e.g. "Venom Peacock [...]")
                             local mut = parseMutation(tool.Name, pType)
                             local price = findPriceForTool(tool, booth)
                             table.insert(scanCache, {
@@ -2321,7 +2367,9 @@ local function scanBoothListings()
             end
         end
     end
-    L("Booths: "..boothCount.." | DynInst: "..dynCount.." | Tools: "..toolCount.." | mine: "..mineCount.." | others: "..#scanCache)
+    L(string.format("Booths:%d | DynInst:%d | Tools:%d (🐾Pet:%d, 🌱Plant:%d, ?:%d)",
+        boothCount, dynCount, toolCount, petCount, plantCount, otherCount))
+    L(string.format("Mine:%d | Found Pet listings: %d", mineCount, #scanCache))
 
     -- If 0 tools, sample first booth's structure
     if toolCount == 0 and boothCount > 0 then
