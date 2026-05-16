@@ -521,81 +521,75 @@ local rebuildRulesUI  -- forward declare so buildRuleRow can call it
 
 local function buildRuleRow(parent, r, idx, big)
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, big and 44 or 34)
+    row.Size = UDim2.new(1, 0, 0, big and 46 or 38)
     row.BackgroundColor3 = C.input row.BorderSizePixel = 0 row.Parent = parent
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
 
-    local fSize = big and 13 or 12
+    local fSize = big and 13 or 11
+    local rowH = big and 32 or 28
+    local rowOff = big and -16 or -14
 
-    -- Type (left)
+    -- Helper for editable cell with icon + label color
+    local function makeCell(x, w, icon, iconColor, valColor, val, onChange)
+        local wrap = Instance.new("Frame")
+        wrap.Size = UDim2.new(0, w, 0, rowH)
+        wrap.Position = UDim2.new(0, x, 0.5, rowOff)
+        wrap.BackgroundColor3 = C.card wrap.BorderSizePixel = 0 wrap.Parent = row
+        Instance.new("UICorner", wrap).CornerRadius = UDim.new(0, 5)
+        local s = Instance.new("UIStroke", wrap)
+        s.Color = iconColor s.Thickness = 1
+        s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        s.Transparency = 0.6
+        local ic = Instance.new("TextLabel")
+        ic.Size = UDim2.new(0, 16, 1, 0) ic.Position = UDim2.new(0, 2, 0, 0)
+        ic.BackgroundTransparency = 1 ic.Text = icon
+        ic.Font = F ic.TextSize = fSize - 1 ic.Parent = wrap
+        local box = Instance.new("TextBox")
+        box.Size = UDim2.new(1, -20, 1, 0) box.Position = UDim2.new(0, 18, 0, 0)
+        box.BackgroundTransparency = 1
+        box.Text = val box.TextColor3 = valColor
+        box.Font = FB box.TextSize = fSize
+        box.TextXAlignment = Enum.TextXAlignment.Left
+        box.ClearTextOnFocus = false box.Parent = wrap
+        box:GetPropertyChangedSignal("Text"):Connect(function() onChange(box.Text) end)
+        return wrap, box
+    end
+
+    -- Type (left, non-editable for now)
     local typeLbl = Instance.new("TextLabel")
-    typeLbl.Size = UDim2.new(0.25, 0, 1, 0) typeLbl.Position = UDim2.new(0, 8, 0, 0)
+    typeLbl.Size = UDim2.new(0, 92, 1, 0) typeLbl.Position = UDim2.new(0, 8, 0, 0)
     typeLbl.BackgroundTransparency = 1
     typeLbl.Text = r.type or "All"
-    typeLbl.TextColor3 = C.text typeLbl.Font = FB typeLbl.TextSize = fSize
+    typeLbl.TextColor3 = C.text typeLbl.Font = FB typeLbl.TextSize = fSize + 1
     typeLbl.TextXAlignment = Enum.TextXAlignment.Left
     typeLbl.TextTruncate = Enum.TextTruncate.AtEnd typeLbl.Parent = row
 
-    -- KG range
-    local kgLbl = Instance.new("TextLabel")
-    kgLbl.Size = UDim2.new(0.22, 0, 1, 0) kgLbl.Position = UDim2.new(0.25, 0, 0, 0)
-    kgLbl.BackgroundTransparency = 1
-    local maxStr = r.max == math.huge and "∞" or tostring(r.max)
-    kgLbl.Text = "KG "..r.min.."–"..maxStr
-    kgLbl.TextColor3 = C.textDim kgLbl.Font = FM kgLbl.TextSize = fSize - 1
-    kgLbl.TextXAlignment = Enum.TextXAlignment.Center kgLbl.Parent = row
+    -- Editable MIN KG
+    makeCell(105, 64, "↓", C.textDim, C.text, tostring(r.min), function(txt)
+        local n = tonumber(txt)
+        if n and n >= 0 then r.min = n end
+    end)
 
-    -- Editable PRICE box
-    local rowH = big and 30 or 26
-    local rowOff = big and -15 or -13
+    -- Editable MAX KG
+    local maxKgStr = r.max == math.huge and "∞" or tostring(r.max)
+    makeCell(173, 64, "↑", C.textDim, C.text, maxKgStr, function(txt)
+        if txt == "" or txt == "∞" or txt == "inf" then
+            r.max = math.huge
+        else
+            local n = tonumber(txt)
+            if n and n > 0 then r.max = n end
+        end
+    end)
 
-    local priceWrap = Instance.new("Frame")
-    priceWrap.Size = UDim2.new(0, 92, 0, rowH) priceWrap.Position = UDim2.new(0.47, 4, 0.5, rowOff)
-    priceWrap.BackgroundColor3 = C.card priceWrap.BorderSizePixel = 0 priceWrap.Parent = row
-    Instance.new("UICorner", priceWrap).CornerRadius = UDim.new(0, 5)
-    local pStroke = Instance.new("UIStroke", priceWrap)
-    pStroke.Color = C.accent pStroke.Thickness = 1
-    pStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    pStroke.Transparency = 0.6
-    local priceIcon = Instance.new("TextLabel")
-    priceIcon.Size = UDim2.new(0, 18, 1, 0) priceIcon.Position = UDim2.new(0, 4, 0, 0)
-    priceIcon.BackgroundTransparency = 1 priceIcon.Text = "💰"
-    priceIcon.Font = F priceIcon.TextSize = fSize - 1 priceIcon.Parent = priceWrap
-    local priceBox = Instance.new("TextBox")
-    priceBox.Size = UDim2.new(1, -24, 1, 0) priceBox.Position = UDim2.new(0, 22, 0, 0)
-    priceBox.BackgroundTransparency = 1
-    priceBox.Text = tostring(r.price) priceBox.TextColor3 = C.accent
-    priceBox.Font = FB priceBox.TextSize = fSize
-    priceBox.TextXAlignment = Enum.TextXAlignment.Left
-    priceBox.ClearTextOnFocus = false priceBox.Parent = priceWrap
-    priceBox:GetPropertyChangedSignal("Text"):Connect(function()
-        local n = tonumber(priceBox.Text)
+    -- Editable PRICE
+    makeCell(241, 86, "💰", C.accent, C.accent, tostring(r.price), function(txt)
+        local n = tonumber(txt)
         if n and n > 0 then r.price = n end
     end)
 
-    -- Editable MAX LIST box
-    local maxWrap = Instance.new("Frame")
-    maxWrap.Size = UDim2.new(0, 76, 0, rowH) maxWrap.Position = UDim2.new(0.72, 4, 0.5, rowOff)
-    maxWrap.BackgroundColor3 = C.card maxWrap.BorderSizePixel = 0 maxWrap.Parent = row
-    Instance.new("UICorner", maxWrap).CornerRadius = UDim.new(0, 5)
-    local mStroke = Instance.new("UIStroke", maxWrap)
-    mStroke.Color = C.success mStroke.Thickness = 1
-    mStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    mStroke.Transparency = 0.6
-    local maxIcon = Instance.new("TextLabel")
-    maxIcon.Size = UDim2.new(0, 18, 1, 0) maxIcon.Position = UDim2.new(0, 4, 0, 0)
-    maxIcon.BackgroundTransparency = 1 maxIcon.Text = "📋"
-    maxIcon.Font = F maxIcon.TextSize = fSize - 1 maxIcon.Parent = maxWrap
-    local maxBox = Instance.new("TextBox")
-    maxBox.Size = UDim2.new(1, -24, 1, 0) maxBox.Position = UDim2.new(0, 22, 0, 0)
-    maxBox.BackgroundTransparency = 1
-    maxBox.Text = (r.maxListings == math.huge) and "∞" or tostring(r.maxListings or "∞")
-    maxBox.TextColor3 = C.success
-    maxBox.Font = FB maxBox.TextSize = fSize
-    maxBox.TextXAlignment = Enum.TextXAlignment.Left
-    maxBox.ClearTextOnFocus = false maxBox.Parent = maxWrap
-    maxBox:GetPropertyChangedSignal("Text"):Connect(function()
-        local txt = maxBox.Text
+    -- Editable MAX LIST
+    local mlStr = (r.maxListings == math.huge) and "∞" or tostring(r.maxListings or "∞")
+    makeCell(331, 70, "📋", C.success, C.success, mlStr, function(txt)
         if txt == "" or txt == "∞" or txt == "inf" then
             r.maxListings = math.huge
         else
@@ -607,7 +601,7 @@ local function buildRuleRow(parent, r, idx, big)
     -- Delete button
     local delBtn = Instance.new("TextButton")
     delBtn.Size = UDim2.new(0, 30, 0, rowH)
-    delBtn.Position = UDim2.new(1, -36, 0.5, rowOff)
+    delBtn.Position = UDim2.new(1, -34, 0.5, rowOff)
     delBtn.BackgroundColor3 = C.danger delBtn.AutoButtonColor = false
     delBtn.Text = "✕" delBtn.TextColor3 = Color3.new(1,1,1)
     delBtn.Font = FB delBtn.TextSize = 14 delBtn.Parent = row
@@ -1295,6 +1289,8 @@ local function refreshPriceList() end  -- no-op (List Harga now uses rebuildRule
 -- ===== START AUTO LIST (toggle) =====
 local stopReq = false
 local isRunning = false
+local startGradient
+local startGradTask
 
 local function setStartIdle()
     isRunning = false
@@ -1303,14 +1299,43 @@ local function setStartIdle()
     startBtn.Text = "⚡ START"
     startStroke.Color = C.accent
     startStroke.Transparency = 0.5
+    startStroke.Thickness = 1.5
+    -- Stop & remove animated gradient
+    if startGradient then
+        pcall(function() startGradient:Destroy() end)
+        startGradient = nil
+    end
 end
+
 local function setStartRunning()
     isRunning = true
-    startBtn.BackgroundColor3 = C.accent
-    startBtn.TextColor3 = Color3.fromRGB(20, 20, 20)
+    -- KEEP background gray (NOT yellow), only animate outline
+    startBtn.BackgroundColor3 = C.card
+    startBtn.TextColor3 = C.accent
     startBtn.Text = "⏸ STOP"
-    startStroke.Color = C.accent
+    startStroke.Color = Color3.fromRGB(255, 255, 255)  -- white base so gradient shows
+    startStroke.Thickness = 2
     startStroke.Transparency = 0
+
+    -- Add rotating gradient on outline (sweeping border animation)
+    if startGradient then pcall(function() startGradient:Destroy() end) end
+    startGradient = Instance.new("UIGradient")
+    startGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, C.accent),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 200)),
+        ColorSequenceKeypoint.new(1, C.accent),
+    })
+    startGradient.Parent = startStroke
+
+    -- Spin the gradient
+    task.spawn(function()
+        local r = 0
+        while isRunning and startGradient and startGradient.Parent do
+            r = (r + 4) % 360
+            startGradient.Rotation = r
+            task.wait(0.03)
+        end
+    end)
 end
 setStartIdle()
 
@@ -1370,11 +1395,11 @@ startBtn.MouseButton1Click:Connect(function()
             return
         end
 
-        -- Diagnose: count pets + dump sample attributes for base-weight detection
+        -- Diagnose: count pets + dump COMPLETE structure of first pet
         local allPets, favCount = 0, 0
         local typeCount = {}
         local baseAttrFound = nil
-        local sampledAttrs = {}
+        local dumpedPet = false
         for _, t in ipairs(bp:GetChildren()) do
             if isPet(t) then
                 allPets = allPets + 1
@@ -1383,16 +1408,30 @@ startBtn.MouseButton1Click:Connect(function()
                 else
                     local pType = getPetType(t)
                     typeCount[pType] = (typeCount[pType] or 0) + 1
-                    if #sampledAttrs < 2 then
-                        local attrs = {}
-                        for k, v in pairs(t:GetAttributes()) do
-                            table.insert(attrs, k.."="..tostring(v):sub(1, 20))
-                        end
-                        table.insert(sampledAttrs, t.Name:sub(1, 30).." → "..table.concat(attrs, ", "))
-                    end
                     if not baseAttrFound then
                         local _, attr = getBaseKg(t)
                         if attr then baseAttrFound = attr end
+                    end
+                    -- Dump first non-fav pet COMPLETELY
+                    if not dumpedPet then
+                        dumpedPet = true
+                        L("======================================")
+                        L("[DUMP] "..t.Name)
+                        L("[DUMP] Attributes:")
+                        for k, v in pairs(t:GetAttributes()) do
+                            L("    "..k.." ("..typeof(v)..") = "..tostring(v))
+                        end
+                        L("[DUMP] Children:")
+                        for _, ch in ipairs(t:GetChildren()) do
+                            local extra = ""
+                            if ch:IsA("ValueBase") then extra = " VALUE="..tostring(ch.Value) end
+                            L("    "..ch.ClassName.." '"..ch.Name.."'"..extra)
+                            -- Inspect child attributes too
+                            for k, v in pairs(ch:GetAttributes()) do
+                                L("      attr "..k.." = "..tostring(v))
+                            end
+                        end
+                        L("======================================")
                     end
                 end
             end
@@ -1404,11 +1443,8 @@ startBtn.MouseButton1Click:Connect(function()
         if baseAttrFound then
             L("✅ Base weight attribute: '"..baseAttrFound.."'")
         else
-            L("⚠ Base weight attribute TIDAK ditemukan — pakai current weight")
-            L("[DEBUG] Sample pet attributes (cari attr yang seperti base weight):")
-            for _, line in ipairs(sampledAttrs) do
-                L("  "..line)
-            end
+            L("⚠ Base weight attr TIDAK ditemukan — cari di [DUMP] di atas")
+            L("⚠ Pakai current weight untuk filter")
         end
 
         -- Build todo + match rules (using BASE weight if available)
@@ -1896,40 +1932,60 @@ local function scanBoothListings()
     scanCache = {}
     local diagLines = {}
 
+    -- Inspect workspace top level (always log so user can see)
+    L("======= SNIPE SCAN START =======")
+    local wsTop = {}
+    for _, c in ipairs(Workspace:GetChildren()) do
+        table.insert(wsTop, c.Name)
+    end
+    L("Workspace top ("..#wsTop.."): "..table.concat(wsTop, ", "):sub(1, 150))
+
     -- Try multiple paths to find booths
     local TW = Workspace:FindFirstChild("TradeWorld")
     local Booths
     if TW then
-        table.insert(diagLines, "TradeWorld: ✓")
+        table.insert(diagLines, "TW✓")
+        L("✓ TradeWorld found")
+        local twChildren = {}
+        for _, c in ipairs(TW:GetChildren()) do table.insert(twChildren, c.Name) end
+        L("TradeWorld children: "..table.concat(twChildren, ", "):sub(1, 150))
         Booths = TW:FindFirstChild("Booths")
     else
-        table.insert(diagLines, "TradeWorld: ✗")
+        table.insert(diagLines, "TW✗")
+        L("✗ TradeWorld NOT in Workspace top — kamu mungkin di area lain")
     end
     if not Booths then
-        -- Try alternate paths
         Booths = Workspace:FindFirstChild("Booths")
-        if Booths then table.insert(diagLines, "Booths (alt): ✓") end
+        if Booths then
+            table.insert(diagLines, "Booths(alt)✓")
+            L("✓ Booths found at Workspace.Booths")
+        end
     else
-        table.insert(diagLines, "Booths: ✓")
+        table.insert(diagLines, "Booths✓")
+        L("✓ Booths found at Workspace.TradeWorld.Booths")
     end
     if not Booths then
-        -- Last resort: scan all top-level for any model with "Booth" in name
-        for _, c in ipairs(Workspace:GetChildren()) do
-            if c:IsA("Model") and string.find(string.lower(c.Name), "booth") then
-                Booths = c.Parent
-                table.insert(diagLines, "Booths (search): ✓")
+        -- Recursive search for any folder/model named "Booths"
+        for _, d in ipairs(Workspace:GetDescendants()) do
+            if d.Name == "Booths" and (d:IsA("Folder") or d:IsA("Model")) then
+                Booths = d
+                table.insert(diagLines, "Booths(search)✓")
+                L("✓ Booths found via search at "..d:GetFullName())
                 break
             end
         end
     end
     if not Booths then
-        scanDiag = "Booths gak nemu — kamu di Trade World? "..table.concat(diagLines, " | ")
+        scanDiag = "Booths gak nemu — coba TP ke Trade World"
+        L("✗ Booths gak ditemukan dimanapun")
+        L("→ Coba klik booth/trade area di game dulu biar streaming load")
+        L("======= SCAN END (FAIL) =======")
         return
     end
 
-    local boothCount, dynCount, toolCount, otherCount = 0, 0, 0, 0
+    local boothCount, dynCount, toolCount, mineCount = 0, 0, 0, 0
     for _, booth in ipairs(Booths:GetChildren()) do
-        if booth:IsA("Model") then
+        if booth:IsA("Model") or booth:IsA("Folder") then
             boothCount = boothCount + 1
             local di = booth:FindFirstChild("DynamicInstances")
             if di then
@@ -1938,8 +1994,9 @@ local function scanBoothListings()
                     if tool:IsA("Tool") then
                         toolCount = toolCount + 1
                         local owner = tool:GetAttribute("OWNER") or tool:GetAttribute("a") or "?"
-                        -- Skip own listings
-                        if owner ~= player.Name then
+                        if owner == player.Name then
+                            mineCount = mineCount + 1
+                        else
                             local pType = tostring(tool:GetAttribute("f") or "?")
                             local nm = tool.Name
                             local kg = tonumber(string.match(nm, "%[(%d+%.?%d*)%s*KG%]")) or 0
@@ -1947,28 +2004,33 @@ local function scanBoothListings()
                             local mut = parseMutation(nm, pType)
                             local price = findPriceForTool(tool, booth)
                             table.insert(scanCache, {
-                                type = pType,
-                                mutation = mut,
-                                age = age,
-                                kg = kg,
-                                price = price,
-                                owner = owner,
-                                tool = tool,
-                                booth = booth,
-                                name = nm,
+                                type = pType, mutation = mut, age = age, kg = kg,
+                                price = price, owner = owner, tool = tool,
+                                booth = booth, name = nm,
                             })
-                        else
-                            otherCount = otherCount + 1
                         end
                     end
                 end
             end
         end
     end
-    scanDiag = string.format(
-        "Booths: %d | with DynInst: %d | Tools: %d | mine: %d | others: %d",
-        boothCount, dynCount, toolCount, otherCount, #scanCache
-    )
+    L("Booths: "..boothCount.." | DynInst: "..dynCount.." | Tools: "..toolCount.." | mine: "..mineCount.." | others: "..#scanCache)
+
+    -- If 0 tools, sample first booth's structure
+    if toolCount == 0 and boothCount > 0 then
+        L("⚠ Booths ada tapi 0 tools. Sample booth structure:")
+        local sampleBooth = Booths:GetChildren()[1]
+        if sampleBooth then
+            L("  '"..sampleBooth.Name.."' ("..sampleBooth.ClassName..")")
+            for _, c in ipairs(sampleBooth:GetChildren()) do
+                L("    "..c.ClassName.." '"..c.Name.."' ("..#c:GetChildren().." kids)")
+            end
+        end
+    end
+    L("======= SCAN END =======")
+
+    scanDiag = string.format("Booths:%d Tools:%d Mine:%d Found:%d",
+        boothCount, toolCount, mineCount, #scanCache)
 end
 
 local function renderSnipe()
