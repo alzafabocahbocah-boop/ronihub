@@ -875,13 +875,18 @@ local hopBody = makeCollapsibleCard(rejoinScroll, "Hop Server (cari server lain)
 addReadOnlyRow(hopBody, "Current Players", function()
     return tostring(#Players:GetPlayers())
 end)
-local hopMinBox = addInputRow(hopBody, "Min Players (current)", "0", "")
-local hopTargetBox = addInputRow(hopBody, "Target Players (di server baru)", "20", "")
+local hopAutoMinBox = addInputRow(hopBody, "Auto-hop kalau player ≤", "5", "")
+local hopMinPlayersBox = addInputRow(hopBody, "Min players di server baru", "15", "")
+local hopMaxPlayersBox = addInputRow(hopBody, "Max players di server baru", "30", "")
+local hopTargetBox = addInputRow(hopBody, "Target players (ideal)", "25", "")
+local hopForeignToggle = addToggleRow(hopBody, "Skip server kalau banyak Indo", false)
 local autoHopToggle = addToggleRow(hopBody, "Auto Hop Server", false)
 local hopNowBtn = addButtonRow(hopBody, "🔀 HOP NOW", C.accent)
+local hopScanBtn = addButtonRow(hopBody, "🔍 SCAN PLAYER SEKARANG", C.card)
 
--- For backward compat - autoRejoinBox alias
+-- For backward compat - autoRejoinBox alias + hopMinBox alias
 local autoRejoinBox = listingBox
+local hopMinBox = hopAutoMinBox
 
 -- ============================================================
 -- MISC PANEL
@@ -1130,6 +1135,7 @@ end  -- end do block for snipe UI
 -- ============================================================
 local createRE = RS.GameEvents.TradeEvents.Booths.CreateListing
 local removeRE = RS.GameEvents.TradeEvents.Booths.RemoveListing
+local buyRE = RS.GameEvents.TradeEvents.Booths:FindFirstChild("BuyListing")
 local claimRE = RS.GameEvents.TradeEvents.Booths.ClaimBooth
 local removeBoothRE = RS.GameEvents.TradeEvents.Booths:FindFirstChild("RemoveBooth")
 local skinRE
@@ -1143,21 +1149,48 @@ local function isFav(t)
 end
 local function getPetType(t) return tostring(t:GetAttribute("f") or "?") end
 
--- Current weight (parsed from name like "Peryton [6.4 KG]")
+-- Current weight: try child NumberValue 'Weight' first, fallback ke name parse
 local function getCurrentKg(t)
+    -- Try child NumberValue (game format for booth tools + maybe backpack)
+    for _, name in ipairs({"Weight", "weight", "KG", "kg"}) do
+        local child = t:FindFirstChild(name)
+        if child and child:IsA("ValueBase") then
+            local v = tonumber(child.Value)
+            if v and v > 0 then return v end
+        end
+    end
+    -- Try attribute
+    for _, attr in ipairs({"Weight", "weight", "KG", "kg", "w"}) do
+        local v = t:GetAttribute(attr)
+        if v and tonumber(v) and tonumber(v) > 0 then return tonumber(v) end
+    end
+    -- Fallback: parse from name like "Peryton [6.4 KG]"
     return tonumber(string.match(t.Name, "%[([%d%.]+)%s*[Kk][Gg]%]")) or 0
 end
 
--- Get age from name (multiple patterns)
+-- Get age: try API, child value, attribute, name patterns
 local function getAge(t)
-    local name = t.Name
     -- Try API first (Zenx APS)
     local uuid = t:GetAttribute("PET_UUID")
     if uuid and getgenv and getgenv().ZenxAPS and getgenv().ZenxAPS.getAge then
         local age = getgenv().ZenxAPS.getAge(uuid)
         if age then return age end
     end
-    -- Parse patterns
+    -- Try child NumberValue 'Age'
+    for _, name in ipairs({"Age", "age", "Level", "Lvl"}) do
+        local child = t:FindFirstChild(name)
+        if child and child:IsA("ValueBase") then
+            local v = tonumber(child.Value)
+            if v and v >= 1 then return v end
+        end
+    end
+    -- Try attribute
+    for _, attr in ipairs({"Age", "age", "Level", "Lvl"}) do
+        local v = t:GetAttribute(attr)
+        if v and tonumber(v) and tonumber(v) >= 1 then return tonumber(v) end
+    end
+    -- Parse from name
+    local name = t.Name
     for _, pat in ipairs({
         "%[Age%s+(%d+)%]", "%[Age(%d+)%]",
         "%[Lv%s+(%d+)%]", "%[Lv(%d+)%]",
@@ -1169,7 +1202,7 @@ local function getAge(t)
         if m then return tonumber(m) end
     end
     if name:match("%[Age%s*MAX%]") or name:match("%[MAX%]") then return 100 end
-    return 1  -- safe default
+    return 1
 end
 
 -- Base weight (at age 1) — try attributes, fallback to FORMULA: baseKG = kg * 11 / (age + 10)
@@ -1197,17 +1230,29 @@ end
 
 local function getBoothState(b)
     local di = b:FindFirstChild("DynamicInstances")
+    -- Scan booth descendants for TextLabels (booth signs)
+    for _, d in ipairs(b:GetDescendants()) do
+        if d:IsA("TextLabel") or d:IsA("TextButton") then
+            local txt = tostring(d.Text or "")
+            local lowTxt = string.lower(txt)
+            if lowTxt:find("unclaimed", 1, true) then
+                return "unclaimed"
+            end
+            -- Check if booth sign shows player name
+            if string.find(lowTxt, string.lower(player.Name), 1, true) then
+                return "mine"
+            end
+        end
+    end
+    -- Fallback: check tool attributes (in case OWNER attr exists)
     if di then
         for _, c in ipairs(di:GetChildren()) do
             if c:IsA("Tool") then
                 local owner = c:GetAttribute("OWNER") or c:GetAttribute("a")
+                    or c:GetAttribute("Owner") or c:GetAttribute("Seller")
+                    or c:GetAttribute("PlayerName")
                 if owner == player.Name then return "mine" end
             end
-        end
-    end
-    for _, d in ipairs(b:GetDescendants()) do
-        if (d:IsA("TextLabel") or d:IsA("TextButton")) and string.find(string.lower(tostring(d.Text or "")), "unclaimed") then
-            return "unclaimed"
         end
     end
     if di and #di:GetChildren() > 0 then return "owned" end
@@ -1216,7 +1261,9 @@ end
 
 local function findMyBooth(Booths)
     for _, b in ipairs(Booths:GetChildren()) do
-        if b:IsA("Model") and getBoothState(b) == "mine" then return b end
+        if (b:IsA("Model") or b:IsA("Folder")) and getBoothState(b) == "mine" then
+            return b
+        end
     end
 end
 
@@ -1688,42 +1735,122 @@ local function getServerList()
     return data.data or data
 end
 
+-- Heuristic: detect Indonesian-style names
+-- Indonesian gamers often: short names, vocaloid/anime refs, "ID/IDN" suffix, x_xx patterns
+local function looksIndonesian(name)
+    local lower = string.lower(name)
+    -- Common Indo gamer patterns
+    if lower:find("indo") or lower:find("idn") or lower:find("jkt")
+       or lower:find("bdg") or lower:find("sby") or lower:find("nkri")
+       or lower:find("wibu") or lower:find("kamu") or lower:find("aku") then
+        return true
+    end
+    -- Common Indo names
+    for _, n in ipairs({"budi","andi","rizki","rian","aji","dimas","fajar","reza","rama",
+                         "anto","yoga","irfan","bayu","arif","papa","mama","saputra","wijaya",
+                         "putra","saputri","tan","wati","yanto","yati"}) do
+        if lower:find(n, 1, true) then return true end
+    end
+    return false
+end
+
+-- Scan players in current server, return (totalPlayers, indoCount, foreignCount, names)
+local function scanCurrentPlayers()
+    local total, indo, foreign = 0, 0, 0
+    local names = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        total = total + 1
+        local n = p.DisplayName or p.Name
+        local label = n
+        if looksIndonesian(n) or looksIndonesian(p.Name) then
+            indo = indo + 1
+            label = "🇮🇩 "..n
+        else
+            foreign = foreign + 1
+            label = "🌍 "..n
+        end
+        table.insert(names, label)
+    end
+    return total, indo, foreign, names
+end
+
 local function hopToBestServer()
     L("==== HOP SERVER ====")
+    local minP = tonumber(hopMinPlayersBox.Text) or 0
+    local maxP = tonumber(hopMaxPlayersBox.Text) or 30
     local target = tonumber(hopTargetBox.Text) or 20
-    L("Target players: "..target)
+    L("Filter: "..minP.."-"..maxP.." players, target "..target)
+
     local servers, err = getServerList()
     if not servers then L("[ERR] "..tostring(err)) return end
-    L("Found "..#servers.." servers")
+    L("Found "..#servers.." servers total")
+
     local current = tostring(game.JobId)
     local candidates = {}
     for _, s in ipairs(servers) do
-        if s.id ~= current and (s.playing or 0) < (s.maxPlayers or 30) then
+        local playing = s.playing or 0
+        local max = s.maxPlayers or 30
+        if s.id ~= current and playing >= minP and playing <= maxP and playing < max then
             table.insert(candidates, s)
         end
     end
-    if #candidates == 0 then L("[ERR] no candidate servers") return end
+    if #candidates == 0 then
+        L("[ERR] gak ada server cocok dengan filter ("..minP.."-"..maxP..")")
+        L("Coba turunin min atau naikin max")
+        return
+    end
+    L("Kandidat: "..#candidates.." server")
+
+    -- Sort by closeness to target
     table.sort(candidates, function(a, b)
         return math.abs((a.playing or 0) - target) < math.abs((b.playing or 0) - target)
     end)
+
     local best = candidates[1]
-    L("Hopping to: "..(best.playing or "?").."/"..(best.maxPlayers or "?").." players")
+    L("Pilih: "..(best.playing or "?").."/"..(best.maxPlayers or "?").." players (fps "..tostring(best.fps or "?")..")")
     task.wait(0.5)
     pcall(function()
         TeleportService:TeleportToPlaceInstance(game.PlaceId, best.id, player)
     end)
 end
+
 hopNowBtn.MouseButton1Click:Connect(function() task.spawn(hopToBestServer) end)
 
--- Auto hop loop (when current players drops below min)
+-- Scan players button
+hopScanBtn.MouseButton1Click:Connect(function()
+    task.spawn(function()
+        L("")
+        L("==== SCAN PLAYERS DI SERVER INI ====")
+        local total, indo, foreign, names = scanCurrentPlayers()
+        L(string.format("Total: %d | 🇮🇩 Indo: %d (%.0f%%) | 🌍 Asing: %d (%.0f%%)",
+            total, indo, total > 0 and (indo/total*100) or 0,
+            foreign, total > 0 and (foreign/total*100) or 0))
+        for _, n in ipairs(names) do L("  "..n) end
+        L("================================")
+    end)
+end)
+
+-- Auto hop loop (when current players drops below min, OR too many Indo players)
 task.spawn(function()
     while gui.Parent do
         task.wait(60)
         if autoHopToggle.get() then
-            local minPlayers = tonumber(hopMinBox.Text) or 0
+            local minPlayers = tonumber(hopAutoMinBox.Text) or 0
             local current = #Players:GetPlayers()
+            local shouldHop = false
+            local reason = ""
             if current <= minPlayers then
-                L("[AUTO-HOP] players ("..current..") ≤ min ("..minPlayers..")")
+                shouldHop = true
+                reason = "players ("..current..") ≤ min ("..minPlayers..")"
+            elseif hopForeignToggle.get() then
+                local total, indo, foreign = scanCurrentPlayers()
+                if total > 0 and indo > foreign then
+                    shouldHop = true
+                    reason = "Indo ("..indo..") > Asing ("..foreign..")"
+                end
+            end
+            if shouldHop then
+                L("[AUTO-HOP] "..reason)
                 hopToBestServer()
                 return
             end
@@ -1747,76 +1874,71 @@ local function unlistAllInternal()
         return 0
     end
 
-    local mine = findMyBooth(Booths)
-    if not mine then
-        L("[ERR] Booth-mu gak nemu. Cek:")
-        local boothCount, ownedCount = 0, 0
+    -- Find my booth: scan booth tools, find any that has PET_UUID + OWNER matching me
+    -- OR: just find booth that has any tools (since user only has 1 booth)
+    -- Better: iterate ALL booths and unlist tools that have UUIDs (we'll try removing all of mine)
+    local myBooth = findMyBooth(Booths)
+    if not myBooth then
+        -- Fallback: try to find by character position
+        L("[INFO] findMyBooth gagal, cari via tools yang ada PET_UUID-nya")
         for _, b in ipairs(Booths:GetChildren()) do
-            if b:IsA("Model") then
-                boothCount = boothCount + 1
+            if b:IsA("Model") or b:IsA("Folder") then
                 local di = b:FindFirstChild("DynamicInstances")
-                if di then
-                    for _, t in ipairs(di:GetChildren()) do
-                        if t:IsA("Tool") then
-                            local own = t:GetAttribute("OWNER") or "?"
-                            if own ~= "?" then ownedCount = ownedCount + 1 end
-                            if string.find(string.lower(own), string.lower(player.Name:sub(1,6))) then
-                                L("  Match partial: '"..own.."' di booth "..b.Name:sub(1,20))
-                            end
-                        end
-                    end
+                if di and #di:GetChildren() > 0 then
+                    -- Check if any tool has my pet UUID? Hard to verify.
+                    -- For now, give up — user can manually run unlist
+                    L("  booth "..b.Name:sub(1,12).." punya "..#di:GetChildren().." tools")
                 end
             end
         end
-        L("  Total booths: "..boothCount..", owned (any): "..ownedCount)
-        L("  Player name yg dicari: '"..player.Name.."'")
+        L("[ERR] Booth-mu gak nemu — coba claim booth dulu, atau cek di-area trade")
         return 0
     end
 
-    L("Booth-mu ditemukan: "..mine.Name:sub(1, 24))
-    local di = mine:FindFirstChild("DynamicInstances")
+    L("Booth-mu: "..myBooth.Name:sub(1, 24))
+    local di = myBooth:FindFirstChild("DynamicInstances")
     if not di then
-        L("[ERR] DynamicInstances gak ada di booth-mu")
+        L("[ERR] DynamicInstances gak ada")
         return 0
     end
 
+    -- Gather all listings — use tool's NAME (which is "{listingUUID}")
     local listings = {}
     for _, t in ipairs(di:GetChildren()) do
         if t:IsA("Tool") then
-            local uuid = tostring(t:GetAttribute("PET_UUID") or t.Name)
-            table.insert(listings, {uuid=uuid, name=t.Name})
+            -- Tool name format: "{uuid}" — strip braces
+            local listingUUID = t.Name:gsub("[{}]", "")
+            table.insert(listings, {
+                uuid = listingUUID,
+                name = t.Name,
+                tool = t,
+            })
         end
     end
     L("Pet di booth: "..#listings)
     if #listings == 0 then return 0 end
 
+    -- Confirmed format from remote spy: RemoveListing:InvokeServer(uuid_clean)
     local removed = 0
     for i, item in ipairs(listings) do
         if stopReq then break end
-        local clean = item.uuid:gsub("^{",""):gsub("}$","")
-        local braced = "{"..clean.."}"
-        local success = false
-        -- Try multiple arg formats
-        for _, args in ipairs({
-            {"Pet", braced},
-            {"Pet", clean},
-            {braced},
-            {clean},
-        }) do
-            local rets = {pcall(function() return removeRE:InvokeServer(table.unpack(args)) end)}
-            -- Accept true OR any truthy non-false return
-            if rets[1] and rets[2] and rets[2] ~= false then
-                success = true
+        local rets = {pcall(function() return removeRE:InvokeServer(item.uuid) end)}
+        -- Verify by checking if tool is gone after small wait
+        task.wait(0.3)
+        local stillThere = false
+        for _, t in ipairs(di:GetChildren()) do
+            if t:IsA("Tool") and t.Name:gsub("[{}]", "") == item.uuid then
+                stillThere = true
                 break
             end
         end
-        if success then
+        if not stillThere then
             removed = removed + 1
-            L("["..i.."/"..#listings.."] ✅ "..item.name:sub(1, 30))
+            L("["..i.."/"..#listings.."] ✅ "..item.uuid:sub(1, 12).."...")
         else
-            L("["..i.."/"..#listings.."] ❌ "..item.name:sub(1, 30))
+            L("["..i.."/"..#listings.."] ❌ "..item.uuid:sub(1, 12).."... (pcall="..tostring(rets[1]).." ret="..tostring(rets[2])..")")
         end
-        task.wait(0.4)
+        task.wait(0.3)
     end
     return removed
 end
@@ -2147,20 +2269,51 @@ local function scanBoothListings()
                 for _, tool in ipairs(di:GetChildren()) do
                     if tool:IsA("Tool") then
                         toolCount = toolCount + 1
-                        local owner = tool:GetAttribute("OWNER") or tool:GetAttribute("a") or "?"
+                        -- Owner detection (multiple possible attribute names)
+                        local owner = tool:GetAttribute("OWNER")
+                            or tool:GetAttribute("Owner")
+                            or tool:GetAttribute("owner")
+                            or tool:GetAttribute("a")
+                            or tool:GetAttribute("Seller")
+                            or "?"
                         if owner == player.Name then
                             mineCount = mineCount + 1
                         else
-                            local pType = tostring(tool:GetAttribute("f") or "?")
-                            local nm = tool.Name
-                            local kg = tonumber(string.match(nm, "%[(%d+%.?%d*)%s*KG%]")) or 0
-                            local age = tonumber(string.match(nm, "%[Age%s+(%d+)%]")) or 0
-                            local mut = parseMutation(nm, pType)
+                            -- Type: try f attribute first, then DisplayName, then Item_String child
+                            local pType = tostring(
+                                tool:GetAttribute("f")
+                                or tool:GetAttribute("DisplayName")
+                                or "?"
+                            )
+                            local itemStr = tool:FindFirstChild("Item_String")
+                            if pType == "?" and itemStr and itemStr:IsA("StringValue") then
+                                pType = tostring(itemStr.Value)
+                            end
+
+                            -- Weight: child NumberValue first, then attribute, then parse name
+                            local kg = 0
+                            local wChild = tool:FindFirstChild("Weight") or tool:FindFirstChild("weight")
+                            if wChild and wChild:IsA("ValueBase") then
+                                kg = tonumber(wChild.Value) or 0
+                            else
+                                kg = tonumber(string.match(tool.Name, "%[([%d%.]+)%s*[Kk][Gg]%]")) or 0
+                            end
+
+                            -- Age: child first, then name parse
+                            local age = 0
+                            local aChild = tool:FindFirstChild("Age") or tool:FindFirstChild("age")
+                            if aChild and aChild:IsA("ValueBase") then
+                                age = tonumber(aChild.Value) or 0
+                            else
+                                age = tonumber(string.match(tool.Name, "%[Age%s+(%d+)%]")) or 0
+                            end
+
+                            local mut = parseMutation(tool.Name, pType)
                             local price = findPriceForTool(tool, booth)
                             table.insert(scanCache, {
                                 type = pType, mutation = mut, age = age, kg = kg,
                                 price = price, owner = owner, tool = tool,
-                                booth = booth, name = nm,
+                                booth = booth, name = tool.Name,
                             })
                         end
                     end
