@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.24 (mutation prefix update - support comma + new mutations)"
+local SCRIPT_VERSION = "v3.27 (server age per-detik)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -22,6 +22,32 @@ local function loadState()
     return ok and data or nil
 end
 local savedState = loadState() or {}
+
+-- ===== REJOIN SERVER DETECTION =====
+-- Bandingkan JobId saat ini vs JobId sebelum rejoin
+local currentJobId = tostring(game.JobId or "")
+local serverUptime = workspace.DistributedGameTime or 0
+print(string.format("[ZenxInv] Server age: %d menit (%d detik)",
+    math.floor(serverUptime/60), math.floor(serverUptime)))
+local rejoinStatus = "fresh"  -- fresh | new | same
+local rejoinTimeAgo = nil
+if savedState.lastJobId and savedState.lastJobId ~= "" then
+    local elapsed = os.time() - (savedState.rejoinTime or 0)
+    if elapsed < 600 then  -- valid in last 10 min
+        rejoinTimeAgo = elapsed
+        if savedState.lastJobId == currentJobId then
+            rejoinStatus = "same"
+            print("[ZenxInv] ⚠ Server LAMA terdeteksi! JobId: "..currentJobId:sub(1,12).."...")
+        else
+            rejoinStatus = "new"
+            print("[ZenxInv] ✓ Server BARU. Old: "..savedState.lastJobId:sub(1,12).."... → New: "..currentJobId:sub(1,12).."...")
+        end
+    end
+end
+-- Clear after read (so future loads without rejoin show "fresh")
+savedState.lastJobId = nil
+savedState.rejoinTime = nil
+saveState(savedState)
 
 pcall(function()
     if player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("ZenxInvGui") then
@@ -400,6 +426,43 @@ local cdLbl = lbl(content, "Auto Rejoin: OFF", 9, C.Gray, Enum.TextXAlignment.Ce
 cdLbl.Size = UDim2.new(1,0,0,20) cdLbl.LayoutOrder=9 cdLbl.BackgroundColor3=C.Panel cdLbl.BackgroundTransparency=0
 corner(cdLbl, 6) stroke(cdLbl, C.Dim, 1.1)
 
+-- Server age label (workspace.DistributedGameTime = uptime detik sejak server start)
+local ageLbl = lbl(content, "Server age: ?", 9, C.Gray, Enum.TextXAlignment.Center)
+ageLbl.Size = UDim2.new(1,0,0,20) ageLbl.LayoutOrder=10
+ageLbl.BackgroundColor3=C.Panel ageLbl.BackgroundTransparency=0
+corner(ageLbl, 6) stroke(ageLbl, C.Dim, 1.1)
+
+local function fmtAge(sec)
+    sec = math.floor(sec)
+    local h = math.floor(sec / 3600)
+    local m = math.floor((sec % 3600) / 60)
+    local s = sec % 60
+    if h > 0 then
+        return string.format("%dj %02dm %02ds", h, m, s)
+    elseif m > 0 then
+        return string.format("%dm %02ds", m, s)
+    else
+        return string.format("%ds", s)
+    end
+end
+
+local function updateServerAge()
+    local age = workspace.DistributedGameTime or 0
+    ageLbl.Text = "🕒 Server age: "..fmtAge(age)
+    -- Color hint: fresh (hijau) ≤30m | warm (gold) 30-60m | old (merah) >60m
+    local color = C.Green
+    if age > 3600 then color = C.Red
+    elseif age > 1800 then color = C.Gold end
+    ageLbl.TextColor3 = color
+end
+updateServerAge()
+task.spawn(function()
+    while ageLbl.Parent do
+        task.wait(1)
+        pcall(updateServerAge)
+    end
+end)
+
 -- ============================================
 -- INVENTORY BUILD
 -- ============================================
@@ -508,10 +571,57 @@ end)
 local isAR = false
 local arTask = nil
 
+-- Helper: fetch server list, find one different from current
+local function teleportToDifferentServer()
+    local req = (syn and syn.request) or http_request or request
+    if fluxus and fluxus.request then req = fluxus.request end
+    if not req then
+        print("[ZenxInv] no http function — fallback to normal teleport")
+        TS:Teleport(game.PlaceId, player)
+        return
+    end
+    local url = "https://games.roblox.com/v1/games/"..tostring(game.PlaceId).."/servers/Public?limit=100"
+    local ok, resp = pcall(function() return req({Url=url, Method="GET"}) end)
+    if not ok or not resp then
+        print("[ZenxInv] server list fetch fail — fallback normal teleport")
+        TS:Teleport(game.PlaceId, player)
+        return
+    end
+    local body = resp.Body or resp.body or ""
+    local okd, data = pcall(function() return HttpService:JSONDecode(body) end)
+    if not okd or not data or not data.data then
+        print("[ZenxInv] parse fail — fallback")
+        TS:Teleport(game.PlaceId, player)
+        return
+    end
+    -- Find server with different JobId
+    for _, s in ipairs(data.data) do
+        if s.id ~= currentJobId and (s.playing or 0) < (s.maxPlayers or 30) then
+            print("[ZenxInv] Hop ke server "..tostring(s.playing).."/"..tostring(s.maxPlayers).." players")
+            TS:TeleportToPlaceInstance(game.PlaceId, s.id, player)
+            return
+        end
+    end
+    print("[ZenxInv] gak nemu server beda, fallback normal teleport")
+    TS:Teleport(game.PlaceId, player)
+end
+
+-- Save JobId before teleport (so on reload we can compare)
+local function markRejoinAndTeleport(useDifferent)
+    savedState.lastJobId = currentJobId
+    savedState.rejoinTime = os.time()
+    saveState(savedState)
+    task.wait(0.5)
+    if useDifferent then
+        teleportToDifferentServer()
+    else
+        TS:Teleport(game.PlaceId, player)
+    end
+end
+
 rnBtn.MouseButton1Click:Connect(function()
     rnBtn.Text = "Rejoining..."
-    task.wait(0.5)
-    TS:Teleport(game.PlaceId, player)
+    markRejoinAndTeleport(false)
 end)
 
 local function setArTog(val)
@@ -535,7 +645,8 @@ end
 local function startAR()
     isAR = true
     setArTog(true)
-    saveState({autoRejoin=true, rejoinMinutes=rejoinMinutes})
+    saveState({autoRejoin=true, rejoinMinutes=rejoinMinutes,
+               lastJobId=savedState.lastJobId, rejoinTime=savedState.rejoinTime})
     arTask = task.spawn(function()
         while isAR do
             local mins = rejoinMinutes
@@ -547,6 +658,11 @@ local function startAR()
             end
             if isAR then
                 cdLbl.Text = "Rejoining..."
+                -- Save JobId before teleport
+                local currentSt = loadState() or {}
+                currentSt.lastJobId = currentJobId
+                currentSt.rejoinTime = os.time()
+                saveState(currentSt)
                 task.wait(0.5)
                 TS:Teleport(game.PlaceId, player)
             end
@@ -587,6 +703,26 @@ expBtn.MouseButton1Click:Connect(function() setExpanded(not expanded) end)
 if savedState.autoRejoin == true then
     print("[ZenxInv] resume Auto Rejoin ON")
     task.spawn(function() task.wait(2) startAR() end)
+end
+
+-- ===== REJOIN STATUS DISPLAY + AUTO-RETRY =====
+-- Status: fresh (first load) | new (rejoin sukses, server beda) | same (rejoin gagal, server sama)
+if rejoinStatus == "new" then
+    cdLbl.Text = "✓ Server BARU (rejoin OK)"
+    cdLbl.TextColor3 = C.Green
+    task.spawn(function()
+        task.wait(8)
+        if not isAR then cdLbl.Text = "Auto Rejoin: OFF" cdLbl.TextColor3 = C.Gray end
+    end)
+elseif rejoinStatus == "same" then
+    cdLbl.Text = "⚠ Server LAMA! Auto-hop..."
+    cdLbl.TextColor3 = C.Red
+    print("[ZenxInv] Rejoin gagal — auto-hop ke server lain dalam 3 detik")
+    -- Auto-retry with different server
+    task.spawn(function()
+        task.wait(3)
+        markRejoinAndTeleport(true)  -- true = pakai TeleportToPlaceInstance (server beda)
+    end)
 end
 
 print("==== ZenxInv "..SCRIPT_VERSION.." READY ====")
