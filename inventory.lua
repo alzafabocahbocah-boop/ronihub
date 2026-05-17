@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.28 (rejoin loop sampai server baru)"
+local SCRIPT_VERSION = "v3.30 (server age baseline + sync)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -26,9 +26,9 @@ local savedState = loadState() or {}
 -- ===== REJOIN SERVER DETECTION =====
 -- Bandingkan JobId saat ini vs JobId sebelum rejoin
 local currentJobId = tostring(game.JobId or "")
-local serverUptime = workspace.DistributedGameTime or 0
-print(string.format("[ZenxInv] Server age: %d menit (%d detik)",
-    math.floor(serverUptime/60), math.floor(serverUptime)))
+local serverDGT = workspace.DistributedGameTime or 0
+print(string.format("[ZenxInv] Server uptime baseline: %d detik (%.1f menit) | JobId: %s",
+    math.floor(serverDGT), serverDGT/60, currentJobId:sub(1, 12)))
 local rejoinStatus = "fresh"  -- fresh | new | same
 local rejoinTimeAgo = nil
 local retryCount = tonumber(savedState.retryCount or 0)
@@ -446,6 +446,11 @@ ageLbl.Size = UDim2.new(1,0,0,20) ageLbl.LayoutOrder=10
 ageLbl.BackgroundColor3=C.Panel ageLbl.BackgroundTransparency=0
 corner(ageLbl, 6) stroke(ageLbl, C.Dim, 1.1)
 
+-- Baseline: simpan DistributedGameTime saat script load + clock saat itu
+-- Lalu pas update tinggal tambah elapsed lokal
+local baselineDGT = workspace.DistributedGameTime or 0
+local baselineClock = tick()
+
 local function fmtAge(sec)
     sec = math.floor(sec)
     local h = math.floor(sec / 3600)
@@ -461,9 +466,11 @@ local function fmtAge(sec)
 end
 
 local function updateServerAge()
-    local age = workspace.DistributedGameTime or 0
+    -- Pakai baseline + elapsed (DistributedGameTime kadang gak update tiap detik di client)
+    local elapsed = tick() - baselineClock
+    local age = baselineDGT + elapsed
     ageLbl.Text = "🕒 Server age: "..fmtAge(age)
-    -- Color hint: fresh (hijau) ≤30m | warm (gold) 30-60m | old (merah) >60m
+    -- Color hint: fresh ≤30m hijau | warm 30-60m gold | tua >60m merah
     local color = C.Green
     if age > 3600 then color = C.Red
     elseif age > 1800 then color = C.Gold end
@@ -474,6 +481,17 @@ task.spawn(function()
     while ageLbl.Parent do
         task.wait(1)
         pcall(updateServerAge)
+    end
+end)
+-- Resync baseline tiap 30 detik (in case server time drift)
+task.spawn(function()
+    while ageLbl.Parent do
+        task.wait(30)
+        local newDGT = workspace.DistributedGameTime or 0
+        if newDGT > 0 then
+            baselineDGT = newDGT
+            baselineClock = tick()
+        end
     end
 end)
 
