@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.30 (server age baseline + sync)"
+local SCRIPT_VERSION = "v3.32 (rejoin debug visible + queue-on-tp)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -27,8 +27,18 @@ local savedState = loadState() or {}
 -- Bandingkan JobId saat ini vs JobId sebelum rejoin
 local currentJobId = tostring(game.JobId or "")
 local serverDGT = workspace.DistributedGameTime or 0
-print(string.format("[ZenxInv] Server uptime baseline: %d detik (%.1f menit) | JobId: %s",
-    math.floor(serverDGT), serverDGT/60, currentJobId:sub(1, 12)))
+print("============================================")
+print("[ZenxInv] REJOIN DETECTION ANALYSIS")
+print("[ZenxInv] Current JobId: "..currentJobId)
+print("[ZenxInv] Server uptime: "..math.floor(serverDGT).." detik ("..string.format("%.1f", serverDGT/60).." menit)")
+print("[ZenxInv] Saved state file exists: "..tostring(isfile and isfile(STATE_FILE) or false))
+if savedState and savedState.lastJobId then
+    print("[ZenxInv] savedState.lastJobId: "..tostring(savedState.lastJobId))
+    print("[ZenxInv] savedState.rejoinTime: "..tostring(savedState.rejoinTime))
+    print("[ZenxInv] elapsed since rejoin: "..(os.time() - (savedState.rejoinTime or 0)).." detik")
+    print("[ZenxInv] savedState.retryCount: "..tostring(savedState.retryCount))
+end
+print("============================================")
 local rejoinStatus = "fresh"  -- fresh | new | same
 local rejoinTimeAgo = nil
 local retryCount = tonumber(savedState.retryCount or 0)
@@ -63,9 +73,23 @@ savedState.retryCount = retryCount
 savedState.triedJobIds = triedJobIds
 saveState(savedState)
 
+-- Destroy old GUI di SEMUA possible parents
 pcall(function()
+    -- PlayerGui (default)
     if player:FindFirstChild("PlayerGui") and player.PlayerGui:FindFirstChild("ZenxInvGui") then
         player.PlayerGui.ZenxInvGui:Destroy()
+    end
+    -- gethui (executor protected container)
+    if gethui then
+        local hui = gethui()
+        if hui and hui:FindFirstChild("ZenxInvGui") then
+            hui.ZenxInvGui:Destroy()
+        end
+    end
+    -- CoreGui
+    local cg = game:GetService("CoreGui")
+    if cg:FindFirstChild("ZenxInvGui") then
+        cg.ZenxInvGui:Destroy()
     end
 end)
 
@@ -336,7 +360,64 @@ end
 -- BUILD GUI
 -- ============================================
 local GUI_W = 330 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_COMPACT  -- v3.16: lebar 330
-local sg = mk("ScreenGui",{Name="ZenxInvGui", DisplayOrder=999, ResetOnSpawn=false, Parent=player:WaitForChild("PlayerGui")})
+
+-- Try parent ke CoreGui supaya tidak bisa di-destroy oleh script game/script lain
+local guiParent = player:WaitForChild("PlayerGui")
+local protected = false
+do
+    -- Try gethui() (Synapse/Krnl/Delta/Fluxus exposes ProtectedGuis container)
+    local ok, hui = pcall(function()
+        if gethui then return gethui() end
+        return nil
+    end)
+    if ok and hui then
+        guiParent = hui
+        protected = true
+        print("[ZenxInv] GUI parented to gethui() — protected from destroy")
+    else
+        -- Fallback: try CoreGui directly (kalau executor support)
+        local ok2, cg = pcall(function() return game:GetService("CoreGui") end)
+        if ok2 and cg then
+            -- Test if we can parent (executor needs perms)
+            local test = pcall(function()
+                local tmp = Instance.new("ScreenGui")
+                tmp.Name = "_zenxTest"
+                tmp.Parent = cg
+                tmp:Destroy()
+            end)
+            if test then
+                guiParent = cg
+                protected = true
+                print("[ZenxInv] GUI parented to CoreGui — protected")
+            end
+        end
+    end
+    if not protected then
+        print("[ZenxInv] GUI di PlayerGui (gak protected, executor gak support gethui/CoreGui)")
+    end
+end
+
+local sg = mk("ScreenGui",{
+    Name="ZenxInvGui",
+    DisplayOrder=2147483647,  -- max int32, paling depan
+    ResetOnSpawn=false,
+    IgnoreGuiInset=true,
+    ZIndexBehavior=Enum.ZIndexBehavior.Sibling,
+    Parent=guiParent
+})
+
+-- Keep DisplayOrder max + re-parent kalau di-destroy (anti-tamper)
+task.spawn(function()
+    while sg do
+        task.wait(2)
+        pcall(function()
+            if sg.DisplayOrder ~= 2147483647 then sg.DisplayOrder = 2147483647 end
+            if not sg.Parent or sg.Parent == nil then
+                sg.Parent = guiParent
+            end
+        end)
+    end
+end)
 
 local main = mk("Frame",{
     Size=UDim2.new(0, GUI_W, 0, GUI_H),
@@ -445,6 +526,29 @@ local ageLbl = lbl(content, "Server age: ?", 9, C.Gray, Enum.TextXAlignment.Cent
 ageLbl.Size = UDim2.new(1,0,0,20) ageLbl.LayoutOrder=10
 ageLbl.BackgroundColor3=C.Panel ageLbl.BackgroundTransparency=0
 corner(ageLbl, 6) stroke(ageLbl, C.Dim, 1.1)
+
+-- Debug label: nampilin info detection
+local dbgLbl = lbl(content, "", 8, C.Gray, Enum.TextXAlignment.Center)
+dbgLbl.Size = UDim2.new(1,0,0,32) dbgLbl.LayoutOrder=11
+dbgLbl.BackgroundColor3=C.Panel dbgLbl.BackgroundTransparency=0
+dbgLbl.TextWrapped = true
+corner(dbgLbl, 6) stroke(dbgLbl, C.Dim, 1.1)
+
+-- Build debug text dari analysis di atas
+local function buildDbgText()
+    local lines = {}
+    table.insert(lines, "JobId: "..currentJobId:sub(1, 12))
+    if rejoinStatus == "fresh" then
+        table.insert(lines, "Status: FRESH (gak ada history)")
+    elseif rejoinStatus == "new" then
+        table.insert(lines, "Status: ✓ BARU (rejoin OK)")
+    elseif rejoinStatus == "same" then
+        table.insert(lines, "Status: ⚠ LAMA (retry #"..(retryCount or 0)..")")
+    end
+    return table.concat(lines, "\n")
+end
+dbgLbl.Text = ""
+-- Akan di-update setelah rejoinStatus diset di bawah
 
 -- Baseline: simpan DistributedGameTime saat script load + clock saat itu
 -- Lalu pas update tinggal tambah elapsed lokal
@@ -659,7 +763,35 @@ local function teleportToDifferentServer()
 end
 
 -- Save JobId before teleport (so on reload we can compare)
+-- Queue current script to auto-rerun after teleport (Delta/Synapse/Krnl support)
+local function tryQueueOnTeleport()
+    -- Try various executor APIs
+    local qot = queueonteleport or queue_on_teleport or (syn and syn.queue_on_teleport)
+    if not qot then
+        print("[ZenxInv] queueonteleport gak ada di executor — kamu harus re-run manual setelah TP")
+        return false
+    end
+    -- Embed source kode pendek yg re-load script lengkap
+    -- IMPORTANT: ganti URL ini ke source script kamu, atau pakai loadfile lokal
+    local reloadSrc = [[
+        task.wait(2)
+        -- Re-run script (executor harus support local file atau URL)
+        -- Edit baris ini sesuai cara loading script kamu:
+        -- loadstring(game:HttpGet("URL_SCRIPT_KAMU"))()
+        print("[ZenxInv] post-teleport queued: silahkan re-run script manual atau set URL")
+    ]]
+    local ok, err = pcall(function() qot(reloadSrc) end)
+    if ok then
+        print("[ZenxInv] ✓ queueonteleport set — script akan auto-run setelah TP")
+        return true
+    else
+        print("[ZenxInv] queueonteleport gagal: "..tostring(err))
+        return false
+    end
+end
+
 local function markRejoinAndTeleport(useDifferent, isRetry)
+    -- 1. Build state
     savedState.lastJobId = currentJobId
     savedState.rejoinTime = os.time()
     if isRetry then
@@ -668,7 +800,22 @@ local function markRejoinAndTeleport(useDifferent, isRetry)
         savedState.retryCount = 0
         savedState.triedJobIds = {currentJobId}
     end
+
+    -- 2. Save state to file
     saveState(savedState)
+
+    -- 3. VERIFY save by reading back
+    local verify = loadState()
+    if verify and verify.lastJobId == currentJobId then
+        print("[ZenxInv] ✓ State saved: lastJobId="..currentJobId:sub(1,12).."... retry="..tostring(savedState.retryCount))
+    else
+        print("[ZenxInv] ✗ State save FAIL! Detection mungkin gak akan jalan")
+    end
+
+    -- 4. Queue auto-rerun
+    tryQueueOnTeleport()
+
+    -- 5. Teleport
     task.wait(0.5)
     if useDifferent then
         teleportToDifferentServer()
@@ -764,6 +911,16 @@ if savedState.autoRejoin == true then
 end
 
 -- ===== REJOIN STATUS DISPLAY + AUTO-RETRY =====
+-- Update debug label dengan hasil detection
+dbgLbl.Text = buildDbgText()
+if rejoinStatus == "fresh" then
+    dbgLbl.TextColor3 = C.Gray
+elseif rejoinStatus == "new" then
+    dbgLbl.TextColor3 = C.Green
+elseif rejoinStatus == "same" then
+    dbgLbl.TextColor3 = C.Red
+end
+
 -- Status: fresh (first load) | new (rejoin sukses, server beda) | same (rejoin gagal, server sama)
 if rejoinStatus == "new" then
     cdLbl.Text = "✓ Server BARU (rejoin OK)"
@@ -780,7 +937,7 @@ elseif rejoinStatus == "same" then
     print("[ZenxInv] Tried so far: "..#triedJobIds.." servers")
     task.spawn(function()
         task.wait(3)
-        markRejoinAndTeleport(true, true)  -- useDifferent=true, isRetry=true
+        markRejoinAndTeleport(true, true)
     end)
 end
 
