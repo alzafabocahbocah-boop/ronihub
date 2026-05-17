@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.27 (server age per-detik)"
+local SCRIPT_VERSION = "v3.28 (rejoin loop sampai server baru)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -31,22 +31,36 @@ print(string.format("[ZenxInv] Server age: %d menit (%d detik)",
     math.floor(serverUptime/60), math.floor(serverUptime)))
 local rejoinStatus = "fresh"  -- fresh | new | same
 local rejoinTimeAgo = nil
+local retryCount = tonumber(savedState.retryCount or 0)
+local triedJobIds = savedState.triedJobIds or {}
+
 if savedState.lastJobId and savedState.lastJobId ~= "" then
     local elapsed = os.time() - (savedState.rejoinTime or 0)
-    if elapsed < 600 then  -- valid in last 10 min
+    if elapsed < 600 then
         rejoinTimeAgo = elapsed
         if savedState.lastJobId == currentJobId then
             rejoinStatus = "same"
-            print("[ZenxInv] ⚠ Server LAMA terdeteksi! JobId: "..currentJobId:sub(1,12).."...")
+            print("[ZenxInv] ⚠ Server LAMA! Retry #"..retryCount.." JobId: "..currentJobId:sub(1,12).."...")
         else
             rejoinStatus = "new"
-            print("[ZenxInv] ✓ Server BARU. Old: "..savedState.lastJobId:sub(1,12).."... → New: "..currentJobId:sub(1,12).."...")
+            print("[ZenxInv] ✓ Server BARU after "..retryCount.." retries. Old: "..savedState.lastJobId:sub(1,12).."... → New: "..currentJobId:sub(1,12).."...")
+            -- Reset tried list on success
+            retryCount = 0
+            triedJobIds = {}
         end
     end
 end
--- Clear after read (so future loads without rejoin show "fresh")
+-- Add current JobId to tried list (avoid retrying same)
+local alreadyTried = false
+for _, j in ipairs(triedJobIds) do
+    if j == currentJobId then alreadyTried = true break end
+end
+if not alreadyTried then table.insert(triedJobIds, currentJobId) end
+-- Save clean state for next teleport
 savedState.lastJobId = nil
 savedState.rejoinTime = nil
+savedState.retryCount = retryCount
+savedState.triedJobIds = triedJobIds
 saveState(savedState)
 
 pcall(function()
@@ -571,7 +585,7 @@ end)
 local isAR = false
 local arTask = nil
 
--- Helper: fetch server list, find one different from current
+-- Helper: fetch server list, find one different from current AND not in tried list
 local function teleportToDifferentServer()
     local req = (syn and syn.request) or http_request or request
     if fluxus and fluxus.request then req = fluxus.request end
@@ -594,22 +608,48 @@ local function teleportToDifferentServer()
         TS:Teleport(game.PlaceId, player)
         return
     end
-    -- Find server with different JobId
+    -- Build set of tried JobIds
+    local triedSet = {}
+    for _, j in ipairs(savedState.triedJobIds or {}) do triedSet[j] = true end
+    -- Find server with different JobId, not in tried list
+    local candidates = {}
     for _, s in ipairs(data.data) do
-        if s.id ~= currentJobId and (s.playing or 0) < (s.maxPlayers or 30) then
-            print("[ZenxInv] Hop ke server "..tostring(s.playing).."/"..tostring(s.maxPlayers).." players")
-            TS:TeleportToPlaceInstance(game.PlaceId, s.id, player)
-            return
+        if s.id ~= currentJobId and not triedSet[s.id] and (s.playing or 0) < (s.maxPlayers or 30) then
+            table.insert(candidates, s)
         end
     end
-    print("[ZenxInv] gak nemu server beda, fallback normal teleport")
-    TS:Teleport(game.PlaceId, player)
+    if #candidates == 0 then
+        print("[ZenxInv] Semua server udah dicoba — reset list & retry")
+        -- Reset and try again with any different server
+        savedState.triedJobIds = {currentJobId}
+        saveState(savedState)
+        for _, s in ipairs(data.data) do
+            if s.id ~= currentJobId and (s.playing or 0) < (s.maxPlayers or 30) then
+                print("[ZenxInv] Hop ke server "..tostring(s.playing).."/"..tostring(s.maxPlayers))
+                TS:TeleportToPlaceInstance(game.PlaceId, s.id, player)
+                return
+            end
+        end
+        TS:Teleport(game.PlaceId, player)
+        return
+    end
+    -- Pick first candidate
+    local target = candidates[1]
+    print(string.format("[ZenxInv] Hop ke server (%d/%d players, %d kandidat tersisa)",
+        target.playing or 0, target.maxPlayers or 30, #candidates))
+    TS:TeleportToPlaceInstance(game.PlaceId, target.id, player)
 end
 
 -- Save JobId before teleport (so on reload we can compare)
-local function markRejoinAndTeleport(useDifferent)
+local function markRejoinAndTeleport(useDifferent, isRetry)
     savedState.lastJobId = currentJobId
     savedState.rejoinTime = os.time()
+    if isRetry then
+        savedState.retryCount = (savedState.retryCount or 0) + 1
+    else
+        savedState.retryCount = 0
+        savedState.triedJobIds = {currentJobId}
+    end
     saveState(savedState)
     task.wait(0.5)
     if useDifferent then
@@ -621,7 +661,7 @@ end
 
 rnBtn.MouseButton1Click:Connect(function()
     rnBtn.Text = "Rejoining..."
-    markRejoinAndTeleport(false)
+    markRejoinAndTeleport(false, false)  -- normal teleport, fresh attempt
 end)
 
 local function setArTog(val)
@@ -715,13 +755,14 @@ if rejoinStatus == "new" then
         if not isAR then cdLbl.Text = "Auto Rejoin: OFF" cdLbl.TextColor3 = C.Gray end
     end)
 elseif rejoinStatus == "same" then
-    cdLbl.Text = "⚠ Server LAMA! Auto-hop..."
+    local nextRetry = (retryCount or 0) + 1
+    cdLbl.Text = "⚠ Server LAMA — Retry #"..nextRetry
     cdLbl.TextColor3 = C.Red
-    print("[ZenxInv] Rejoin gagal — auto-hop ke server lain dalam 3 detik")
-    -- Auto-retry with different server
+    print("[ZenxInv] Rejoin gagal — auto-retry #"..nextRetry.." dalam 3 detik")
+    print("[ZenxInv] Tried so far: "..#triedJobIds.." servers")
     task.spawn(function()
         task.wait(3)
-        markRejoinAndTeleport(true)  -- true = pakai TeleportToPlaceInstance (server beda)
+        markRejoinAndTeleport(true, true)  -- useDifferent=true, isRetry=true
     end)
 end
 
