@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.36"
-local VERSION_DATE = "trust server response + skip already-listed (pets stay in backpack)"
+local VERSION = "8.37"
+local VERSION_DATE = "maxKG cache — mutated pet baseKG dari non-mutated"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -93,6 +93,83 @@ do
             end
         end
         return result
+    end
+end
+
+-- ===== v8.37: maxKGCache — tiru inventory.lua untuk mutated pet detection =====
+-- Mutated pet Tool.Name gak punya [Age N], tapi base type sama (e.g. "Everchanted Peacock" → "Peacock")
+-- Strategy: cache baseKG dari non-mutated yang punya age → reuse buat mutated
+do
+    BH.maxKGCache = {}
+
+    -- Parse pet display name dari Tool.Name (sebelum "[")
+    function BH.getPetName(item)
+        local n = item.Name or ""
+        return n:match("^(.-)%s*%[") or n
+    end
+
+    -- Parse age dari item (return nil kalo gak ketemu)
+    function BH.getAgeFromItem(item)
+        -- Try attribute
+        for _, attr in ipairs({"Age","age","Level","Lvl","PetAge","PetLevel"}) do
+            local v = item:GetAttribute(attr)
+            if v and tonumber(v) and tonumber(v) >= 1 then return tonumber(v) end
+        end
+        -- Try child
+        for _, name in ipairs({"Age","age","Level","Lvl"}) do
+            local c = item:FindFirstChild(name)
+            if c and c:IsA("ValueBase") and tonumber(c.Value) then return tonumber(c.Value) end
+        end
+        -- Parse name
+        local n = item.Name or ""
+        for _, pat in ipairs({
+            "%[Age%s+(%d+)%]","%[Age(%d+)%]",
+            "%[Lv%s+(%d+)%]","%[Level%s+(%d+)%]","%[Lvl%s+(%d+)%]",
+        }) do
+            local m = n:match(pat) if m then return tonumber(m) end
+        end
+        if n:match("%[Age%s*MAX%]") or n:match("%[MAX%]") then return 100 end
+        return nil
+    end
+
+    -- Parse current KG dari Tool.Name "[X.XX KG]"
+    function BH.getKGFromItem(item)
+        local n = item.Name or ""
+        local kg = n:match("%[([%d.]+)%s*KG%]")
+        return kg and tonumber(kg) or nil
+    end
+
+    -- Scan backpack, build cache dari pet yang punya age
+    function BH.buildMaxKGCache()
+        BH.maxKGCache = {}
+        local bp = player:FindFirstChild("Backpack")
+        if not bp then return end
+        for _, item in ipairs(bp:GetChildren()) do
+            if item:IsA("Tool") and (item:FindFirstChild("PetToolLocal") or item:GetAttribute("PET_UUID")) then
+                local name = BH.getPetName(item)
+                local age = BH.getAgeFromItem(item)
+                local kg = BH.getKGFromItem(item)
+                if name and age and kg and age >= 1 then
+                    local baseKG = kg * 11 / (age + 10)
+                    -- Index by full name + base name
+                    local existing = BH.maxKGCache[name]
+                    if not existing or baseKG > existing then BH.maxKGCache[name] = baseKG end
+                    local base = BH.getBaseName(name)
+                    if base ~= name then
+                        local existingBase = BH.maxKGCache[base]
+                        if not existingBase or baseKG > existingBase then BH.maxKGCache[base] = baseKG end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Lookup cache (try full name first, then base)
+    function BH.getCachedBaseKG(name)
+        if BH.maxKGCache[name] then return BH.maxKGCache[name] end
+        local base = BH.getBaseName(name)
+        if BH.maxKGCache[base] then return BH.maxKGCache[base] end
+        return nil
     end
 end
 
@@ -1384,8 +1461,14 @@ local function getBaseKg(t)
     -- Fallback: formula baseKG = kg * 11 / (age + 10)
     local kg = getCurrentKg(t)
     local age = getAge(t)
-    if kg > 0 and age and age >= 1 then
+    if kg > 0 and age and age >= 2 then  -- age 2+ artinya beneran parsed, bukan fallback 1
         return kg * 11 / (age + 10), "formula"
+    end
+    -- v8.37: cache fallback untuk mutated pet (yang gak punya age info)
+    local name = BH.getPetName(t)
+    if name then
+        local cached = BH.getCachedBaseKG(name)
+        if cached then return cached, "cache" end
     end
     return nil
 end
@@ -1879,6 +1962,12 @@ startBtn.MouseButton1Click:Connect(function()
         local function listMatchingPets()
             local bp = player:FindFirstChild("Backpack")
             if not bp then return 0 end
+
+            -- v8.37: build maxKGCache dulu (cache baseKG dari non-mutated buat reuse di mutated)
+            BH.buildMaxKGCache()
+            local cacheCount = 0
+            for _ in pairs(BH.maxKGCache) do cacheCount = cacheCount + 1 end
+            if cacheCount > 0 then L("  KG cache built: "..cacheCount.." entries") end
 
             local pets = {}
             for _, t in ipairs(bp:GetChildren()) do
