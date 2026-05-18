@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.47"
-local VERSION_DATE = "TBC cache + paced list (delay enforced before list)"
+local VERSION_DATE = "Auto-replenish mode — never stop, prune session on sale"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2584,23 +2584,27 @@ startBtn.MouseButton1Click:Connect(function()
             local rule = listingRules[ri]
             if not rule then return 0 end
 
-            -- Session tracking (UUID yg di-list session ini)
+            -- v8.47: TBC available → TRUST it (real-time, auto-update kalo pet kejual/unlist)
+            -- Session tracking masih dipake sebagai cap pendek dalam satu cycle iter
+            if BH.TBC then
+                local tbcCount = BH.countActiveFromData(rule, getCachedTbcData())
+                -- Session count (UUID di cycle ini, lebih agresif buat cegah double-list di transition)
+                local sessionCount = 0
+                for _ in pairs(myListed[ri]) do sessionCount = sessionCount + 1 end
+                -- Max: kalo TBC belum update setelah listing baru, session-nya yang cap
+                -- TBC dropping (pet kejual) → returns lower → bisa list lagi
+                return math.max(tbcCount, sessionCount)
+            end
+
+            -- Fallback (no TBC): session + workspace booth max
             local sessionCount = 0
             for _ in pairs(myListed[ri]) do sessionCount = sessionCount + 1 end
-
-            -- v8.46: TBC data (akurat, no streaming dependency)
-            -- v8.47: pakai cache biar gak spam TBC call (138 pets × N rules per cycle)
-            local tbcCount = BH.countActiveFromData(rule, getCachedTbcData())
-
-            -- Fallback: workspace scan (kalo TBC gak available)
             local boothCount = 0
-            if not BH.TBC and BH.myBoothUuid then
+            if BH.myBoothUuid then
                 local myBooth = BH.getMyBoothObj()
                 if myBooth then boothCount = BH.countInBooth(myBooth, rule) end
             end
-
-            -- Max-of-all: session prevents over-list, TBC/booth detects pre-existing
-            return math.max(sessionCount, tbcCount, boothCount)
+            return math.max(sessionCount, boothCount)
         end
 
         -- Helper: rescan workspace, prune sold/unlisted UUIDs
@@ -2837,6 +2841,34 @@ startBtn.MouseButton1Click:Connect(function()
             -- v8.38: build cache EARLIER (sebelum countActive) biar booth count benar
             BH.buildMaxKGCache()
 
+            -- v8.47: Prune myListed berdasarkan TBC reality
+            -- (pet yang udah kejual / unlist → hapus dari session tracking)
+            -- Biar count drop ke real, dan cycle bisa list lagi.
+            invalidateTbcCache()  -- pastikan fetch fresh data
+            if BH.TBC then
+                local data = getCachedTbcData()
+                if data and data.Listings then
+                    local stillListed = {}
+                    for _, l in pairs(data.Listings) do
+                        if l.ItemId then
+                            stillListed[tostring(l.ItemId):gsub("[{}]","")] = true
+                        end
+                    end
+                    for ri, uuidSet in pairs(myListed) do
+                        local before = 0
+                        for _ in pairs(uuidSet) do before = before + 1 end
+                        for u in pairs(uuidSet) do
+                            if not stillListed[u] then uuidSet[u] = nil end
+                        end
+                        local after = 0
+                        for _ in pairs(uuidSet) do after = after + 1 end
+                        if before ~= after then
+                            L("  r"..ri.." pruned: "..before.." → "..after.." (pet kejual/unlisted)")
+                        end
+                    end
+                end
+            end
+
             -- Show current count per rule (real count dari booth scan)
             for ri, r in ipairs(listingRules) do
                 local ml = r.maxListings or math.huge
@@ -2852,7 +2884,7 @@ startBtn.MouseButton1Click:Connect(function()
             totalListed = totalListed + listed
             L("Cycle "..cycleNum.." done: "..listed.." new listed (total session: "..totalListed..")")
 
-            -- v8.26: Cek kalo backpack drained (rule below max + no matching pet)
+            -- v8.47: cek backpack drained — DON'T STOP, cuma wait lebih lama
             local hasNonFullRule = false
             local canFillSomeRule = false
             local bp = player:FindFirstChild("Backpack")
@@ -2879,12 +2911,12 @@ startBtn.MouseButton1Click:Connect(function()
                 if canFillSomeRule then break end
             end
 
-            -- Stop kalo backpack drained dan masih ada rule yang below max
-            if hasNonFullRule and not canFillSomeRule and #listingRules > 0 then
-                L("==== BACKPACK DRAINED ====")
-                L("Rule masih below max tapi gak ada pet di backpack yang match")
-                setStats("Backpack drained — STOP", C.danger)
-                break
+            -- v8.47: kalo backpack drained, MASUK MODE IDLE (gak STOP)
+            -- Script terus jalan. Pas ada pet kebeli/unlist, count turun → next cycle fill.
+            local isIdle = (hasNonFullRule and not canFillSomeRule and #listingRules > 0)
+            if isIdle then
+                L("  💤 Backpack drained — IDLE mode, nunggu ada pet ke-jual / pet baru")
+                setStats("Idle — tunggu ada pet kejual / pet baru", C.textDim)
             end
 
             -- Auto-rejoin check
@@ -2895,10 +2927,15 @@ startBtn.MouseButton1Click:Connect(function()
                 return
             end
 
-            -- Wait before next replenish cycle
+            -- v8.47: idle mode pakai wait lebih lama (15s), normal mode pakai replenishInterval
+            local waitTime = isIdle and 15 or replenishInterval
+
+            -- v8.47: idle wait lebih lama, normal wait = replenishInterval
             if not stopReq then
-                setStats("Replenish idle — "..replenishInterval.."s", C.success)
-                for i = 1, replenishInterval do
+                if not isIdle then
+                    setStats("Replenish idle — "..waitTime.."s", C.success)
+                end
+                for i = 1, waitTime do
                     if stopReq then break end
                     task.wait(1)
                 end
