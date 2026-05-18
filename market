@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.39"
-local VERSION_DATE = "Pantau Booth tab — monitor listings + batch unlist"
+local VERSION = "8.40"
+local VERSION_DATE = "auto-detect booth via OWNER attribute (no listing needed)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1232,23 +1232,33 @@ do
 
     local function refreshList()
         clearList()
+
+        -- v8.40: Auto-detect booth kalo belum cached (via OWNER attribute)
+        statusLbl.Text = "🔍 Stream + detect booth..."
+        statusLbl.TextColor3 = C.textDim
+        BH.ensureBoothsStreamed()
+
         if not BH.myBoothUuid then
-            statusLbl.Text = "❌ Booth-mu belum cached (jalankan START dulu 1x)"
+            local detected = BH.detectMyBoothByOwner()
+            if detected then
+                statusLbl.Text = "⭐ Booth detected: "..detected:sub(1,12).."..."
+            end
+        end
+
+        if not BH.myBoothUuid then
+            statusLbl.Text = "❌ Gak nemu booth-mu (gak punya listing aktif?)"
             statusLbl.TextColor3 = C.danger
             return
         end
 
-        -- Stream booth-mu (no TP)
-        statusLbl.Text = "Streaming booth..."
-        statusLbl.TextColor3 = C.textDim
         local myBooth = BH.getMyBoothObj()
-        if myBooth then
-            local part = myBooth:FindFirstChildWhichIsA("BasePart", true)
-            if part then pcall(function() player:RequestStreamAroundAsync(part.Position) end) end
-            task.wait(1.5)
+        if not myBooth then
+            -- Stream lagi
+            statusLbl.Text = "Stream booth..."
+            BH.ensureBoothsStreamed()
+            task.wait(0.5)
+            myBooth = BH.getMyBoothObj()
         end
-
-        myBooth = BH.getMyBoothObj()
         if not myBooth then
             statusLbl.Text = "❌ Booth gak ditemukan di workspace"
             statusLbl.TextColor3 = C.danger
@@ -1271,7 +1281,7 @@ do
             if t:IsA("Tool") then table.insert(listed, t) end
         end
 
-        statusLbl.Text = "📦 "..#listed.." pet di booth-mu"
+        statusLbl.Text = "📦 "..#listed.." pet di booth-mu  •  Tap utk pilih"
         statusLbl.TextColor3 = C.success
 
         -- Render each listing
@@ -2085,6 +2095,64 @@ do
             end
         end
     end
+
+    -- v8.40: Detect booth via OWNER attribute (gak perlu list dulu)
+    -- Scan semua booth, kalo tool punya OWNER == player.Name → itu booth-mu
+    function BH.detectMyBoothByOwner()
+        local TW = Workspace:FindFirstChild("TradeWorld")
+        local Booths = TW and TW:FindFirstChild("Booths")
+        if not Booths then return nil end
+        local playerName = player.Name
+        for _, b in ipairs(Booths:GetChildren()) do
+            local di = b:FindFirstChild("DynamicInstances")
+            if di then
+                for _, t in ipairs(di:GetChildren()) do
+                    if t:IsA("Tool") then
+                        local owner = t:GetAttribute("OWNER") or t:GetAttribute("a")
+                        if owner and tostring(owner) == playerName then
+                            local boothUuid = b.Name:gsub("[{}]","")
+                            BH.myBoothUuid = boothUuid
+                            BH.marketState.myBoothUuid = boothUuid
+                            BH.saveMarketState(BH.marketState)
+                            return boothUuid
+                        end
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    -- v8.40: Validate cached UUID still has tools (kalo enggak, clear cache & re-detect)
+    function BH.validateOrRedetect()
+        if BH.myBoothUuid then
+            local b = BH.getMyBoothObj()
+            if b then
+                local di = b:FindFirstChild("DynamicInstances")
+                if di and #di:GetChildren() > 0 then return true end  -- valid
+                -- empty → could be: empty booth OR streaming not done OR wrong booth
+                -- Try owner detect to confirm
+                local detected = BH.detectMyBoothByOwner()
+                if detected and detected ~= BH.myBoothUuid then
+                    L("[State] cached booth UUID stale, re-detected: "..detected:sub(1,16))
+                    return true
+                end
+                return true  -- assume cached is still right, just empty/streaming
+            else
+                -- Cached booth gak ada di workspace, re-detect
+                BH.myBoothUuid = nil
+                local detected = BH.detectMyBoothByOwner()
+                if detected then
+                    L("[State] re-detected booth: "..detected:sub(1,16))
+                    return true
+                end
+                return false
+            end
+        else
+            local detected = BH.detectMyBoothByOwner()
+            return detected ~= nil
+        end
+    end
 end
 
 startBtn.MouseButton1Click:Connect(function()
@@ -2344,6 +2412,15 @@ startBtn.MouseButton1Click:Connect(function()
             setStats("Streaming booths...", C.accent)
             BH.ensureBoothsStreamed()
 
+            -- v8.40: auto-detect booth via OWNER (kalo belum cached)
+            if not BH.myBoothUuid then
+                local detected = BH.detectMyBoothByOwner()
+                if detected then
+                    L("⭐ Booth-mu DETECTED (via OWNER): "..detected:sub(1,16))
+                    L("  💾 Saved to state.json")
+                end
+            end
+
             -- v8.38: build cache EARLIER (sebelum countActive) biar booth count benar
             BH.buildMaxKGCache()
 
@@ -2601,6 +2678,18 @@ local function unlistAllInternal()
     if not TW then L("│ ✗ TradeWorld gak ada"); setStats("FAIL: TradeWorld", C.danger); return 0 end
     local Booths = TW:FindFirstChild("Booths")
     if not Booths then L("│ ✗ Booths gak ada"); setStats("FAIL: Booths", C.danger); return 0 end
+
+    -- v8.40: auto-detect booth via OWNER attribute kalo belum cached
+    if not BH.myBoothUuid then
+        L("│ Booth belum cached, stream + detect...")
+        setStats("Stream + detect booth...", C.accent)
+        BH.ensureBoothsStreamed()
+        local detected = BH.detectMyBoothByOwner()
+        if detected then
+            L("│ ⭐ Booth detected via OWNER: "..detected:sub(1,16))
+            L("│ 💾 Saved")
+        end
+    end
 
     -- ===== FAST PATH: kalo booth-mu udah cached =====
     if BH.myBoothUuid then
