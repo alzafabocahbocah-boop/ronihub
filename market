@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.38"
-local VERSION_DATE = "booth count fix — cache lookup via f attribute"
+local VERSION = "8.39"
+local VERSION_DATE = "Pantau Booth tab — monitor listings + batch unlist"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -420,9 +420,11 @@ end
 makeSubBtn("Listing")
 makeSubBtn("Rejoin")
 makeSubBtn("Misc")
+makeSubBtn("Pantau")
 local listingPanel = makeSubPanel("Listing")
 local rejoinPanel = makeSubPanel("Rejoin")
 local miscPanel = makeSubPanel("Misc")
+local pantauPanel = makeSubPanel("Pantau")
 listingPanel.Visible = true
 subBtns.Listing.stroke.Thickness = 1.5
 subBtns.Listing.lbl.TextColor3 = C.accent
@@ -1171,6 +1173,199 @@ local skinCard = makeCard(miscPanel, 86)
 lblOf(skinCard, "🎨  BOOTH SKIN", 14, 10, 250, 22, C.accent, 14, FB)
 lblOf(skinCard, "Pilih skin booth (perlu buka skin selector di game)", 14, 32, 400, 18, C.textDim, 11)
 local skinPickBtn = btnOf(skinCard, 14, 54, 200, 26, "🎨 BUKA SKIN PICKER", C.accent)
+
+-- ============================================================
+-- PANTAU BOOTH PANEL (v8.39)
+-- ============================================================
+do
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 14) pad.PaddingLeft = UDim.new(0, 14)
+    pad.PaddingRight = UDim.new(0, 14) pad.PaddingBottom = UDim.new(0, 14)
+    pad.Parent = pantauPanel
+
+    -- Header card
+    local hdrCard = Instance.new("Frame")
+    hdrCard.Size = UDim2.new(1, 0, 0, 64)
+    hdrCard.BackgroundColor3 = C.card
+    hdrCard.BorderSizePixel = 0
+    hdrCard.Parent = pantauPanel
+    Instance.new("UICorner", hdrCard).CornerRadius = UDim.new(0, 8)
+
+    lblOf(hdrCard, "📋  PANTAU BOOTH-MU", 14, 8, 240, 22, C.accent, 14, FB)
+    local statusLbl = lblOf(hdrCard, "Klik REFRESH untuk scan", 14, 30, 380, 18, C.textDim, 11)
+    local refreshBtn = btnOf(hdrCard, 14, 50, 110, 26, "🔄 REFRESH", C.accent)
+    local unlistOneBtn = btnOf(hdrCard, 134, 50, 130, 26, "🗑️ UNLIST PILIH", C.danger)
+
+    -- Scrollable list area
+    local listFrame = Instance.new("Frame")
+    listFrame.Size = UDim2.new(1, 0, 1, -78)
+    listFrame.Position = UDim2.new(0, 0, 0, 74)
+    listFrame.BackgroundColor3 = C.bg
+    listFrame.BorderSizePixel = 0
+    listFrame.Parent = pantauPanel
+    Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 8)
+
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, -8, 1, -8)
+    scroll.Position = UDim2.new(0, 4, 0, 4)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 4
+    scroll.ScrollBarImageColor3 = C.accent
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.Parent = listFrame
+    local scrollLayout = Instance.new("UIListLayout")
+    scrollLayout.Padding = UDim.new(0, 6)
+    scrollLayout.Parent = scroll
+    Instance.new("UIPadding", scroll).PaddingRight = UDim.new(0, 4)
+
+    -- Tracker for selected listings (for batch unlist)
+    local selectedUuids = {}
+
+    local function clearList()
+        for _, c in ipairs(scroll:GetChildren()) do
+            if c:IsA("Frame") then c:Destroy() end
+        end
+        selectedUuids = {}
+    end
+
+    local function refreshList()
+        clearList()
+        if not BH.myBoothUuid then
+            statusLbl.Text = "❌ Booth-mu belum cached (jalankan START dulu 1x)"
+            statusLbl.TextColor3 = C.danger
+            return
+        end
+
+        -- Stream booth-mu (no TP)
+        statusLbl.Text = "Streaming booth..."
+        statusLbl.TextColor3 = C.textDim
+        local myBooth = BH.getMyBoothObj()
+        if myBooth then
+            local part = myBooth:FindFirstChildWhichIsA("BasePart", true)
+            if part then pcall(function() player:RequestStreamAroundAsync(part.Position) end) end
+            task.wait(1.5)
+        end
+
+        myBooth = BH.getMyBoothObj()
+        if not myBooth then
+            statusLbl.Text = "❌ Booth gak ditemukan di workspace"
+            statusLbl.TextColor3 = C.danger
+            return
+        end
+
+        -- Build maxKGCache buat tampil baseKG akurat
+        BH.buildMaxKGCache()
+
+        local di = myBooth:FindFirstChild("DynamicInstances")
+        if not di then
+            statusLbl.Text = "❌ DynamicInstances kosong"
+            statusLbl.TextColor3 = C.danger
+            return
+        end
+
+        local tools = di:GetChildren()
+        local listed = {}
+        for _, t in ipairs(tools) do
+            if t:IsA("Tool") then table.insert(listed, t) end
+        end
+
+        statusLbl.Text = "📦 "..#listed.." pet di booth-mu"
+        statusLbl.TextColor3 = C.success
+
+        -- Render each listing
+        for i, t in ipairs(listed) do
+            local uuid = t.Name:gsub("[{}]","")
+            local pType = tostring(t:GetAttribute("f") or "?")
+            local baseKgVal = getBaseKg(t)
+            local currentKgVal = getCurrentKg(t)
+            -- Try get price (might be in attribute)
+            local price = "?"
+            for _, attrName in ipairs({"Price","PRICE","ListingPrice","SellPrice","price"}) do
+                local v = t:GetAttribute(attrName)
+                if v and tonumber(v) then price = tostring(v); break end
+            end
+
+            local item = Instance.new("Frame")
+            item.Size = UDim2.new(1, 0, 0, 56)
+            item.BackgroundColor3 = C.card
+            item.BorderSizePixel = 0
+            item.Parent = scroll
+            Instance.new("UICorner", item).CornerRadius = UDim.new(0, 6)
+
+            -- Selection state ring
+            local stroke = Instance.new("UIStroke", item)
+            stroke.Color = C.accent
+            stroke.Thickness = 0
+            stroke.Transparency = 0.3
+
+            -- Pet info
+            lblOf(item, i..". "..pType, 12, 6, 260, 18, C.text, 13, FB)
+            local kgInfo = baseKgVal and (string.format("Base %.2f kg", baseKgVal)) or "kg ?"
+            if currentKgVal and currentKgVal > 0 then
+                kgInfo = kgInfo.."  •  Current "..string.format("%.1f", currentKgVal).." kg"
+            end
+            lblOf(item, kgInfo, 12, 24, 300, 16, C.textDim, 11)
+            lblOf(item, "💰 "..price.."  •  UUID "..uuid:sub(1,8).."...", 12, 38, 300, 16, C.textDim, 11)
+
+            -- Click to toggle selection
+            local clickBtn = Instance.new("TextButton")
+            clickBtn.Size = UDim2.new(1, 0, 1, 0)
+            clickBtn.BackgroundTransparency = 1
+            clickBtn.Text = "" clickBtn.Parent = item
+            clickBtn.MouseButton1Click:Connect(function()
+                if selectedUuids[uuid] then
+                    selectedUuids[uuid] = nil
+                    stroke.Thickness = 0
+                    item.BackgroundColor3 = C.card
+                else
+                    selectedUuids[uuid] = true
+                    stroke.Thickness = 1.5
+                    item.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+                end
+            end)
+        end
+    end
+
+    refreshBtn.MouseButton1Click:Connect(function()
+        task.spawn(refreshList)
+    end)
+
+    -- Unlist selected listings
+    unlistOneBtn.MouseButton1Click:Connect(function()
+        task.spawn(function()
+            local toUnlist = {}
+            for uuid, _ in pairs(selectedUuids) do table.insert(toUnlist, uuid) end
+            if #toUnlist == 0 then
+                statusLbl.Text = "⚠ Belum pilih listing (tap di list)"
+                statusLbl.TextColor3 = C.danger
+                return
+            end
+
+            statusLbl.Text = "🗑️ Unlist "..#toUnlist.." pet..."
+            statusLbl.TextColor3 = C.accent
+
+            local removed = 0
+            for _, uuid in ipairs(toUnlist) do
+                local ok, ret = pcall(function() return removeRE:InvokeServer(uuid) end)
+                if ok and ret == true then removed = removed + 1 end
+                task.wait(0.3)
+            end
+
+            statusLbl.Text = "✅ Unlisted "..removed.." / "..#toUnlist
+            statusLbl.TextColor3 = C.success
+            task.wait(1)
+            refreshList()  -- auto refresh after unlist
+        end)
+    end)
+
+    -- Auto-refresh saat tab dibuka
+    subBtns.Pantau.btn.MouseButton1Click:Connect(function()
+        task.wait(0.1)  -- biar tab switching dulu
+        task.spawn(refreshList)
+    end)
+end
 
 -- ============================================================
 -- SNIPE PANEL (Manual + Otomatis sub-tabs)
