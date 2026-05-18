@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.48"
-local VERSION_DATE = "FIX: assume mature (age=100) when age unknown → base = cur/10"
+local VERSION_DATE = "Auto-Start + Misc scroll + hide Listing UNLIST ALL"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -537,6 +537,21 @@ local listingPanel = makeSubPanel("Listing")
 local rejoinPanel = makeSubPanel("Rejoin")
 local miscPanel = makeSubPanel("Misc")
 local pantauPanel = makeSubPanel("Pantau")
+
+-- v8.48: miscPanel scrollable biar content gak ke-cut
+do
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, 0, 1, 0)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 6
+    scroll.ScrollBarImageColor3 = C.accent
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.Parent = miscPanel
+    miscPanel = scroll  -- redirect cards ke scrollable area
+end
+
 listingPanel.Visible = true
 subBtns.Listing.stroke.Thickness = 1.5
 subBtns.Listing.lbl.TextColor3 = C.accent
@@ -679,6 +694,8 @@ unlistAllListingBtn.Position = UDim2.new(0, 210, 0, 370)
 unlistAllListingBtn.BackgroundColor3 = C.card unlistAllListingBtn.AutoButtonColor = false
 unlistAllListingBtn.Text = "📋 UNLIST ALL" unlistAllListingBtn.TextColor3 = C.danger
 unlistAllListingBtn.Font = FB unlistAllListingBtn.TextSize = 14
+-- v8.48: hide btn from Listing tab (sekarang di Pantau tab aja)
+unlistAllListingBtn.Visible = false
 unlistAllListingBtn.Parent = listingPanel
 Instance.new("UICorner", unlistAllListingBtn).CornerRadius = UDim.new(0, 8)
 local unlistAllStroke = Instance.new("UIStroke", unlistAllListingBtn)
@@ -1378,6 +1395,29 @@ local skinCard = makeCard(miscPanel, 86)
 lblOf(skinCard, "🎨  BOOTH SKIN", 14, 10, 250, 22, C.accent, 14, FB)
 lblOf(skinCard, "Pilih skin booth (perlu buka skin selector di game)", 14, 32, 400, 18, C.textDim, 11)
 local skinPickBtn = btnOf(skinCard, 14, 54, 200, 26, "🎨 BUKA SKIN PICKER", C.accent)
+
+-- v8.48: AUTO-START card — auto klik START pas script load (kalau rules ada)
+do
+    local autoStartCard = makeCard(miscPanel, 86)
+    lblOf(autoStartCard, "🚀  AUTO-START", 14, 10, 250, 22, C.accent, 14, FB)
+    lblOf(autoStartCard, "Auto klik START pas script di-load (saved across rejoin)", 14, 32, 460, 18, C.textDim, 11)
+    local autoStartBtn = btnOf(autoStartCard, 14, 54, 220, 26, "🚀 Auto-Start: OFF", C.danger)
+    -- Init dari state
+    BH.autoStart = BH.marketState.autoStart == true
+    if BH.autoStart then
+        autoStartBtn.Text = "🚀 Auto-Start: ON"
+        autoStartBtn.BackgroundColor3 = C.success
+    end
+    autoStartBtn.MouseButton1Click:Connect(function()
+        BH.autoStart = not BH.autoStart
+        autoStartBtn.Text = BH.autoStart and "🚀 Auto-Start: ON" or "🚀 Auto-Start: OFF"
+        autoStartBtn.BackgroundColor3 = BH.autoStart and C.success or C.danger
+        L("[Auto-Start] "..(BH.autoStart and "enabled" or "disabled"))
+        -- Save ke state
+        BH.marketState.autoStart = BH.autoStart
+        BH.saveMarketState(BH.marketState)
+    end)
+end
 
 -- ============================================================
 -- PANTAU BOOTH PANEL (v8.39)
@@ -2781,7 +2821,7 @@ do
     end
 end
 
-startBtn.MouseButton1Click:Connect(function()
+BH.onStartClick = function()
     -- If already running → request stop
     if isRunning then
         stopReq = true
@@ -2810,6 +2850,11 @@ startBtn.MouseButton1Click:Connect(function()
         -- Tracking per rule: UUIDs yang udah kita list
         local myListed = {}
         for i, _ in ipairs(listingRules) do myListed[i] = {} end
+
+        -- v8.48: state flags supaya log gak spam pas backpack habis
+        local zeroMatchLogged = {}  -- per rule index, true kalo "0 available" udah di-log
+        local wasIdleLastCycle = false
+        local idleCyclesCount = 0
 
         -- v8.47: TBC data cache (refresh setelah list atau 1s TTL)
         local tbcDataCache = nil
@@ -2968,28 +3013,40 @@ startBtn.MouseButton1Click:Connect(function()
                 if mutCount > 0 then table.insert(extras, mutCount.." mutated") end
                 if skipCount > 0 then table.insert(extras, skipCount.." sudah listed") end
                 local info = #extras > 0 and (" ("..table.concat(extras, ", ")..")") or ""
-                L("  r"..ri.." ("..(r.type or "All").." "..r.min.."-"..(r.max==math.huge and "∞" or r.max).."): "..matchCount.." available"..info)
 
-                -- v8.47: kalo matchCount=0, log pet type yang sama (siapa tau kg miss sedikit)
+                -- v8.48: log "0 available" ONCE per rule, biar gak spam kalo backpack habis
                 if matchCount == 0 then
-                    local sameTypeList = {}
-                    for _, p in ipairs(pets) do
-                        local typeOk = (not r.type) or r.type == p.baseType
-                        if typeOk and not alreadyListed[p.clean] then
-                            table.insert(sameTypeList, p)
-                        end
-                    end
-                    if #sameTypeList > 0 then
-                        L("    └─ "..#sameTypeList.." "..(r.type or "All").." di backpack TAPI kg gak match:")
-                        for i, p in ipairs(sameTypeList) do
-                            if i <= 6 then
-                                L(string.format("        • %s: base=%.2f cur=%.2f", p.type, p.wt or 0, p.currentKg or 0))
+                    if not zeroMatchLogged[ri] then
+                        L("  r"..ri.." ("..(r.type or "All").." "..r.min.."-"..(r.max==math.huge and "∞" or r.max).."): 0 available — abaikan sampai ada pet baru")
+                        -- log pet type yang sama (untuk debug kg miss)
+                        local sameTypeList = {}
+                        for _, p in ipairs(pets) do
+                            local typeOk = (not r.type) or r.type == p.baseType
+                            if typeOk and not alreadyListed[p.clean] then
+                                table.insert(sameTypeList, p)
                             end
                         end
-                        if #sameTypeList > 6 then
-                            L("        ... +"..(#sameTypeList-6).." more")
+                        if #sameTypeList > 0 then
+                            L("    └─ "..#sameTypeList.." "..(r.type or "All").." di backpack TAPI kg gak match:")
+                            for i, p in ipairs(sameTypeList) do
+                                if i <= 6 then
+                                    L(string.format("        • %s: base=%.2f cur=%.2f", p.type, p.wt or 0, p.currentKg or 0))
+                                end
+                            end
+                            if #sameTypeList > 6 then
+                                L("        ... +"..(#sameTypeList-6).." more")
+                            end
                         end
+                        zeroMatchLogged[ri] = true
                     end
+                    -- else: silent (udah pernah di-log, abaikan)
+                else
+                    -- Ada pet match → log normal + reset flag (kalo sebelumnya 0)
+                    if zeroMatchLogged[ri] then
+                        L("  ▶ r"..ri.." ("..(r.type or "All").."): "..matchCount.." pet baru tersedia!")
+                        zeroMatchLogged[ri] = nil
+                    end
+                    L("  r"..ri.." ("..(r.type or "All").." "..r.min.."-"..(r.max==math.huge and "∞" or r.max).."): "..matchCount.." available"..info)
                 end
             end
 
@@ -3190,11 +3247,21 @@ startBtn.MouseButton1Click:Connect(function()
             end
 
             -- v8.47: kalo backpack drained, MASUK MODE IDLE (gak STOP)
-            -- Script terus jalan. Pas ada pet kebeli/unlist, count turun → next cycle fill.
+            -- v8.48: log idle SEKALI per transisi (gak spam tiap cycle)
             local isIdle = (hasNonFullRule and not canFillSomeRule and #listingRules > 0)
             if isIdle then
-                L("  💤 Backpack drained — IDLE mode, nunggu ada pet ke-jual / pet baru")
-                setStats("Idle — tunggu ada pet kejual / pet baru", C.textDim)
+                idleCyclesCount = idleCyclesCount + 1
+                if not wasIdleLastCycle then
+                    L("  💤 IDLE — gak ada pet match rules, abaikan sampai ada yang baru")
+                    setStats("💤 IDLE — nunggu pet kejual / pet baru", C.textDim)
+                end
+                wasIdleLastCycle = true
+            else
+                if wasIdleLastCycle then
+                    L("  ▶ RESUME — backpack ada pet baru (idle "..idleCyclesCount.." cycle)")
+                    idleCyclesCount = 0
+                end
+                wasIdleLastCycle = false
             end
 
             -- Auto-rejoin check
@@ -3205,10 +3272,9 @@ startBtn.MouseButton1Click:Connect(function()
                 return
             end
 
-            -- v8.47: idle mode pakai wait lebih lama (15s), normal mode pakai replenishInterval
-            local waitTime = isIdle and 15 or replenishInterval
+            -- v8.48: idle mode pakai wait 30s (lebih tenang), normal 3s
+            local waitTime = isIdle and 30 or replenishInterval
 
-            -- v8.47: idle wait lebih lama, normal wait = replenishInterval
             if not stopReq then
                 if not isIdle then
                     setStats("Replenish idle — "..waitTime.."s", C.success)
@@ -3224,7 +3290,8 @@ startBtn.MouseButton1Click:Connect(function()
         setStats("Stopped — "..totalListed.." total listed", C.success)
         setStartIdle()
     end)
-end)
+end
+startBtn.MouseButton1Click:Connect(BH.onStartClick)
 
 -- ===== REJOIN =====
 rejoinBtn.MouseButton1Click:Connect(function()
@@ -4381,4 +4448,19 @@ refreshBackpackStats()  -- initial stats load
 task.spawn(function()
     task.wait(1)
     tryClaim()
+end)
+
+-- v8.48: AUTO-START — if enabled & ada rules, fire START btn after delay
+task.spawn(function()
+    task.wait(5)  -- biar semua init kelar
+    if BH.autoStart and #listingRules > 0 and not isRunning then
+        L("")
+        L("🚀 [Auto-Start] enabled — firing START in 3s...")
+        task.wait(3)
+        if not isRunning then
+            BH.onStartClick()
+        end
+    elseif BH.autoStart and #listingRules == 0 then
+        L("⚠ [Auto-Start] enabled tapi 0 rules — skip")
+    end
 end)
