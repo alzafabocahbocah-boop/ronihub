@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.41"
-local VERSION_DATE = "smart detect — auto-click BOOTH btn + proximity"
+local VERSION = "8.42"
+local VERSION_DATE = "verify booth ownership (sign+OWNER) sebelum cache"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1233,19 +1233,23 @@ do
     local function refreshList()
         clearList()
 
-        -- v8.41: Smart detect — pencet tombol BOOTH game otomatis, atau proximity, atau OWNER
-        statusLbl.Text = "🔍 Detecting booth (auto-click BOOTH btn)..."
+        -- v8.41+v8.42: Smart detect dengan verification
+        statusLbl.Text = "🔍 Detect booth..."
         statusLbl.TextColor3 = C.textDim
         local uuid, method = BH.smartDetectMyBooth()
-        if uuid then
-            statusLbl.Text = "⭐ Booth detected via "..method.." ("..uuid:sub(1,12)..")"
-        end
 
         if not BH.myBoothUuid then
-            statusLbl.Text = "❌ Gak nemu booth. Pencet tombol BOOTH biru di game atas, lalu REFRESH lagi"
+            if method == "user-belum-claim-booth" then
+                statusLbl.Text = "⚠ Lo belum CLAIM booth. Claim booth dulu di game."
+            else
+                statusLbl.Text = "❌ Gak nemu booth. Pencet tombol BOOTH biru di game atas, lalu REFRESH lagi"
+            end
             statusLbl.TextColor3 = C.danger
             return
         end
+
+        statusLbl.Text = "⭐ Booth ("..method..") "..uuid:sub(1,12)
+        statusLbl.TextColor3 = C.accent
 
         local myBooth = BH.getMyBoothObj()
         if not myBooth then
@@ -2208,34 +2212,114 @@ do
     end
 
     -- v8.40: Validate cached UUID still has tools (kalo enggak, clear cache & re-detect)
+    -- v8.42: Verify booth ini PUNYA player (sign text atau tool OWNER)
+    -- Return: true = punya kita, false = unclaimed, nil = gak bisa verify
+    function BH.verifyBoothOwnership(booth)
+        if not booth then return nil end
+        local playerName = player.Name
+        local playerNameLow = playerName:lower()
+
+        -- Method 1: Cek sign text (e.g. "@playerName's Booth")
+        local foundUnclaimed = false
+        for _, d in ipairs(booth:GetDescendants()) do
+            if d:IsA("TextLabel") or d:IsA("TextButton") then
+                local txt = tostring(d.Text or ""):lower()
+                if txt:find(playerNameLow, 1, true) then
+                    return true  -- KONFIRM punya kita
+                end
+                if txt:find("unclaimed", 1, true) then
+                    foundUnclaimed = true
+                end
+            end
+        end
+
+        -- Method 2: Cek tool OWNER di DynamicInstances
+        local di = booth:FindFirstChild("DynamicInstances")
+        if di then
+            for _, t in ipairs(di:GetChildren()) do
+                if t:IsA("Tool") then
+                    local owner = t:GetAttribute("OWNER") or t:GetAttribute("a")
+                    if owner and tostring(owner) == playerName then
+                        return true  -- KONFIRM via tool OWNER
+                    end
+                end
+            end
+        end
+
+        if foundUnclaimed then return false end  -- unclaimed booth
+        return nil  -- uncertain
+    end
+
     -- v8.41: Smart detect — combine BOOTH button click + proximity + owner attr
     function BH.smartDetectMyBooth()
         -- Sudah cached? confirm cepat via getMyBoothObj
         if BH.myBoothUuid then
             local b = BH.getMyBoothObj()
-            if b then return BH.myBoothUuid, "cached" end
+            if b then
+                -- Verify kalo masih punya kita (claim mungkin udah un-claimed)
+                local owned = BH.verifyBoothOwnership(b)
+                if owned == false then
+                    -- Cached booth udah unclaimed, clear cache
+                    BH.myBoothUuid = nil
+                    BH.marketState.myBoothUuid = nil
+                    BH.saveMarketState(BH.marketState)
+                else
+                    return BH.myBoothUuid, "cached"
+                end
+            end
         end
 
-        -- Method 1: Click BOOTH button → wait → proximity
+        -- Method 1: Click BOOTH button → wait → proximity → VERIFY
         local btnClicked = BH.clickBoothButton()
         if btnClicked then
             task.wait(2.5)  -- biar TP done + streaming
             BH.ensureBoothsStreamed()
-            local uuid = BH.detectMyBoothByProximity(35)
-            if uuid then return uuid, "booth-button + proximity" end
+
+            -- Cari booth terdekat (manual, JANGAN langsung save)
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local TW = Workspace:FindFirstChild("TradeWorld")
+                local Booths = TW and TW:FindFirstChild("Booths")
+                if Booths then
+                    local closest, closestDist = nil, math.huge
+                    for _, b in ipairs(Booths:GetChildren()) do
+                        local part = b:FindFirstChildWhichIsA("BasePart", true)
+                        if part then
+                            local d = (part.Position - hrp.Position).Magnitude
+                            if d < closestDist then
+                                closestDist = d
+                                closest = b
+                            end
+                        end
+                    end
+
+                    if closest and closestDist <= 35 then
+                        -- VERIFY ownership SEBELUM save
+                        local owned = BH.verifyBoothOwnership(closest)
+                        if owned == true then
+                            local uuid = closest.Name:gsub("[{}]","")
+                            BH.myBoothUuid = uuid
+                            BH.marketState.myBoothUuid = uuid
+                            BH.saveMarketState(BH.marketState)
+                            return uuid, "booth-btn + verified"
+                        elseif owned == false then
+                            -- BOOTH btn ngarahin ke unclaimed → user belum claim
+                            return nil, "user-belum-claim-booth"
+                        end
+                        -- owned == nil: uncertain, lanjutin coba method lain
+                    end
+                end
+            end
         end
 
-        -- Method 2: Proximity langsung (kalo player udah deket booth)
-        local uuid = BH.detectMyBoothByProximity(35)
-        if uuid then return uuid, "proximity" end
-
-        -- Method 3: OWNER attribute scan
+        -- Method 2: OWNER attribute scan (broader scan)
         BH.ensureBoothsStreamed()
         task.wait(1)
-        uuid = BH.detectMyBoothByOwner()
+        local uuid = BH.detectMyBoothByOwner()
         if uuid then return uuid, "owner attribute" end
 
-        return nil, "none"
+        return nil, "tidak-ketemu"
     end
 
     function BH.validateOrRedetect()
