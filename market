@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.47"
-local VERSION_DATE = "Pantau unlist all + remove Misc unlist + auto-refresh SNIPE"
+local VERSION_DATE = "LIST HARGA search + SNIPE Buy tab"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -792,6 +792,46 @@ lhMaxListBox.TextSize = 14
 local lhAddBtn = btnOf(pricePanel, 400, 430, 110, 34, "+ ADD", C.accent)
 lhAddBtn.TextSize = 14
 
+-- v8.47: hide rule-add form (add rules dari tab Listing aja)
+do
+    lhTypeDrop.Visible = false
+    lhMinKgBox.Visible = false
+    lhMaxKgBox.Visible = false
+    lhPriceBox.Visible = false
+    lhMaxListBox.Visible = false
+    lhAddBtn.Visible = false
+    for _, c in ipairs(pricePanel:GetChildren()) do
+        if c:IsA("TextLabel") then
+            local t = c.Text
+            if t == "SELECT PET TYPE" or t == "MIN KG" or t == "MAX KG"
+               or t == "PRICE" or t == "MAX LIST" then
+                c.Visible = false
+            end
+        end
+    end
+end
+
+-- v8.47: search box di LIST HARGA (filter rules)
+local priceSearchText = ""
+do
+    local lhSearchBox = boxOf(pricePanel, 0, 118, 1, 34, "")
+    lhSearchBox.Size = UDim2.new(1, 0, 0, 34)
+    lhSearchBox.PlaceholderText = "🔍 cari rule by pet type..."
+    lhSearchBox.TextSize = 14
+    local lhSearchPad = Instance.new("UIPadding")
+    lhSearchPad.PaddingLeft = UDim.new(0, 12)
+    lhSearchPad.Parent = lhSearchBox
+
+    -- Pindahin priceScroll biar gak overlap dengan search
+    priceScroll.Position = UDim2.new(0, 0, 0, 160)
+    priceScroll.Size = UDim2.new(1, 0, 1, -180)
+
+    lhSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        priceSearchText = lhSearchBox.Text or ""
+        rebuildRulesUI()
+    end)
+end
+
 -- ============================================================
 -- PET TYPE MODAL (popup overlay)
 -- ============================================================
@@ -987,9 +1027,18 @@ function rebuildRulesUI()
     rulesEmptyLbl.Visible = false
 
     for idx, r in ipairs(listingRules) do
-        buildRuleRow(rulesScroll, r, idx, false)  -- listing: compact
+        buildRuleRow(rulesScroll, r, idx, false)  -- listing: compact (always show all)
         if priceScroll then
-            buildRuleRow(priceScroll, r, idx, true)  -- list harga: bigger
+            -- v8.47: filter by search text di LIST HARGA
+            local searchOk = true
+            if priceSearchText and priceSearchText ~= "" then
+                local q = priceSearchText:lower()
+                local typeName = (r.type or "all"):lower()
+                searchOk = typeName:find(q, 1, true) ~= nil
+            end
+            if searchOk then
+                buildRuleRow(priceScroll, r, idx, true)  -- list harga: bigger
+            end
         end
     end
     rulesScroll.CanvasSize = UDim2.new(0, 0, 0, rulesLayout.AbsoluteContentSize.Y + 12)
@@ -1712,8 +1761,10 @@ local function makeSnSubBtn(name)
 end
 
 makeSnSubBtn("Manual")
+makeSnSubBtn("Buy")
 makeSnSubBtn("Otomatis")
 local snManualPanel = makeSnSubPanel("Manual")
+local snBuyPanel = makeSnSubPanel("Buy")
 local snAutoPanel = makeSnSubPanel("Otomatis")
 snManualPanel.Visible = true
 snSubBtns.Manual.stroke.Thickness = 1.5
@@ -1861,6 +1912,55 @@ snAutoDesc.Text = "Auto-buy berdasarkan rules.\nLagi dikembangkan, stay tuned!"
 snAutoDesc.TextColor3 = C.textDim snAutoDesc.Font = FM snAutoDesc.TextSize = 14
 snAutoDesc.TextXAlignment = Enum.TextXAlignment.Center
 snAutoDesc.TextWrapped = true snAutoDesc.Parent = snAutoCenter
+
+-- v8.47: ===== BUY SNIPE TAB =====
+-- Use table to manage locals (200-limit)
+local snBuy = {}
+do
+    local snBuyPad = Instance.new("UIPadding")
+    snBuyPad.PaddingTop = UDim.new(0, 14) snBuyPad.PaddingLeft = UDim.new(0, 14)
+    snBuyPad.PaddingRight = UDim.new(0, 14) snBuyPad.PaddingBottom = UDim.new(0, 14)
+    snBuyPad.Parent = snBuyPanel
+
+    lblOf(snBuyPanel, "💰  BUY", 0, 0, 400, 28, C.accent, 18, FB)
+    lblOf(snBuyPanel, "Beli pet dari listing player lain (sort termurah dulu)", 0, 32, 600, 20, C.textDim, 13)
+
+    snBuy.refresh = btnOf(snBuyPanel, 0, 60, 120, 32, "🔄 MUAT ULANG", C.accent)
+    snBuy.refresh.TextSize = 12
+    snBuy.search = Instance.new("TextBox")
+    snBuy.search.Size = UDim2.new(1, -136, 0, 32) snBuy.search.Position = UDim2.new(0, 132, 0, 60)
+    snBuy.search.BackgroundColor3 = C.input snBuy.search.BorderSizePixel = 0
+    snBuy.search.Text = "" snBuy.search.TextColor3 = C.text
+    snBuy.search.PlaceholderText = "🔍 cari pet (Peacock, EV, dll)..."
+    snBuy.search.PlaceholderColor3 = C.textDim
+    snBuy.search.Font = F snBuy.search.TextSize = 14
+    snBuy.search.ClearTextOnFocus = false snBuy.search.Parent = snBuyPanel
+    Instance.new("UICorner", snBuy.search).CornerRadius = UDim.new(0, 6)
+    local snBuySearchPad = Instance.new("UIPadding")
+    snBuySearchPad.PaddingLeft = UDim.new(0, 12) snBuySearchPad.Parent = snBuy.search
+
+    snBuy.maxPrice = boxOf(snBuyPanel, 0, 100, 140, 32, "")
+    snBuy.maxPrice.PlaceholderText = "Max price (filter)"
+    snBuy.maxPrice.TextSize = 12
+    snBuy.countLbl = Instance.new("TextLabel")
+    snBuy.countLbl.Size = UDim2.new(1, -160, 0, 32) snBuy.countLbl.Position = UDim2.new(0, 156, 0, 100)
+    snBuy.countLbl.BackgroundTransparency = 1
+    snBuy.countLbl.Text = "Loading..."
+    snBuy.countLbl.TextColor3 = C.textDim snBuy.countLbl.Font = FM snBuy.countLbl.TextSize = 12
+    snBuy.countLbl.TextXAlignment = Enum.TextXAlignment.Left snBuy.countLbl.Parent = snBuyPanel
+
+    snBuy.scroll = Instance.new("ScrollingFrame")
+    snBuy.scroll.Size = UDim2.new(1, 0, 1, -150) snBuy.scroll.Position = UDim2.new(0, 0, 0, 140)
+    snBuy.scroll.BackgroundColor3 = C.card snBuy.scroll.BorderSizePixel = 0
+    snBuy.scroll.ScrollBarThickness = 4 snBuy.scroll.ScrollBarImageColor3 = C.accent
+    snBuy.scroll.CanvasSize = UDim2.new(0, 0, 0, 0) snBuy.scroll.Parent = snBuyPanel
+    Instance.new("UICorner", snBuy.scroll).CornerRadius = UDim.new(0, 8)
+    snBuy.layout = Instance.new("UIListLayout") snBuy.layout.Padding = UDim.new(0, 4) snBuy.layout.Parent = snBuy.scroll
+    local snBuyScrollPad = Instance.new("UIPadding")
+    snBuyScrollPad.PaddingTop = UDim.new(0, 4) snBuyScrollPad.PaddingLeft = UDim.new(0, 4) snBuyScrollPad.PaddingRight = UDim.new(0, 4)
+    snBuyScrollPad.Parent = snBuy.scroll
+end
+
 
 -- Reset filters
 snResetBtn.MouseButton1Click:Connect(function()
@@ -4012,6 +4112,108 @@ local function renderSnipe()
     snScroll.CanvasSize = UDim2.new(0, 0, 0, snScrollLayout.AbsoluteContentSize.Y + 8)
 end
 
+-- v8.47: BUY tab render
+local function renderBuy()
+    for _, c in ipairs(snBuy.scroll:GetChildren()) do
+        if c:IsA("Frame") then c:Destroy() end
+    end
+
+    local sf = string.lower(snBuy.search.Text or "")
+    local maxPrice = tonumber(snBuy.maxPrice.Text) or math.huge
+
+    -- Filter + sort by price ascending (termurah dulu)
+    local sorted = {}
+    for _, p in ipairs(scanCache) do
+        if not p.isMine then  -- jangan tampilin listing-mu sendiri
+            local nameMatch = sf == "" or string.find(string.lower(p.name or ""), sf, 1, true)
+                or string.find(string.lower(p.type or ""), sf, 1, true)
+            local priceOk = p.price and p.price <= maxPrice
+            if nameMatch and priceOk then
+                table.insert(sorted, p)
+            end
+        end
+    end
+    table.sort(sorted, function(a, b) return (a.price or 0) < (b.price or 0) end)
+
+    snBuy.countLbl.Text = #sorted > 0
+        and ("Total: "..#sorted.." (termurah dulu)")
+        or "0 listing match filter"
+    snBuy.countLbl.TextColor3 = #sorted > 0 and C.success or C.danger
+
+    for i, p in ipairs(sorted) do
+        if i > 50 then break end  -- limit display to 50
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -8, 0, 36)
+        row.BackgroundColor3 = C.input
+        row.BorderSizePixel = 0 row.Parent = snBuy.scroll
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
+
+        -- Pet info (left)
+        local info = Instance.new("TextLabel")
+        info.Size = UDim2.new(1, -100, 1, 0) info.Position = UDim2.new(0, 8, 0, 0)
+        info.BackgroundTransparency = 1
+        local mutTag = (p.mutation and p.mutation ~= "-" and p.mutation ~= "") and (" ["..p.mutation.."]") or ""
+        info.Text = string.format("<b>%s%s</b>  %.1fkg  •  Lv%d  •  <font color='#FFD700'>💰%s</font>  •  by %s",
+            p.type, mutTag, p.kg or 0, p.age or 0, tostring(p.price or "?"), (p.owner or "?"):sub(1,12))
+        info.RichText = true
+        info.TextColor3 = C.text info.Font = FM info.TextSize = 11
+        info.TextXAlignment = Enum.TextXAlignment.Left
+        info.TextTruncate = Enum.TextTruncate.AtEnd
+        info.Parent = row
+
+        -- BUY button
+        local buyBtn = Instance.new("TextButton")
+        buyBtn.Size = UDim2.new(0, 80, 0, 26) buyBtn.Position = UDim2.new(1, -86, 0.5, -13)
+        buyBtn.BackgroundColor3 = C.success
+        buyBtn.Text = "💰 BUY" buyBtn.TextColor3 = Color3.new(1, 1, 1)
+        buyBtn.Font = FB buyBtn.TextSize = 12
+        buyBtn.BorderSizePixel = 0 buyBtn.Parent = row
+        Instance.new("UICorner", buyBtn).CornerRadius = UDim.new(0, 5)
+
+        buyBtn.MouseButton1Click:Connect(function()
+            buyBtn.Text = "..."
+            buyBtn.BackgroundColor3 = C.accent
+            task.spawn(function()
+                if not buyRE then
+                    buyBtn.Text = "✗ NO RE"
+                    return
+                end
+                local listingUuid = p.listingUuid
+                if not listingUuid then
+                    buyBtn.Text = "✗ NO UUID"
+                    buyBtn.BackgroundColor3 = C.danger
+                    return
+                end
+                local clean = tostring(listingUuid):gsub("[{}]","")
+                local braced = "{"..clean.."}"
+
+                local attempts = {clean, braced}
+                local success = false
+                for _, arg in ipairs(attempts) do
+                    local ok, ret = pcall(function() return buyRE:InvokeServer(arg) end)
+                    L("[Buy] tried "..arg:sub(1,12).." → "..tostring(ret))
+                    if ok and ret == true then success = true; break end
+                    task.wait(0.3)
+                end
+
+                if success then
+                    buyBtn.Text = "✅ OK"
+                    buyBtn.BackgroundColor3 = C.success
+                    L("[Buy] ✅ bought "..p.type.." @ "..tostring(p.price))
+                    task.wait(2)
+                    row:Destroy()
+                else
+                    buyBtn.Text = "✗ FAIL"
+                    buyBtn.BackgroundColor3 = C.danger
+                    L("[Buy] ❌ failed "..p.type)
+                end
+            end)
+        end)
+    end
+
+    snBuy.scroll.CanvasSize = UDim2.new(0, 0, 0, snBuy.layout.AbsoluteContentSize.Y + 8)
+end
+
 do
     snRefreshBtn.MouseButton1Click:Connect(function()
         snCountLbl.Text = "Scanning..."
@@ -4034,6 +4236,11 @@ do
                     scanBoothListings()
                     renderSnipe()
                 end)
+            elseif snBuyPanel and snBuyPanel.Visible then
+                pcall(function()
+                    scanBoothListings()
+                    renderBuy()
+                end)
             end
         end
     end)
@@ -4046,6 +4253,29 @@ do
                 scanBoothListings()
                 renderSnipe()
             end)
+        end
+    end)
+
+    -- v8.47: BUY TAB
+    snBuy.refresh.MouseButton1Click:Connect(function()
+        snBuy.countLbl.Text = "Scanning..."
+        task.spawn(function()
+            scanBoothListings()
+            renderBuy()
+        end)
+    end)
+    snBuy.search:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
+    snBuy.maxPrice:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
+
+    snSubBtns.Buy.btn.MouseButton1Click:Connect(function()
+        task.wait(0.1)
+        if #scanCache == 0 then
+            task.spawn(function()
+                scanBoothListings()
+                renderBuy()
+            end)
+        else
+            renderBuy()
         end
     end)
 end
