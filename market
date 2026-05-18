@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.40"
-local VERSION_DATE = "auto-detect booth via OWNER attribute (no listing needed)"
+local VERSION = "8.41"
+local VERSION_DATE = "smart detect — auto-click BOOTH btn + proximity"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1233,30 +1233,25 @@ do
     local function refreshList()
         clearList()
 
-        -- v8.40: Auto-detect booth kalo belum cached (via OWNER attribute)
-        statusLbl.Text = "🔍 Stream + detect booth..."
+        -- v8.41: Smart detect — pencet tombol BOOTH game otomatis, atau proximity, atau OWNER
+        statusLbl.Text = "🔍 Detecting booth (auto-click BOOTH btn)..."
         statusLbl.TextColor3 = C.textDim
-        BH.ensureBoothsStreamed()
-
-        if not BH.myBoothUuid then
-            local detected = BH.detectMyBoothByOwner()
-            if detected then
-                statusLbl.Text = "⭐ Booth detected: "..detected:sub(1,12).."..."
-            end
+        local uuid, method = BH.smartDetectMyBooth()
+        if uuid then
+            statusLbl.Text = "⭐ Booth detected via "..method.." ("..uuid:sub(1,12)..")"
         end
 
         if not BH.myBoothUuid then
-            statusLbl.Text = "❌ Gak nemu booth-mu (gak punya listing aktif?)"
+            statusLbl.Text = "❌ Gak nemu booth. Pencet tombol BOOTH biru di game atas, lalu REFRESH lagi"
             statusLbl.TextColor3 = C.danger
             return
         end
 
         local myBooth = BH.getMyBoothObj()
         if not myBooth then
-            -- Stream lagi
             statusLbl.Text = "Stream booth..."
             BH.ensureBoothsStreamed()
-            task.wait(0.5)
+            task.wait(1)
             myBooth = BH.getMyBoothObj()
         end
         if not myBooth then
@@ -2123,7 +2118,126 @@ do
         return nil
     end
 
+    -- v8.41: Detect booth via PROXIMITY player → booth terdekat
+    -- Useful setelah click BOOTH button (game auto-TP ke booth claimed)
+    function BH.detectMyBoothByProximity(maxDist)
+        maxDist = maxDist or 35
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return nil end
+
+        local TW = Workspace:FindFirstChild("TradeWorld")
+        local Booths = TW and TW:FindFirstChild("Booths")
+        if not Booths then return nil end
+
+        local closest, closestDist = nil, math.huge
+        for _, b in ipairs(Booths:GetChildren()) do
+            local part = b:FindFirstChildWhichIsA("BasePart", true)
+            if part then
+                local d = (part.Position - hrp.Position).Magnitude
+                if d < closestDist then
+                    closestDist = d
+                    closest = b
+                end
+            end
+        end
+
+        if closest and closestDist <= maxDist then
+            local boothUuid = closest.Name:gsub("[{}]","")
+            BH.myBoothUuid = boothUuid
+            BH.marketState.myBoothUuid = boothUuid
+            BH.saveMarketState(BH.marketState)
+            return boothUuid
+        end
+        return nil
+    end
+
+    -- v8.41: Cari + click tombol BOOTH di PlayerGui (game auto-TP)
+    function BH.clickBoothButton()
+        local pg = player:FindFirstChild("PlayerGui")
+        if not pg then return false end
+
+        local found = nil
+        for _, gui in ipairs(pg:GetDescendants()) do
+            if gui:IsA("TextButton") or gui:IsA("ImageButton") then
+                local txt = tostring(gui.Text or ""):lower():gsub("%s","")
+                local nm = gui.Name:lower()
+                if txt == "booth" or nm == "booth" or (nm:find("booth") and not nm:find("history")) then
+                    -- Hindari "Booth History" button
+                    if nm ~= "boothhistory" and not nm:find("history") then
+                        found = gui
+                        break
+                    end
+                end
+            end
+            -- Coba juga TextLabel "BOOTH" yang dibungkus parent button
+            if gui:IsA("TextLabel") then
+                local txt = tostring(gui.Text or ""):lower():gsub("%s","")
+                if txt == "booth" then
+                    -- Cari parent yang clickable
+                    local parent = gui.Parent
+                    while parent and parent ~= pg do
+                        if parent:IsA("TextButton") or parent:IsA("ImageButton") then
+                            found = parent
+                            break
+                        end
+                        parent = parent.Parent
+                    end
+                    if found then break end
+                end
+            end
+        end
+
+        if not found then return false end
+
+        -- Fire click via getconnections (work di Delta)
+        local clicked = false
+        pcall(function()
+            if getconnections then
+                for _, conn in ipairs(getconnections(found.MouseButton1Click)) do
+                    pcall(function() conn:Fire() end)
+                    clicked = true
+                end
+                for _, conn in ipairs(getconnections(found.Activated)) do
+                    pcall(function() conn:Fire() end)
+                    clicked = true
+                end
+            end
+        end)
+        return clicked
+    end
+
     -- v8.40: Validate cached UUID still has tools (kalo enggak, clear cache & re-detect)
+    -- v8.41: Smart detect — combine BOOTH button click + proximity + owner attr
+    function BH.smartDetectMyBooth()
+        -- Sudah cached? confirm cepat via getMyBoothObj
+        if BH.myBoothUuid then
+            local b = BH.getMyBoothObj()
+            if b then return BH.myBoothUuid, "cached" end
+        end
+
+        -- Method 1: Click BOOTH button → wait → proximity
+        local btnClicked = BH.clickBoothButton()
+        if btnClicked then
+            task.wait(2.5)  -- biar TP done + streaming
+            BH.ensureBoothsStreamed()
+            local uuid = BH.detectMyBoothByProximity(35)
+            if uuid then return uuid, "booth-button + proximity" end
+        end
+
+        -- Method 2: Proximity langsung (kalo player udah deket booth)
+        local uuid = BH.detectMyBoothByProximity(35)
+        if uuid then return uuid, "proximity" end
+
+        -- Method 3: OWNER attribute scan
+        BH.ensureBoothsStreamed()
+        task.wait(1)
+        uuid = BH.detectMyBoothByOwner()
+        if uuid then return uuid, "owner attribute" end
+
+        return nil, "none"
+    end
+
     function BH.validateOrRedetect()
         if BH.myBoothUuid then
             local b = BH.getMyBoothObj()
@@ -2412,11 +2526,11 @@ startBtn.MouseButton1Click:Connect(function()
             setStats("Streaming booths...", C.accent)
             BH.ensureBoothsStreamed()
 
-            -- v8.40: auto-detect booth via OWNER (kalo belum cached)
+            -- v8.40+v8.41: auto-detect booth (smart: BOOTH-button → proximity → owner)
             if not BH.myBoothUuid then
-                local detected = BH.detectMyBoothByOwner()
+                local detected, method = BH.smartDetectMyBooth()
                 if detected then
-                    L("⭐ Booth-mu DETECTED (via OWNER): "..detected:sub(1,16))
+                    L("⭐ Booth-mu DETECTED (via "..method.."): "..detected:sub(1,16))
                     L("  💾 Saved to state.json")
                 end
             end
@@ -2679,14 +2793,13 @@ local function unlistAllInternal()
     local Booths = TW:FindFirstChild("Booths")
     if not Booths then L("│ ✗ Booths gak ada"); setStats("FAIL: Booths", C.danger); return 0 end
 
-    -- v8.40: auto-detect booth via OWNER attribute kalo belum cached
+    -- v8.40+v8.41: auto-detect booth (smart) kalo belum cached
     if not BH.myBoothUuid then
-        L("│ Booth belum cached, stream + detect...")
-        setStats("Stream + detect booth...", C.accent)
-        BH.ensureBoothsStreamed()
-        local detected = BH.detectMyBoothByOwner()
+        L("│ Booth belum cached, smart-detect...")
+        setStats("Detect booth (smart)...", C.accent)
+        local detected, method = BH.smartDetectMyBooth()
         if detected then
-            L("│ ⭐ Booth detected via OWNER: "..detected:sub(1,16))
+            L("│ ⭐ Booth detected via "..method..": "..detected:sub(1,16))
             L("│ 💾 Saved")
         end
     end
