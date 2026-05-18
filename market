@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.45"
-local VERSION_DATE = "countActive max(session, booth) — prevent over-list"
+local VERSION = "8.46"
+local VERSION_DATE = "TBC.GetPlayerBoothData — accurate booth data, no streaming"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -75,6 +75,83 @@ do
     for _, m in ipairs(BH.MUTATION_NAMES) do
         table.insert(BH.MUTATION_PREFIXES, m..", ")  -- "Galactic, "
         table.insert(BH.MUTATION_PREFIXES, m.." ")   -- "Galactic "
+    end
+
+    -- v8.46: Mutation multipliers (BaseWeight × mult = weight at age 1 displayed)
+    -- Default 1.0 untuk yang belum diketahui. Tambah seiring ditemukan.
+    BH.MUTATION_MULT = {
+        EV = 1.10,        -- Everchanted (derived from user data: 5.58 × 1.09 ≈ 6.087)
+        -- TODO: tambah multiplier untuk mutation lain (Shocked, Rainbow, Nightmare, dll)
+    }
+
+    -- v8.46: TradeBoothController — kunci akses data booth server-wide
+    BH.TBC = nil
+    pcall(function()
+        local Modules = RS:WaitForChild("Modules", 10)
+        local TBCFolder = Modules and Modules:WaitForChild("TradeBoothControllers", 5)
+        local TBCModule = TBCFolder and TBCFolder:WaitForChild("TradeBoothController", 5)
+        if TBCModule then BH.TBC = require(TBCModule) end
+    end)
+    if BH.TBC then L("✓ TBC loaded — booth data via API") else L("⚠ TBC gak ke-load, fallback ke workspace scan") end
+
+    -- v8.46: Fetch booth data dari TBC (work tanpa TP, tanpa streaming)
+    function BH.fetchBoothData(targetPlayer)
+        if not BH.TBC then return nil end
+        targetPlayer = targetPlayer or player
+        local ok, data = pcall(function() return BH.TBC:GetPlayerBoothData(targetPlayer) end)
+        if ok and type(data) == "table" then return data end
+        return nil
+    end
+
+    function BH.getMyBoothData()
+        return BH.fetchBoothData(player)
+    end
+
+    -- v8.46: Compute base weight as displayed at age 1 (sesuai rule lama)
+    -- Formula: BaseWeight × mutation_multiplier
+    function BH.computeBaseKgFromPetData(petData)
+        if not petData then return 0 end
+        local base = petData.BaseWeight or 0
+        local mut = petData.MutationType
+        local mult = 1.0
+        if mut and BH.MUTATION_MULT[mut] then
+            mult = BH.MUTATION_MULT[mut]
+        end
+        return base * mult
+    end
+
+    -- v8.46: Count active listings dari TBC data (akurat, no streaming)
+    function BH.countActiveFromData(rule)
+        local data = BH.getMyBoothData()
+        if not data or not data.Listings then return 0 end
+        local count = 0
+        for _, listing in pairs(data.Listings) do
+            if listing.ItemType == "Pet" and listing.ItemId then
+                local item = data.Items and data.Items[listing.ItemId]
+                if item and item.PetData then
+                    local pType = item.PetType
+                    local baseKg = BH.computeBaseKgFromPetData(item.PetData)
+                    local typeOk = (not rule.type) or rule.type == pType
+                    local kgOk = baseKg >= rule.min and baseKg <= rule.max
+                    if typeOk and kgOk then count = count + 1 end
+                end
+            end
+        end
+        return count
+    end
+
+    -- v8.46: Detect booth-mu dari TBC (no scan, no streaming)
+    function BH.detectMyBoothFromTBC()
+        local data = BH.getMyBoothData()
+        if data and data.Booth then
+            local clean = tostring(data.Booth):gsub("[{}]", "")
+            if clean ~= "" then
+                BH.myBoothUuid = clean
+                pcall(function() BH.saveMarketState({myBoothUuid = clean}) end)
+                return clean
+            end
+        end
+        return nil
     end
 
     function BH.getBaseName(name)
@@ -1241,106 +1318,119 @@ do
 
     local function refreshList()
         clearList()
+        selectedUuids = {}
 
-        -- v8.41+v8.42: Smart detect dengan verification
-        statusLbl.Text = "🔍 Detect booth..."
+        -- v8.46: TBC data — instant, no streaming, no TP
+        statusLbl.Text = "🔄 Fetching booth data..."
         statusLbl.TextColor3 = C.textDim
-        local uuid, method = BH.smartDetectMyBooth()
 
-        if not BH.myBoothUuid then
-            if method == "user-belum-claim-booth" then
-                statusLbl.Text = "⚠ Lo belum CLAIM booth. Claim booth dulu di game."
-            else
-                statusLbl.Text = "❌ Gak nemu booth. Pencet tombol BOOTH biru di game atas, lalu REFRESH lagi"
+        if not BH.TBC then
+            statusLbl.Text = "❌ TBC gak ke-load. Close + reopen script."
+            statusLbl.TextColor3 = C.danger
+            return
+        end
+
+        local data = BH.getMyBoothData()
+        if not data then
+            statusLbl.Text = "❌ Gagal fetch data (TBC error)"
+            statusLbl.TextColor3 = C.danger
+            return
+        end
+
+        local boothUuid = data.Booth
+        if not boothUuid or boothUuid == "" then
+            statusLbl.Text = "⚠ Lo belum CLAIM booth. Claim dulu di game."
+            statusLbl.TextColor3 = C.danger
+            return
+        end
+
+        -- Save booth UUID
+        local clean = tostring(boothUuid):gsub("[{}]","")
+        BH.myBoothUuid = clean
+        pcall(function() BH.saveMarketState({myBoothUuid = clean}) end)
+
+        -- Collect listings
+        local listings = {}
+        if data.Listings then
+            for listingUuid, l in pairs(data.Listings) do
+                local item = data.Items and l.ItemId and data.Items[l.ItemId]
+                table.insert(listings, {
+                    listingUuid = listingUuid,
+                    price = tonumber(l.Price) or 0,
+                    itemType = l.ItemType,
+                    itemId = l.ItemId,
+                    item = item,
+                })
             end
-            statusLbl.TextColor3 = C.danger
-            return
         end
+        table.sort(listings, function(a, b) return a.price < b.price end)
 
-        statusLbl.Text = "⭐ Booth ("..method..") "..uuid:sub(1,12)
-        statusLbl.TextColor3 = C.accent
-
-        local myBooth = BH.getMyBoothObj()
-        if not myBooth then
-            statusLbl.Text = "Stream booth..."
-            BH.ensureBoothsStreamed()
-            task.wait(1)
-            myBooth = BH.getMyBoothObj()
-        end
-        if not myBooth then
-            statusLbl.Text = "❌ Booth gak ditemukan di workspace"
-            statusLbl.TextColor3 = C.danger
-            return
-        end
-
-        -- Build maxKGCache buat tampil baseKG akurat
-        BH.buildMaxKGCache()
-
-        local di = myBooth:FindFirstChild("DynamicInstances")
-        if not di then
-            statusLbl.Text = "❌ DynamicInstances kosong"
-            statusLbl.TextColor3 = C.danger
-            return
-        end
-
-        local tools = di:GetChildren()
-        local listed = {}
-        for _, t in ipairs(tools) do
-            if t:IsA("Tool") then table.insert(listed, t) end
-        end
-
-        statusLbl.Text = "📦 "..#listed.." pet di booth-mu  •  Tap utk pilih"
+        statusLbl.Text = "📦 "..#listings.." listing  •  Booth "..clean:sub(1,8).."...  •  Tap utk pilih"
         statusLbl.TextColor3 = C.success
 
-        -- Render each listing
-        for i, t in ipairs(listed) do
-            local uuid = t.Name:gsub("[{}]","")
-            local pType = tostring(t:GetAttribute("f") or "?")
-            local baseKgVal = getBaseKg(t)
-            local currentKgVal = getCurrentKg(t)
-            -- Try get price (might be in attribute)
-            local price = "?"
-            for _, attrName in ipairs({"Price","PRICE","ListingPrice","SellPrice","price"}) do
-                local v = t:GetAttribute(attrName)
-                if v and tonumber(v) then price = tostring(v); break end
-            end
+        for i, l in ipairs(listings) do
+            local frame = Instance.new("Frame")
+            frame.Size = UDim2.new(1, 0, 0, 64)
+            frame.BackgroundColor3 = C.card
+            frame.BorderSizePixel = 0
+            frame.Parent = scroll
+            Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
-            local item = Instance.new("Frame")
-            item.Size = UDim2.new(1, 0, 0, 56)
-            item.BackgroundColor3 = C.card
-            item.BorderSizePixel = 0
-            item.Parent = scroll
-            Instance.new("UICorner", item).CornerRadius = UDim.new(0, 6)
-
-            -- Selection state ring
-            local stroke = Instance.new("UIStroke", item)
+            local stroke = Instance.new("UIStroke", frame)
             stroke.Color = C.accent
             stroke.Thickness = 0
             stroke.Transparency = 0.3
 
-            -- Pet info
-            lblOf(item, i..". "..pType, 12, 6, 260, 18, C.text, 13, FB)
-            local kgInfo = baseKgVal and (string.format("Base %.2f kg", baseKgVal)) or "kg ?"
-            if currentKgVal and currentKgVal > 0 then
-                kgInfo = kgInfo.."  •  Current "..string.format("%.1f", currentKgVal).." kg"
-            end
-            lblOf(item, kgInfo, 12, 24, 300, 16, C.textDim, 11)
-            lblOf(item, "💰 "..price.."  •  UUID "..uuid:sub(1,8).."...", 12, 38, 300, 16, C.textDim, 11)
+            -- Extract info from PetData
+            local pType = "?"
+            local mutType = ""
+            local levelStr = "?"
+            local baseRaw = "?"
+            local baseAdj = "?"
+            local petName = ""
 
-            -- Click to toggle selection
+            if l.item then
+                pType = tostring(l.item.PetType or "?")
+                local pd = l.item.PetData
+                if pd then
+                    mutType = tostring(pd.MutationType or "")
+                    levelStr = tostring(pd.Level or "?")
+                    petName = tostring(pd.Name or "")
+                    if tonumber(pd.BaseWeight) then
+                        baseRaw = string.format("%.2f", pd.BaseWeight)
+                        local adj = BH.computeBaseKgFromPetData(pd)
+                        baseAdj = string.format("%.2f", adj)
+                    end
+                end
+            elseif l.itemType then
+                pType = tostring(l.itemType)  -- "Holdable" etc
+            end
+
+            local title = i..". "..pType
+            if mutType ~= "" then title = title.." ["..mutType.."]" end
+            if petName ~= "" then title = title.."  ~"..petName end
+            lblOf(frame, title, 12, 6, 320, 18, C.text, 13, FB)
+
+            local info = string.format("Base %s  •  @age1 %s  •  Lv %s", baseRaw, baseAdj, levelStr)
+            lblOf(frame, info, 12, 24, 320, 16, C.textDim, 11)
+
+            lblOf(frame, "💰 "..tostring(l.price).."  •  L "..tostring(l.listingUuid):sub(1,8).."...", 12, 42, 300, 16, C.textDim, 11)
+
             local clickBtn = Instance.new("TextButton")
             clickBtn.Size = UDim2.new(1, 0, 1, 0)
             clickBtn.BackgroundTransparency = 1
-            clickBtn.Text = "" clickBtn.Parent = item
+            clickBtn.Text = ""
+            clickBtn.Parent = frame
+            local lUuid = l.listingUuid
             clickBtn.MouseButton1Click:Connect(function()
-                if selectedUuids[uuid] then
-                    selectedUuids[uuid] = nil
+                if selectedUuids[lUuid] then
+                    selectedUuids[lUuid] = nil
                     stroke.Thickness = 0
-                    item.BackgroundColor3 = C.card
+                    frame.BackgroundColor3 = C.card
                 else
-                    selectedUuids[uuid] = true
+                    selectedUuids[lUuid] = true
                     stroke.Thickness = 1.5
-                    item.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+                    frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
                 end
             end)
         end
@@ -2262,6 +2352,12 @@ do
     -- v8.44: Passive detect — TANPA click button (no UI side effects)
     -- Untuk dipanggil di cycle/auto-claim (silent)
     function BH.passiveDetectMyBooth()
+        -- v8.46: TBC first — fastest, no streaming dependency
+        if BH.TBC then
+            local uuid = BH.detectMyBoothFromTBC()
+            if uuid then return uuid, "tbc" end
+        end
+
         -- Cached check
         if BH.myBoothUuid then
             local b = BH.getMyBoothObj()
@@ -2442,15 +2538,18 @@ startBtn.MouseButton1Click:Connect(function()
             local sessionCount = 0
             for _ in pairs(myListed[ri]) do sessionCount = sessionCount + 1 end
 
-            -- Booth scan (real count dari workspace)
+            -- v8.46: TBC data (akurat, no streaming dependency)
+            local tbcCount = BH.countActiveFromData(rule)
+
+            -- Fallback: workspace scan (kalo TBC gak available)
             local boothCount = 0
-            if BH.myBoothUuid then
+            if not BH.TBC and BH.myBoothUuid then
                 local myBooth = BH.getMyBoothObj()
                 if myBooth then boothCount = BH.countInBooth(myBooth, rule) end
             end
 
-            -- Max-of-both: session prevents over-list (cap), booth detects pre-existing/sold
-            return math.max(sessionCount, boothCount)
+            -- Max-of-all: session prevents over-list, TBC/booth detects pre-existing
+            return math.max(sessionCount, tbcCount, boothCount)
         end
 
         -- Helper: rescan workspace, prune sold/unlisted UUIDs
