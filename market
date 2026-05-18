@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.31"
-local VERSION_DATE = "post-list verify (anti silent-fail)"
+local VERSION = "8.33"
+local VERSION_DATE = "backpack verify (fast & reliable) + 15s cooldown"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1859,56 +1859,69 @@ startBtn.MouseButton1Click:Connect(function()
                     local ok, idOrErr = listPet(p.braced, rule.price)
 
                     if ok then
-                        -- v8.31: VERIFY pet beneran muncul di booth (anti silent-fail)
-                        task.wait(1)
-                        local verified = false
-                        local foundInBooth = nil
-                        local TW = Workspace:FindFirstChild("TradeWorld")
-                        local Booths = TW and TW:FindFirstChild("Booths")
-                        if Booths then
-                            for _, b in ipairs(Booths:GetChildren()) do
-                                local di = b:FindFirstChild("DynamicInstances")
-                                if di then
-                                    for _, t in ipairs(di:GetChildren()) do
-                                        if t:IsA("Tool") and t.Name:gsub("[{}]","") == p.clean then
-                                            verified = true
-                                            foundInBooth = b
-                                            break
-                                        end
+                        -- v8.33: VERIFY via BACKPACK (lebih reliable & cepat dari scan booth)
+                        -- Pet pasti HILANG dari backpack kalo listing sukses
+                        task.wait(0.5)
+                        local stillInBackpack = false
+                        local bp = player:FindFirstChild("Backpack")
+                        if bp then
+                            for _, t in ipairs(bp:GetChildren()) do
+                                if t:IsA("Tool") then
+                                    local u = t:GetAttribute("PET_UUID")
+                                    if u and tostring(u):gsub("[{}]","") == p.clean then
+                                        stillInBackpack = true
+                                        break
                                     end
                                 end
-                                if verified then break end
                             end
                         end
 
-                        if verified then
+                        if not stillInBackpack then
+                            -- SUKSES — pet pindah dari backpack
                             if ruleIdx > 0 then myListed[ruleIdx][p.clean] = true end
                             listedNow = listedNow + 1
-                            L("   ✅ verified in booth: "..tostring(idOrErr):sub(1,12))
+                            L("   ✅ verified (pet gone from backpack)")
                             setStats("Listed "..listedNow.." this round", C.accent)
-                            -- Detect booth-mu from first verified listing
-                            if not BH.myBoothUuid and foundInBooth then
-                                BH.myBoothUuid = foundInBooth.Name:gsub("[{}]","")
-                                BH.marketState.myBoothUuid = BH.myBoothUuid
-                                BH.saveMarketState(BH.marketState)
-                                L("   ⭐ Booth-mu DETECTED: "..BH.myBoothUuid:sub(1,16))
-                                L("   💾 Saved to state.json")
+
+                            -- Detect booth (cuma kalo belum cached)
+                            if not BH.myBoothUuid then
+                                task.wait(0.5)  -- biar streaming kasih chance
+                                local TW = Workspace:FindFirstChild("TradeWorld")
+                                local Booths = TW and TW:FindFirstChild("Booths")
+                                if Booths then
+                                    for _, b in ipairs(Booths:GetChildren()) do
+                                        local di = b:FindFirstChild("DynamicInstances")
+                                        if di then
+                                            for _, t in ipairs(di:GetChildren()) do
+                                                if t:IsA("Tool") and t.Name:gsub("[{}]","") == p.clean then
+                                                    BH.myBoothUuid = b.Name:gsub("[{}]","")
+                                                    BH.marketState.myBoothUuid = BH.myBoothUuid
+                                                    BH.saveMarketState(BH.marketState)
+                                                    L("   ⭐ Booth-mu DETECTED: "..BH.myBoothUuid:sub(1,16))
+                                                    L("   💾 Saved to state.json")
+                                                    break
+                                                end
+                                            end
+                                        end
+                                        if BH.myBoothUuid then break end
+                                    end
+                                end
                             end
                             task.wait(delaySec)
                         else
-                            -- Silent fail: server return UUID tapi pet gak muncul (rate-limited)
-                            L("   ⚠ SILENT FAIL — server say ok tapi pet gak di booth")
-                            L("   ⏸ RATE LIMIT detected — wait 8s")
-                            setStats("Rate limited (silent) — wait 8s", C.danger)
-                            task.wait(8)
+                            -- SILENT FAIL — pet masih di backpack (rate limit)
+                            L("   ⚠ SILENT FAIL — pet masih di backpack")
+                            L("   ⏸ RATE LIMIT — wait 15s")
+                            setStats("Rate limited — wait 15s", C.danger)
+                            task.wait(15)
                         end
                     else
                         local errLow = tostring(idOrErr or ""):lower()
                         L("   ❌ "..tostring(idOrErr):sub(1,60))
                         if errLow:find("please wait") or errLow:find("cooldown") or errLow:find("rate") then
-                            L("   ⏸ RATE LIMIT — wait 8s")
-                            setStats("Rate limited — wait 8s", C.danger)
-                            task.wait(8)
+                            L("   ⏸ RATE LIMIT — wait 15s")
+                            setStats("Rate limited — wait 15s", C.danger)
+                            task.wait(15)
                         elseif errLow:find("favorit") then
                             L("   ⏭ skip (favorited)")
                             task.wait(0.5)
@@ -2179,123 +2192,130 @@ task.spawn(function()
     end
 end)
 
--- ===== UNLIST ALL v3 — single TP + parallel stream + brute-force =====
--- v8.27: gak pindah-pindah booth. TP sekali ke center, stream semua booth parallel,
--- baru brute-force unlist (return==true = ours)
+-- ===== UNLIST ALL v4 — no TP, smart cache, logical stream =====
+-- v8.32: Pakai BH.myBoothUuid kalo ada → langsung scan booth-mu, no TP
+--        Kalo gak ada → brute-force, lalu cache hasil
 local function unlistAllInternal()
-    setStats("[1/4] Cari TradeWorld...", C.accent)
-    L("┌─ UNLIST ALL v3 START ─────────")
+    L("┌─ UNLIST ALL v4 START ─────────")
+    setStats("Cari booth...", C.accent)
 
     local TW = Workspace:FindFirstChild("TradeWorld")
-    if not TW then L("│ ✗ TradeWorld gak ada"); setStats("FAIL: TradeWorld gak ada", C.danger); return 0 end
+    if not TW then L("│ ✗ TradeWorld gak ada"); setStats("FAIL: TradeWorld", C.danger); return 0 end
     local Booths = TW:FindFirstChild("Booths")
-    if not Booths then L("│ ✗ Booths gak ada"); setStats("FAIL: Booths folder gak ada", C.danger); return 0 end
+    if not Booths then L("│ ✗ Booths gak ada"); setStats("FAIL: Booths", C.danger); return 0 end
 
-    local allBooths = Booths:GetChildren()
-    L("│ ✓ "..#allBooths.." booth total")
+    -- ===== FAST PATH: kalo booth-mu udah cached =====
+    if BH.myBoothUuid then
+        L("│ ✓ Booth-mu cached: "..BH.myBoothUuid:sub(1,16))
+        local myBooth = BH.getMyBoothObj()
+        if myBooth then
+            -- Stream HANYA booth-mu (logical, no TP)
+            setStats("Stream booth-mu...", C.accent)
+            local part = myBooth:FindFirstChildWhichIsA("BasePart", true)
+            if part then
+                for round = 1, 2 do
+                    pcall(function() player:RequestStreamAroundAsync(part.Position) end)
+                    task.wait(1)
+                end
+            end
+            task.wait(1)
 
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then L("│ ✗ HRP gak ada"); setStats("FAIL: character gak ada", C.danger); return 0 end
-
-    -- Step 1: Cari center of trade area
-    setStats("[2/4] TP ke center booth area...", C.accent)
-    local centerPos = nil
-    local sumPos = Vector3.new(0,0,0)
-    local count = 0
-    local boothPositions = {}
-    for _, b in ipairs(allBooths) do
-        local part = b:FindFirstChildWhichIsA("BasePart", true)
-        if part then
-            sumPos = sumPos + part.Position
-            count = count + 1
-            table.insert(boothPositions, part.Position)
+            -- Scan + unlist langsung
+            local di = myBooth:FindFirstChild("DynamicInstances")
+            local removed = 0
+            if di then
+                local tools = di:GetChildren()
+                L("│ Tools di booth-mu: "..#tools)
+                setStats("Unlisting "..#tools.."...", C.accent)
+                for _, t in ipairs(tools) do
+                    if stopReq then L("│ ⛔ STOP"); break end
+                    if t:IsA("Tool") then
+                        local uuid = t.Name:gsub("[{}]","")
+                        local ok, ret = pcall(function() return removeRE:InvokeServer(uuid) end)
+                        if ok and ret == true then
+                            removed = removed + 1
+                            L("│ ["..removed.."] ✅ "..uuid:sub(1,12).."...")
+                            setStats("Unlisted "..removed, C.accent)
+                        else
+                            L("│ ⚠ "..uuid:sub(1,12)..": "..tostring(ret))
+                        end
+                        task.wait(0.3)
+                    end
+                end
+            end
+            L("│ Done. Removed: "..removed)
+            L("└─────────────────────────")
+            setStats(removed > 0 and "✅ Unlisted "..removed or "0 listings di booth", removed > 0 and C.success or C.danger)
+            return removed
+        else
+            L("│ ⚠ Cached booth gak ada di workspace — clear cache")
+            BH.myBoothUuid = nil
+            BH.marketState.myBoothUuid = nil
+            BH.saveMarketState(BH.marketState)
         end
     end
-    if count > 0 then centerPos = sumPos / count end
 
-    if centerPos then
-        hrp.CFrame = CFrame.new(centerPos + Vector3.new(0, 10, 0))
-        L("│ ✓ TP sekali ke center")
-        task.wait(0.5)
+    -- ===== FALLBACK: brute-force, detect booth, cache =====
+    L("│ Booth belum cached — brute-force mode")
+    setStats("Brute-force (first time)...", C.accent)
+
+    -- Stream parallel all booths (no TP)
+    local boothPositions = {}
+    for _, b in ipairs(Booths:GetChildren()) do
+        local part = b:FindFirstChildWhichIsA("BasePart", true)
+        if part then table.insert(boothPositions, part.Position) end
     end
-
-    -- Step 2: Stream PARALLEL semua booth (no TP per booth)
-    setStats("[3/4] Stream all booths (parallel)...", C.accent)
-    L("│ Force-stream "..#boothPositions.." positions, 3 rounds")
+    L("│ Stream "..#boothPositions.." areas, 3 rounds")
     for round = 1, 3 do
         for _, pos in ipairs(boothPositions) do
             pcall(function() player:RequestStreamAroundAsync(pos) end)
         end
         task.wait(1.5)
     end
-    L("│ Stream done, wait 2s settle...")
     task.wait(2)
 
-    -- Step 3: Collect ALL listings dari workspace
-    setStats("[4/4] Scan + brute-force unlist...", C.accent)
-    local allListings = {}
-    for _, booth in ipairs(allBooths) do
-        local di = booth:FindFirstChild("DynamicInstances")
-        if di then
-            for _, t in ipairs(di:GetChildren()) do
-                if t:IsA("Tool") then
-                    table.insert(allListings, {
-                        uuid = t.Name:gsub("[{}]", ""),
-                        booth = booth, di = di, tool = t,
-                    })
-                end
-            end
-        end
-    end
-    L("│ Total listings ditemukan: "..#allListings)
-
-    if #allListings == 0 then
-        L("│ ✗ 0 listings, streaming gagal?")
-        setStats("0 listings — streaming gagal", C.danger)
-        return 0
-    end
-
-    -- Step 4: Brute-force unlist, return==true = ours
+    -- Collect & brute-force unlist
     local removed = 0
     local rejected = 0
-    local myBooth = nil
+    local detectedBoothObj = nil
 
-    for _, item in ipairs(allListings) do
-        if stopReq then L("│ ⛔ STOP"); break end
-
-        -- Skip listing bukan di booth-mu (kalo udah ke-identify)
-        if myBooth and item.booth ~= myBooth then
-            -- skip
+    for _, booth in ipairs(Booths:GetChildren()) do
+        if stopReq then break end
+        if detectedBoothObj and booth ~= detectedBoothObj then
+            -- udah ketemu booth-mu, skip
         else
-            local ok, ret = pcall(function() return removeRE:InvokeServer(item.uuid) end)
-            task.wait(0.3)
-
-            if ok and ret == true then
-                removed = removed + 1
-                if not myBooth then
-                    myBooth = item.booth
-                    L("│ ⭐ BOOTH-MU: "..item.booth.Name:sub(1,16).."...")
+            local di = booth:FindFirstChild("DynamicInstances")
+            if di then
+                for _, t in ipairs(di:GetChildren()) do
+                    if stopReq then break end
+                    if t:IsA("Tool") then
+                        local uuid = t.Name:gsub("[{}]","")
+                        local ok, ret = pcall(function() return removeRE:InvokeServer(uuid) end)
+                        task.wait(0.3)
+                        if ok and ret == true then
+                            removed = removed + 1
+                            if not detectedBoothObj then
+                                detectedBoothObj = booth
+                                BH.myBoothUuid = booth.Name:gsub("[{}]","")
+                                BH.marketState.myBoothUuid = BH.myBoothUuid
+                                BH.saveMarketState(BH.marketState)
+                                L("│ ⭐ BOOTH-MU DETECTED: "..BH.myBoothUuid:sub(1,16))
+                                L("│ 💾 Saved — next time gak perlu brute-force")
+                            end
+                            L("│ ["..removed.."] ✅ "..uuid:sub(1,12).."...")
+                            setStats("Unlisted "..removed, C.accent)
+                        elseif ok and ret == false then
+                            rejected = rejected + 1
+                        end
+                    end
                 end
-                L("│ ["..removed.."] ✅ "..item.uuid:sub(1,12).."...")
-                setStats("Unlisted "..removed, C.accent)
-            elseif ok and ret == false then
-                rejected = rejected + 1
-            else
-                L("│ ⚠ err: "..tostring(ret):sub(1,40))
             end
-            task.wait(0.15)
         end
     end
 
     L("│ Done. Removed: "..removed.." | Rejected: "..rejected)
     L("└─────────────────────────")
-
-    if removed == 0 then
-        setStats(rejected > 0 and "0 lo punya (semua reject)" or "0 listings", C.danger)
-    else
-        setStats("✅ Unlisted "..removed, C.success)
-    end
+    setStats(removed > 0 and "✅ Unlisted "..removed or "0 listings — booth-mu kosong?", removed > 0 and C.success or C.danger)
     return removed
 end
 local function runUnlistAll()
