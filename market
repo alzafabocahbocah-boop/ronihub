@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.23"
-local VERSION_DATE = "auto-tp-unlist"
+local VERSION = "8.26"
+local VERSION_DATE = "instant-replenish + backpack-drain-stop"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1620,10 +1620,11 @@ startBtn.MouseButton1Click:Connect(function()
     task.spawn(function()
         stopReq = false
         L("")
-        L("==== START AUTO LIST ====")
+        L("==== START AUTO LIST (Auto-Replenish) ====")
         local delaySec = tonumber(delayBox.Text) or 3
         local maxRetry = tonumber(retryBox.Text) or 2
         local autoRejoinN = tonumber(autoRejoinBox.Text) or 0
+        local replenishInterval = 3  -- v8.26: cepat (3s) — begitu sold langsung list
 
         L("Rules: "..#listingRules)
         for i, r in ipairs(listingRules) do
@@ -1631,219 +1632,204 @@ startBtn.MouseButton1Click:Connect(function()
             local mlStr = (r.maxListings == math.huge or not r.maxListings) and "∞" or tostring(r.maxListings)
             L("  ["..i.."] "..(r.type or "All").." | KG "..r.min.."–"..maxStr.." | 💰"..r.price.." | 📋"..mlStr)
         end
-        L("Delay: "..delaySec.." | Retry: "..maxRetry)
+        L("Delay: "..delaySec.." | Replenish interval: "..replenishInterval.."s")
 
-        -- Per-rule counter
-        local ruleCount = {}
-        for i, _ in ipairs(listingRules) do ruleCount[i] = 0 end
+        -- Tracking per rule: UUIDs yang udah kita list
+        local myListed = {}
+        for i, _ in ipairs(listingRules) do myListed[i] = {} end
 
-        -- Helper: find matching rule for pet (returns rule + idx)
-        local function matchRule(pType, wt)
-            if #listingRules == 0 then
-                return {price = perTypePrices[pType] or 100, maxListings = math.huge}, 0
-            end
-            for i, r in ipairs(listingRules) do
-                local typeOk = (not r.type) or r.type == pType
-                local kgOk = wt >= r.min and wt <= r.max
-                local ml = r.maxListings or math.huge
-                if typeOk and kgOk and ruleCount[i] < ml then return r, i end
-            end
-            return nil
+        local TW = Workspace:FindFirstChild("TradeWorld")
+        local Booths = TW and TW:FindFirstChild("Booths")
+
+        -- Helper: count active listings per rule
+        local function countActive(ri)
+            local c = 0
+            for _ in pairs(myListed[ri]) do c = c + 1 end
+            return c
         end
 
-        local bp = player:FindFirstChild("Backpack")
-        if not bp then
-            L("[ERR] no backpack")
-            setStats("ERR: no backpack", C.danger)
-            setStartIdle()
-            return
-        end
-
-        -- Diagnose: count pets + dump COMPLETE structure of first pet
-        local allPets, favCount = 0, 0
-        local typeCount = {}
-        local baseAttrFound = nil
-        local dumpedPet = false
-        for _, t in ipairs(bp:GetChildren()) do
-            if isPet(t) then
-                allPets = allPets + 1
-                if isFav(t) then
-                    favCount = favCount + 1
-                else
-                    local pType = getPetType(t)
-                    typeCount[pType] = (typeCount[pType] or 0) + 1
-                    if not baseAttrFound then
-                        local _, attr = getBaseKg(t)
-                        if attr then baseAttrFound = attr end
-                    end
-                    -- Dump first non-fav pet COMPLETELY
-                    if not dumpedPet then
-                        dumpedPet = true
-                        L("======================================")
-                        L("[DUMP] "..t.Name)
-                        L("[DUMP] Attributes:")
-                        for k, v in pairs(t:GetAttributes()) do
-                            L("    "..k.." ("..typeof(v)..") = "..tostring(v))
-                        end
-                        L("[DUMP] Children:")
-                        for _, ch in ipairs(t:GetChildren()) do
-                            local extra = ""
-                            if ch:IsA("ValueBase") then extra = " VALUE="..tostring(ch.Value) end
-                            L("    "..ch.ClassName.." '"..ch.Name.."'"..extra)
-                            -- Inspect child attributes too
-                            for k, v in pairs(ch:GetAttributes()) do
-                                L("      attr "..k.." = "..tostring(v))
-                            end
-                        end
-                        L("======================================")
-                    end
+        -- Helper: rescan workspace, prune sold/unlisted UUIDs
+        local function rescanAndPrune()
+            if not Booths then return end
+            -- Force-stream
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            for _, b in ipairs(Booths:GetChildren()) do
+                local part = b:FindFirstChildWhichIsA("BasePart", true)
+                if part then
+                    pcall(function() player:RequestStreamAroundAsync(part.Position) end)
                 end
             end
-        end
-        L("Backpack: "..allPets.." pets ("..favCount.." favorited)")
-        local typesStr = ""
-        for tp, c in pairs(typeCount) do typesStr = typesStr..tp.."="..c.." " end
-        L("Non-fav by type: "..typesStr)
-        if baseAttrFound then
-            if baseAttrFound == "formula" then
-                L("✅ Base KG via FORMULA: baseKG = currentKG × 11 / (age + 10)")
-            else
-                L("✅ Base KG via attribute: '"..baseAttrFound.."'")
-            end
-        else
-            L("⚠ Base KG tidak bisa dihitung — pakai current weight")
-        end
+            task.wait(2)
 
-        -- Build todo + match rules (using BASE weight if available)
-        local todo = {}
-        local matchedCount = 0
-        for _, t in ipairs(bp:GetChildren()) do
-            if isPet(t) and not isFav(t) then
-                local uuid = tostring(t:GetAttribute("PET_UUID") or t.Name)
-                local clean = uuid:gsub("^{",""):gsub("}$","")
-                local pType = getPetType(t)
-                local currentKg = getCurrentKg(t)
-                local baseKg = getBaseKg(t) or currentKg  -- fallback to current if no base
-                -- Pre-check if any rule could match this pet (use base weight)
-                local hasMatch = false
-                if #listingRules == 0 then hasMatch = true
-                else
-                    for _, r in ipairs(listingRules) do
-                        local typeOk = (not r.type) or r.type == pType
-                        local kgOk = baseKg >= r.min and baseKg <= r.max
-                        if typeOk and kgOk then hasMatch = true; break end
-                    end
-                end
-                if hasMatch then matchedCount = matchedCount + 1 end
-                table.insert(todo, {
-                    name=t.Name, braced="{"..clean.."}",
-                    type=pType, wt=baseKg, currentKg=currentKg,
-                    tries=0
-                })
-            end
-        end
-        L("Eligible (non-fav): "..#todo.." | Match rules: "..matchedCount)
-
-        if #todo == 0 then
-            local msg
-            if allPets == 0 then msg = "No pets in backpack"
-            elseif favCount >= allPets then msg = "All pets favorited (skip)"
-            else msg = "0 non-fav pets" end
-            setStats(msg, C.danger)
-            setStartIdle()
-            return
-        end
-        if matchedCount == 0 and #listingRules > 0 then
-            setStats("0 pets match rules — cek base KG range", C.danger)
-            L("[INFO] Pets exist tapi gak match rules.")
-            L("[INFO] Cek pet type & KG range di rule udah bener?")
-            setStartIdle()
-            return
-        end
-
-        -- Total max
-        local totalMax = 0
-        for _, r in ipairs(listingRules) do
-            local ml = r.maxListings or math.huge
-            if ml == math.huge then totalMax = math.huge; break end
-            totalMax = totalMax + ml
-        end
-        if #listingRules == 0 then totalMax = math.huge end
-        L("Total max listings: "..(totalMax == math.huge and "∞" or totalMax))
-
-        local sukses, fail = 0, 0
-        local i = 1
-        while i <= #todo and not stopReq do
-            local p = todo[i]
-            local rule, ruleIdx = matchRule(p.type, p.wt)
-            if not rule then
-                i = i + 1
-            else
-                p.tries = p.tries + 1
-                local mlInfo = ruleIdx > 0 and (" [r"..ruleIdx.."]") or ""
-                L("["..sukses.."] "..p.type.." (base "..string.format("%.1f", p.wt).."kg, cur "..string.format("%.1f", p.currentKg).."kg) @ "..rule.price..mlInfo)
-                local ok, id = listPet(p.braced, rule.price)
-                if ok then
-                    -- VERIFY: poll booth for pet to actually appear (max 3s)
-                    local verified = false
-                    local TW = Workspace:FindFirstChild("TradeWorld")
-                    local Booths = TW and TW:FindFirstChild("Booths")
-                    local mineBooth = Booths and findMyBooth(Booths)
-                    if mineBooth then
-                        local cleanUuid = p.braced:gsub("[{}]", "")
-                        for tries = 1, 6 do  -- 6 × 0.5s = 3s max
-                            local di = mineBooth:FindFirstChild("DynamicInstances")
-                            if di then
-                                for _, tool in ipairs(di:GetChildren()) do
-                                    local tu = tostring(tool:GetAttribute("PET_UUID") or "")
-                                    if tu:gsub("[{}]", "") == cleanUuid then
-                                        verified = true
-                                        break
-                                    end
+            -- For each rule, check which UUIDs still exist
+            for ri, uuidSet in pairs(myListed) do
+                for uuid, _ in pairs(uuidSet) do
+                    local found = false
+                    for _, booth in ipairs(Booths:GetChildren()) do
+                        local di = booth:FindFirstChild("DynamicInstances")
+                        if di then
+                            for _, t in ipairs(di:GetChildren()) do
+                                if t:IsA("Tool") and t.Name:gsub("[{}]","") == uuid then
+                                    found = true; break
                                 end
                             end
-                            if verified then break end
-                            task.wait(0.5)
                         end
+                        if found then break end
                     end
-
-                    if verified then
-                        sukses = sukses + 1
-                        if ruleIdx > 0 then ruleCount[ruleIdx] = ruleCount[ruleIdx] + 1 end
-                        L("   ✅ "..tostring(id):sub(1,12).."... [verified di booth]")
-                    else
-                        L("   ⚠ remote sukses tapi pet GAK MUNCUL di booth — retry")
-                        if p.tries < maxRetry then table.insert(todo, p) else fail = fail + 1 end
+                    if not found then
+                        myListed[ri][uuid] = nil  -- sold/unlisted, free up slot
                     end
-
-                    if autoRejoinN > 0 and verified and sukses % autoRejoinN == 0 then
-                        L("   🔄 AUTO-REJOIN setelah "..sukses.." sukses")
-                        task.wait(1)
-                        pcall(function() TeleportService:Teleport(game.PlaceId, player) end)
-                        return
-                    end
-                else
-                    L("   ❌ list call gagal")
-                    if p.tries < maxRetry then table.insert(todo, p) else fail = fail + 1 end
                 end
-                i = i + 1
-                setStats(string.format("Running... ✅ %d  |  ❌ %d", sukses, fail), C.accent)
-                task.wait(delaySec)
-            end
-            -- Check if all rules are full
-            local allFull = #listingRules > 0
-            for ri, r in ipairs(listingRules) do
-                local ml = r.maxListings or math.huge
-                if ruleCount[ri] < ml then allFull = false; break end
-            end
-            if allFull then
-                L("==== ALL RULES FULL ====")
-                break
             end
         end
-        local doneStatus = stopReq and "STOPPED" or "DONE"
-        L("==== "..doneStatus..": ✅ "..sukses.."  ❌ "..fail.." ====")
-        setStats(string.format("%s — ✅ %d  |  ❌ %d", doneStatus, sukses, fail), C.success)
+
+        -- Helper: list pets matching rules (single pass through backpack)
+        local function listMatchingPets()
+            local bp = player:FindFirstChild("Backpack")
+            if not bp then return 0 end
+
+            local pets = {}
+            for _, t in ipairs(bp:GetChildren()) do
+                if isPet(t) and not isFav(t) then
+                    local uuid = tostring(t:GetAttribute("PET_UUID") or t.Name)
+                    local clean = uuid:gsub("^{",""):gsub("}$","")
+                    local pType = getPetType(t)
+                    local currentKg = getCurrentKg(t)
+                    local baseKg = getBaseKg(t) or currentKg
+                    table.insert(pets, {
+                        braced="{"..clean.."}", clean=clean,
+                        type=pType, wt=baseKg, currentKg=currentKg,
+                    })
+                end
+            end
+
+            local listedNow = 0
+            for _, p in ipairs(pets) do
+                if stopReq then break end
+
+                -- Find matching rule with available slot
+                local rule, ruleIdx = nil, nil
+                if #listingRules == 0 then
+                    rule = {price = perTypePrices[p.type] or 100, maxListings = math.huge}
+                    ruleIdx = 0
+                else
+                    for ri, r in ipairs(listingRules) do
+                        local typeOk = (not r.type) or r.type == p.type
+                        local kgOk = p.wt >= r.min and p.wt <= r.max
+                        local ml = r.maxListings or math.huge
+                        if typeOk and kgOk and countActive(ri) < ml then
+                            rule, ruleIdx = r, ri
+                            break
+                        end
+                    end
+                end
+
+                if rule then
+                    local mlInfo = ruleIdx > 0 and (" [r"..ruleIdx.."]") or ""
+                    L(p.type.." (base "..string.format("%.1f", p.wt).."kg) @ "..rule.price..mlInfo)
+                    local ok, id = listPet(p.braced, rule.price)
+                    if ok then
+                        if ruleIdx > 0 then myListed[ruleIdx][p.clean] = true end
+                        listedNow = listedNow + 1
+                        L("   ✅ "..tostring(id):sub(1,12).."...")
+                        setStats("Listed "..listedNow.." this round", C.accent)
+                    else
+                        L("   ❌ list call gagal")
+                    end
+                    task.wait(delaySec)
+                end
+            end
+            return listedNow
+        end
+
+        -- ============ MAIN AUTO-REPLENISH LOOP ============
+        local totalListed = 0
+        local cycleNum = 0
+        while not stopReq do
+            cycleNum = cycleNum + 1
+            L("")
+            L("==== CYCLE "..cycleNum.." ====")
+
+            -- Cycle 2+: rescan untuk detect sold listings
+            if cycleNum > 1 then
+                setStats("Cek listings sold...", C.accent)
+                L("Rescan workspace (cek sold)...")
+                rescanAndPrune()
+                local total = 0
+                for ri, _ in pairs(myListed) do total = total + countActive(ri) end
+                L("Active listings sekarang: "..total)
+            end
+
+            -- Show current count per rule
+            for ri, r in ipairs(listingRules) do
+                local ml = r.maxListings or math.huge
+                local cur = countActive(ri)
+                local mlStr = ml == math.huge and "∞" or tostring(ml)
+                L("  r"..ri..": "..cur.."/"..mlStr.." active")
+            end
+
+            -- List new pets
+            setStats("Cycle "..cycleNum..": listing...", C.accent)
+            local listed = listMatchingPets()
+            totalListed = totalListed + listed
+            L("Cycle "..cycleNum.." done: "..listed.." new listed (total session: "..totalListed..")")
+
+            -- v8.26: Cek kalo backpack drained (rule below max + no matching pet)
+            local hasNonFullRule = false
+            local canFillSomeRule = false
+            local bp = player:FindFirstChild("Backpack")
+            for ri, r in ipairs(listingRules) do
+                local ml = r.maxListings or math.huge
+                if countActive(ri) < ml then
+                    hasNonFullRule = true
+                    -- Cek backpack ada pet match rule ini?
+                    if bp then
+                        for _, t in ipairs(bp:GetChildren()) do
+                            if isPet(t) and not isFav(t) then
+                                local pType = getPetType(t)
+                                local currentKg = getCurrentKg(t)
+                                local baseKg = getBaseKg(t) or currentKg
+                                if (not r.type or r.type == pType)
+                                   and baseKg >= r.min and baseKg <= r.max then
+                                    canFillSomeRule = true
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+                if canFillSomeRule then break end
+            end
+
+            -- Stop kalo backpack drained dan masih ada rule yang below max
+            if hasNonFullRule and not canFillSomeRule and #listingRules > 0 then
+                L("==== BACKPACK DRAINED ====")
+                L("Rule masih below max tapi gak ada pet di backpack yang match")
+                setStats("Backpack drained — STOP", C.danger)
+                break
+            end
+
+            -- Auto-rejoin check
+            if autoRejoinN > 0 and totalListed >= autoRejoinN then
+                L("🔄 AUTO-REJOIN setelah "..totalListed.." total listed")
+                task.wait(1)
+                pcall(function() TeleportService:Teleport(game.PlaceId, player) end)
+                return
+            end
+
+            -- Wait before next replenish cycle
+            if not stopReq then
+                setStats("Replenish idle — "..replenishInterval.."s", C.success)
+                for i = 1, replenishInterval do
+                    if stopReq then break end
+                    task.wait(1)
+                end
+            end
+        end
+
+        L("==== STOPPED — total listed: "..totalListed.." ====")
+        setStats("Stopped — "..totalListed.." total listed", C.success)
         setStartIdle()
     end)
 end)
@@ -2017,162 +2003,100 @@ task.spawn(function()
     end
 end)
 
--- ===== UNLIST ALL =====
+-- ===== UNLIST ALL v2 - per-booth TP loop + return value detection =====
+-- Insight: server return TRUE kalo unlist sukses (booth-mu), FALSE kalo reject
 local function unlistAllInternal()
-    setStats("[1/5] Cari TradeWorld...", C.accent)
-    L("┌─ UNLIST ALL START ─────────")
-    L("│ STEP 1: Cari TradeWorld di Workspace")
+    setStats("[1/8] Cari TradeWorld...", C.accent)
+    L("┌─ UNLIST ALL v2 START ─────────")
 
     local TW = Workspace:FindFirstChild("TradeWorld")
-    if not TW then
-        L("│ ✗ TradeWorld gak ada")
-        setStats("FAIL: TradeWorld gak ada", C.danger)
-        return 0
-    end
+    if not TW then L("│ ✗ TradeWorld gak ada"); setStats("FAIL: TradeWorld gak ada", C.danger); return 0 end
     local Booths = TW:FindFirstChild("Booths")
-    if not Booths then
-        L("│ ✗ TradeWorld.Booths gak ada")
-        setStats("FAIL: Booths folder gak ada", C.danger)
-        return 0
-    end
-    L("│ ✓ Booths folder OK ("..#Booths:GetChildren().." booths)")
+    if not Booths then L("│ ✗ Booths gak ada"); setStats("FAIL: Booths folder gak ada", C.danger); return 0 end
 
-    -- STEP 2: Auto-TP to first booth (force player near booths)
-    setStats("[2/5] TP ke booth area...", C.accent)
-    L("│ STEP 2: TP ke trade booth area")
+    local allBooths = Booths:GetChildren()
+    L("│ ✓ "..#allBooths.." booth total")
+
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        local tpDone = false
-        for _, booth in ipairs(Booths:GetChildren()) do
-            local part = booth:FindFirstChildWhichIsA("BasePart", true)
-            if part then
-                local oldPos = hrp.Position
-                hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0)
-                local dist = (oldPos - part.Position).Magnitude
-                L("│ ✓ TP "..math.floor(dist).." studs ke booth "..booth.Name:sub(1,8))
-                tpDone = true
-                break
-            end
-        end
-        if not tpDone then
-            L("│ ⚠ Gak nemu booth dengan BasePart untuk TP")
-        end
-    else
-        L("│ ⚠ Character/HRP gak ada, skip TP")
-    end
-    task.wait(0.5)
-
-    -- STEP 3: Force stream all booth areas
-    setStats("[3/5] Force-stream booth...", C.accent)
-    L("│ STEP 3: Force-stream semua area booth")
-    local boothPositions = {}
-    for _, booth in ipairs(Booths:GetChildren()) do
-        if booth:IsA("Model") or booth:IsA("Folder") then
-            local pos = nil
-            local defaultModel = booth:FindFirstChild("Default")
-            if defaultModel then
-                if defaultModel:IsA("Model") and defaultModel.PrimaryPart then
-                    pos = defaultModel.PrimaryPart.Position
-                else
-                    local part = defaultModel:FindFirstChildWhichIsA("BasePart", true)
-                    if part then pos = part.Position end
-                end
-            end
-            if not pos then
-                local part = booth:FindFirstChildWhichIsA("BasePart", true)
-                if part then pos = part.Position end
-            end
-            if pos then table.insert(boothPositions, pos) end
-        end
-    end
-    L("│ Force-streaming "..#boothPositions.." areas...")
-    for _, pos in ipairs(boothPositions) do
-        pcall(function() player:RequestStreamAroundAsync(pos) end)
-    end
-    L("│ Wait 3s biar streaming load...")
-    task.wait(3)
-
-    -- STEP 4: Collect all listings across all booths
-    setStats("[4/5] Scan booth listings...", C.accent)
-    L("│ STEP 4: Collect semua listings")
-    local allListings = {}
-    local boothsWithTools = 0
-    for _, booth in ipairs(Booths:GetChildren()) do
-        if booth:IsA("Model") or booth:IsA("Folder") then
-            local di = booth:FindFirstChild("DynamicInstances")
-            if di then
-                local hadTool = false
-                for _, tool in ipairs(di:GetChildren()) do
-                    if tool:IsA("Tool") then
-                        hadTool = true
-                        local uuid = tool.Name:gsub("[{}]", "")
-                        table.insert(allListings, {
-                            uuid = uuid, tool = tool, di = di, booth = booth,
-                        })
-                    end
-                end
-                if hadTool then boothsWithTools = boothsWithTools + 1 end
-            end
-        end
-    end
-    L("│ Booths dengan tools: "..boothsWithTools)
-    L("│ Total listings: "..#allListings)
-
-    if #allListings == 0 then
-        L("│ ✗ 0 listings ditemukan")
-        L("│ Kemungkinan: booth-mu kosong / streaming gagal")
-        L("└─────────────────────────")
-        setStats("0 listings — booth kosong?", C.danger)
-        return 0
-    end
-
-    -- STEP 5: Brute-force unlist (server akan reject yang bukan punya kita)
-    setStats("[5/5] Unlist 0/"..#allListings.."...", C.accent)
-    L("│ STEP 5: Coba unlist (server reject yang bukan punya kita)")
+    if not hrp then L("│ ✗ HRP gak ada"); setStats("FAIL: character gak ada", C.danger); return 0 end
 
     local removed = 0
+    local rejected = 0
     local myBooth = nil
-    local tested = 0
-    for _, item in ipairs(allListings) do
-        if stopReq then
-            L("│ ⛔ STOP requested")
-            break
-        end
 
-        -- After finding our booth, skip listings di booth lain
-        if myBooth and item.booth ~= myBooth then
-            -- skip
+    -- ============ PER-BOOTH LOOP ============
+    -- TP ke tiap booth satu-satu, stream, collect, try unlist
+    for boothIdx, booth in ipairs(allBooths) do
+        if stopReq then L("│ ⛔ STOP requested"); break end
+        if myBooth and booth ~= myBooth then
+            -- udah ketemu booth-mu, skip booth lain
         else
-            tested = tested + 1
-            pcall(function() removeRE:InvokeServer(item.uuid) end)
-            task.wait(0.35)
-            -- Verify tool gone
-            local stillThere = false
-            for _, t in ipairs(item.di:GetChildren()) do
-                if t:IsA("Tool") and t.Name:gsub("[{}]", "") == item.uuid then
-                    stillThere = true
-                    break
+            -- Step A: TP ke booth ini
+            local part = booth:FindFirstChildWhichIsA("BasePart", true)
+            if part then
+                hrp.CFrame = part.CFrame + Vector3.new(0, 8, 0)
+                setStats("[Booth "..boothIdx.."/"..#allBooths.."] "..booth.Name:sub(1,8).."...", C.accent)
+
+                -- Step B: Stream around it
+                pcall(function() player:RequestStreamAroundAsync(part.Position) end)
+                task.wait(0.8)
+
+                -- Step C: Collect tools di booth ini
+                local di = booth:FindFirstChild("DynamicInstances")
+                local toolsInBooth = {}
+                if di then
+                    for _, t in ipairs(di:GetChildren()) do
+                        if t:IsA("Tool") then
+                            local uuid = t.Name:gsub("[{}]", "")
+                            table.insert(toolsInBooth, {uuid=uuid, tool=t, di=di})
+                        end
+                    end
+                end
+
+                if #toolsInBooth > 0 then
+                    L("│ Booth "..boothIdx.." ("..booth.Name:sub(1,8).."...): "..#toolsInBooth.." listings")
+
+                    -- Step D: Try unlist each, cek return value
+                    for _, item in ipairs(toolsInBooth) do
+                        if stopReq then break end
+
+                        local ok, ret = pcall(function() return removeRE:InvokeServer(item.uuid) end)
+                        task.wait(0.3)
+
+                        if ok and ret == true then
+                            -- SUCCESS! Ini punya kita
+                            removed = removed + 1
+                            if not myBooth then
+                                myBooth = booth
+                                L("│ ⭐ BOOTH-MU KETEMU: "..booth.Name:sub(1,16).."...")
+                            end
+                            L("│ ["..removed.."] ✅ "..item.uuid:sub(1,12).."...")
+                            setStats("Unlisted "..removed.." pets", C.accent)
+                        elseif ok and ret == false then
+                            -- Reject = bukan punya kita
+                            rejected = rejected + 1
+                        else
+                            -- Error
+                            L("│ ⚠ ERR: "..tostring(ret):sub(1,40))
+                        end
+
+                        task.wait(0.15)
+                    end
                 end
             end
-            if not stillThere then
-                removed = removed + 1
-                if not myBooth then
-                    myBooth = item.booth
-                    L("│ ✓ Booth-mu KETEMU: "..item.booth.Name:sub(1, 12).."...")
-                end
-                L("│ ["..removed.."] ✅ "..item.uuid:sub(1, 12).."...")
-                setStats("Unlisting "..removed.."...", C.accent)
-            end
-            task.wait(0.15)
         end
     end
 
-    L("│ Selesai. Removed: "..removed.."/"..tested)
+    L("│ Done. Removed: "..removed.." | Rejected: "..rejected)
     L("└─────────────────────────")
 
     if removed == 0 then
-        setStats("0 unlisted — booth-mu kosong?", C.danger)
+        if rejected > 0 then
+            setStats("0 punya lo (semua di booth lain)", C.danger)
+        else
+            setStats("0 listings — booth-mu kosong?", C.danger)
+        end
     else
         setStats("✅ Unlisted "..removed.." pets", C.success)
     end
