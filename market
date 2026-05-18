@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.48"
-local VERSION_DATE = "Auto-Start + Misc scroll + hide Listing UNLIST ALL"
+local VERSION = "8.49"
+local VERSION_DATE = "Merge garden helper: auto-accept + pet types breakdown"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1416,6 +1416,219 @@ do
         -- Save ke state
         BH.marketState.autoStart = BH.autoStart
         BH.saveMarketState(BH.marketState)
+    end)
+end
+
+-- v8.49: AUTO-ACCEPT card (garden server feature) — auto terima gift & trade
+do
+    local acceptCard = makeCard(miscPanel, 116)
+    lblOf(acceptCard, "🎁  AUTO-ACCEPT (Garden Server)", 14, 10, 360, 22, C.accent, 14, FB)
+    lblOf(acceptCard, "Auto terima gift / trade dari player lain", 14, 32, 360, 18, C.textDim, 11)
+    local giftBtn = btnOf(acceptCard, 14, 54, 170, 28, "🎁 Auto-Gift: OFF", C.danger)
+    local tradeBtn = btnOf(acceptCard, 192, 54, 170, 28, "🤝 Auto-Trade: OFF", C.danger)
+    local statusLbl = lblOf(acceptCard, "Scanning gift/trade remotes...", 14, 88, 480, 18, C.textDim, 10)
+
+    -- Scan RS untuk gift/trade remotes
+    BH.giftRemotes = {}
+    BH.tradeRemotes = {}
+    local function scanRemotes(parent, depth)
+        if depth > 6 then return end
+        for _, c in ipairs(parent:GetChildren()) do
+            if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
+                local n = c.Name:lower()
+                if n:find("gift") or n:find("offer") then
+                    table.insert(BH.giftRemotes, {remote=c, name=c.Name, isFn=c:IsA("RemoteFunction")})
+                end
+                if n:find("trade") and not n:find("booth") then
+                    table.insert(BH.tradeRemotes, {remote=c, name=c.Name, isFn=c:IsA("RemoteFunction")})
+                end
+            end
+            pcall(function() scanRemotes(c, depth + 1) end)
+        end
+    end
+    scanRemotes(RS, 0)
+    statusLbl.Text = string.format("Found: %d gift, %d trade remotes", #BH.giftRemotes, #BH.tradeRemotes)
+
+    BH.autoGift = false
+    BH.autoTrade = false
+    BH.giftConns = {}
+    BH.tradeConns = {}
+
+    local function hookGifts()
+        for _, conn in ipairs(BH.giftConns) do conn:Disconnect() end
+        BH.giftConns = {}
+        if not BH.autoGift then return end
+        for _, info in ipairs(BH.giftRemotes) do
+            if info.remote:IsA("RemoteEvent") then
+                local nameL = info.name:lower()
+                if nameL:find("offer") or nameL:find("receive") or nameL:find("incoming") or nameL:find("request") then
+                    local conn = info.remote.OnClientEvent:Connect(function(...)
+                        local args = {...}
+                        for _, other in ipairs(BH.giftRemotes) do
+                            if other.name:lower():find("accept") then
+                                pcall(function()
+                                    if other.isFn then
+                                        other.remote:InvokeServer(table.unpack(args))
+                                    else
+                                        other.remote:FireServer(table.unpack(args))
+                                    end
+                                end)
+                                L("[Auto-Gift] ✅ accepted via "..other.name)
+                                break
+                            end
+                        end
+                    end)
+                    table.insert(BH.giftConns, conn)
+                end
+            end
+        end
+    end
+
+    local function hookTrades()
+        for _, conn in ipairs(BH.tradeConns) do conn:Disconnect() end
+        BH.tradeConns = {}
+        if not BH.autoTrade then return end
+        for _, info in ipairs(BH.tradeRemotes) do
+            if info.remote:IsA("RemoteEvent") then
+                local nameL = info.name:lower()
+                if nameL:find("request") or nameL:find("offer") or nameL:find("incoming") then
+                    local conn = info.remote.OnClientEvent:Connect(function(...)
+                        local args = {...}
+                        for _, other in ipairs(BH.tradeRemotes) do
+                            if other.name:lower():find("accept") then
+                                pcall(function()
+                                    if other.isFn then
+                                        other.remote:InvokeServer(table.unpack(args))
+                                    else
+                                        other.remote:FireServer(table.unpack(args))
+                                    end
+                                end)
+                                L("[Auto-Trade] ✅ accepted via "..other.name)
+                                break
+                            end
+                        end
+                    end)
+                    table.insert(BH.tradeConns, conn)
+                end
+            end
+        end
+    end
+
+    giftBtn.MouseButton1Click:Connect(function()
+        BH.autoGift = not BH.autoGift
+        giftBtn.Text = BH.autoGift and "🎁 Auto-Gift: ON" or "🎁 Auto-Gift: OFF"
+        giftBtn.BackgroundColor3 = BH.autoGift and C.success or C.danger
+        hookGifts()
+        L("[Auto-Gift] "..(BH.autoGift and "enabled, "..#BH.giftConns.." listener" or "disabled"))
+    end)
+
+    tradeBtn.MouseButton1Click:Connect(function()
+        BH.autoTrade = not BH.autoTrade
+        tradeBtn.Text = BH.autoTrade and "🤝 Auto-Trade: ON" or "🤝 Auto-Trade: OFF"
+        tradeBtn.BackgroundColor3 = BH.autoTrade and C.success or C.danger
+        hookTrades()
+        L("[Auto-Trade] "..(BH.autoTrade and "enabled, "..#BH.tradeConns.." listener" or "disabled"))
+    end)
+end
+
+-- v8.49: PET TYPES card — breakdown pet di backpack per type
+do
+    local petTypesCard = makeCard(miscPanel, 240)
+    lblOf(petTypesCard, "📋  PET TYPES (di backpack)", 14, 10, 360, 22, C.accent, 14, FB)
+    local totLbl = lblOf(petTypesCard, "Total: 0 pets", 14, 32, 360, 18, C.text, 12, FM)
+    local ptRefreshBtn = btnOf(petTypesCard, 280, 14, 80, 22, "🔄 REFRESH", C.accent)
+    ptRefreshBtn.TextSize = 10
+
+    local ptScroll = Instance.new("ScrollingFrame")
+    ptScroll.Size = UDim2.new(1, -20, 0, 170)
+    ptScroll.Position = UDim2.new(0, 10, 0, 56)
+    ptScroll.BackgroundColor3 = C.input
+    ptScroll.BorderSizePixel = 0
+    ptScroll.ScrollBarThickness = 4
+    ptScroll.ScrollBarImageColor3 = C.accent
+    ptScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    ptScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    ptScroll.Parent = petTypesCard
+    Instance.new("UICorner", ptScroll).CornerRadius = UDim.new(0, 6)
+    local ptLayout = Instance.new("UIListLayout")
+    ptLayout.Padding = UDim.new(0, 2) ptLayout.Parent = ptScroll
+    local ptPad = Instance.new("UIPadding")
+    ptPad.PaddingTop = UDim.new(0, 4) ptPad.PaddingBottom = UDim.new(0, 4)
+    ptPad.PaddingLeft = UDim.new(0, 6) ptPad.PaddingRight = UDim.new(0, 6)
+    ptPad.Parent = ptScroll
+
+    BH.refreshPetTypes = function()
+        for _, c in ipairs(ptScroll:GetChildren()) do
+            if c:IsA("Frame") then c:Destroy() end
+        end
+        local bp = player:FindFirstChild("Backpack")
+        if not bp then totLbl.Text = "Total: 0 | no backpack"; return end
+
+        local total, favC = 0, 0
+        local tc = {}
+        for _, t in ipairs(bp:GetChildren()) do
+            if isPet(t) then
+                total = total + 1
+                if isFav(t) then favC = favC + 1 end
+                local pt = getPetType(t)
+                local kg = getCurrentKg(t)
+                if not tc[pt] then tc[pt] = {n=0, mn=math.huge, mx=0} end
+                tc[pt].n = tc[pt].n + 1
+                if kg > 0 then
+                    tc[pt].mn = math.min(tc[pt].mn, kg)
+                    tc[pt].mx = math.max(tc[pt].mx, kg)
+                end
+            end
+        end
+        local nTypes = 0 for _ in pairs(tc) do nTypes = nTypes + 1 end
+        totLbl.Text = string.format("Total: %d pets  |  ⭐ %d fav  |  %d types", total, favC, nTypes)
+
+        local sorted = {}
+        for pt, info in pairs(tc) do table.insert(sorted, {pt=pt, info=info}) end
+        table.sort(sorted, function(a, b) return a.info.n > b.info.n end)
+
+        for i, e in ipairs(sorted) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, -8, 0, 22)
+            row.BackgroundColor3 = (i % 2 == 0) and C.bg or C.card
+            row.BorderSizePixel = 0 row.Parent = ptScroll
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+            local nm = Instance.new("TextLabel")
+            nm.Size = UDim2.new(0.55, -4, 1, 0) nm.Position = UDim2.new(0, 8, 0, 0)
+            nm.BackgroundTransparency = 1 nm.Text = e.pt
+            nm.TextColor3 = C.text nm.Font = FM nm.TextSize = 11
+            nm.TextXAlignment = Enum.TextXAlignment.Left
+            nm.TextTruncate = Enum.TextTruncate.AtEnd nm.Parent = row
+            local cn = Instance.new("TextLabel")
+            cn.Size = UDim2.new(0.20, 0, 1, 0) cn.Position = UDim2.new(0.55, 0, 0, 0)
+            cn.BackgroundTransparency = 1 cn.Text = "×"..e.info.n
+            cn.TextColor3 = C.accent cn.Font = FB cn.TextSize = 11
+            cn.TextXAlignment = Enum.TextXAlignment.Center cn.Parent = row
+            local kg = Instance.new("TextLabel")
+            kg.Size = UDim2.new(0.25, 0, 1, 0) kg.Position = UDim2.new(0.75, 0, 0, 0)
+            kg.BackgroundTransparency = 1
+            kg.Text = (e.info.mx > 0) and string.format("%.1f-%.1f", e.info.mn, e.info.mx) or "-"
+            kg.TextColor3 = C.textDim kg.Font = FM kg.TextSize = 10
+            kg.TextXAlignment = Enum.TextXAlignment.Right kg.Parent = row
+        end
+    end
+
+    ptRefreshBtn.MouseButton1Click:Connect(BH.refreshPetTypes)
+
+    -- Auto-refresh on backpack change
+    local function bindBp()
+        local bp = player:FindFirstChild("Backpack")
+        if not bp then return end
+        bp.ChildAdded:Connect(function() task.wait(0.1); pcall(BH.refreshPetTypes) end)
+        bp.ChildRemoved:Connect(function() task.wait(0.1); pcall(BH.refreshPetTypes) end)
+    end
+    bindBp()
+    player.CharacterAdded:Connect(function() task.wait(1); bindBp(); pcall(BH.refreshPetTypes) end)
+
+    -- Initial scan after isPet/getPetType are defined (they're defined later, so delay)
+    task.spawn(function()
+        task.wait(2)
+        pcall(BH.refreshPetTypes)
     end)
 end
 
@@ -3940,6 +4153,7 @@ local function scanBoothListings()
                                 kg = kg,
                                 price = tonumber(listing.Price) or 0,
                                 owner = pp.Name,
+                                sellerPlayer = pp,  -- v8.48: simpan player ref buat buy
                                 name = searchName,
                                 listingUuid = listingUuid,
                                 itemId = listing.ItemId,
@@ -4223,13 +4437,39 @@ local function renderSnipe()
                     task.spawn(function()
                         local clean = tostring(p.listingUuid):gsub("[{}]","")
                         local braced = "{"..clean.."}"
+                        local boothClean = p.boothUuid and tostring(p.boothUuid):gsub("[{}]","") or nil
+                        local seller = p.sellerPlayer
+                        local sellerId = seller and seller.UserId or nil
+
+                        -- v8.48: brute force semua kemungkinan format
+                        local attempts = {
+                            {label="seller+listing", args={seller, clean}},
+                            {label="seller+braced", args={seller, braced}},
+                            {label="listing+seller", args={clean, seller}},
+                            {label="sellerId+listing", args={sellerId, clean}},
+                            {label="booth+listing", args={boothClean, clean}},
+                            {label="listing-clean", args={clean}},
+                            {label="listing-braced", args={braced}},
+                        }
+
                         local success = false
-                        for _, arg in ipairs({clean, braced}) do
-                            local ok, ret = pcall(function() return buyRE:InvokeServer(arg) end)
-                            L("[Buy] "..arg:sub(1,12).." → "..tostring(ret))
-                            if ok and ret == true then success = true; break end
-                            task.wait(0.3)
+                        for _, a in ipairs(attempts) do
+                            if a.args[1] ~= nil then  -- skip kalo arg utama nil
+                                local ok, r1, r2, r3 = pcall(function()
+                                    return buyRE:InvokeServer(table.unpack(a.args))
+                                end)
+                                L("[Buy] "..a.label.." → ok="..tostring(ok).." r1="..tostring(r1):sub(1,30)
+                                    .." r2="..tostring(r2):sub(1,30)
+                                    .." r3="..tostring(r3):sub(1,30))
+                                if ok and r1 == true then
+                                    success = true
+                                    L("[Buy] ✅✅ WORKING FORMAT: "..a.label)
+                                    break
+                                end
+                                task.wait(0.3)
+                            end
                         end
+
                         if success then
                             buyBtn.Text = "✅ OK"
                             buyBtn.BackgroundColor3 = C.success
@@ -4329,14 +4569,37 @@ local function renderBuy()
                 end
                 local clean = tostring(listingUuid):gsub("[{}]","")
                 local braced = "{"..clean.."}"
+                local boothClean = p.boothUuid and tostring(p.boothUuid):gsub("[{}]","") or nil
+                local seller = p.sellerPlayer
+                local sellerId = seller and seller.UserId or nil
 
-                local attempts = {clean, braced}
+                -- v8.48: brute force semua kemungkinan format buy
+                local attempts = {
+                    {label="seller+listing", args={seller, clean}},
+                    {label="seller+braced", args={seller, braced}},
+                    {label="listing+seller", args={clean, seller}},
+                    {label="sellerId+listing", args={sellerId, clean}},
+                    {label="booth+listing", args={boothClean, clean}},
+                    {label="listing-clean", args={clean}},
+                    {label="listing-braced", args={braced}},
+                }
+
                 local success = false
-                for _, arg in ipairs(attempts) do
-                    local ok, ret = pcall(function() return buyRE:InvokeServer(arg) end)
-                    L("[Buy] tried "..arg:sub(1,12).." → "..tostring(ret))
-                    if ok and ret == true then success = true; break end
-                    task.wait(0.3)
+                for _, a in ipairs(attempts) do
+                    if a.args[1] ~= nil then
+                        local ok, r1, r2, r3 = pcall(function()
+                            return buyRE:InvokeServer(table.unpack(a.args))
+                        end)
+                        L("[Buy] "..a.label.." → ok="..tostring(ok).." r1="..tostring(r1):sub(1,30)
+                            .." r2="..tostring(r2):sub(1,30)
+                            .." r3="..tostring(r3):sub(1,30))
+                        if ok and r1 == true then
+                            success = true
+                            L("[Buy] ✅✅ WORKING FORMAT: "..a.label)
+                            break
+                        end
+                        task.wait(0.3)
+                    end
                 end
 
                 if success then
