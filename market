@@ -1,9 +1,9 @@
--- ZENX MARKET v8 — NodeHub style
+=-- ZENX MARKET v8 — NodeHub style
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.34"
-local VERSION_DATE = "adaptive backoff + match count log"
+local VERSION = "8.35"
+local VERSION_DATE = "MUTATION strip — list mutated pets too"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -32,6 +32,68 @@ do
     BH.marketState = BH.loadMarketState()
     BH.myBoothUuid = BH.marketState.myBoothUuid
     if BH.myBoothUuid then L("[State] cached myBoothUuid: "..BH.myBoothUuid:sub(1,16).."...") end
+end
+
+-- ===== v8.35: MUTATION strip helper (sync sama inventory.lua) =====
+do
+    BH.MUTATION_NAMES = {
+        -- Single-word mutations (sorted alphabetical)
+        "Alienated","Ancient","Angelic","Aromatic","Ascended","Astral","Aurora",
+        "Bearded","Blazing","Blessed","Blossoming","Bloodlust",
+        "Celestial","Chaotic","Chilled","Chocolate","Christmas","Chromatic","Corrupt","Corrupted",
+        "Cosmic","Crocodile","Crystal","Cursed",
+        "Dawn","Demonic","Diamond","Disco","Divine","Dreadbound",
+        "Eclipse","Eclipsed","Eldritch","Enchanted","Ethereal","Everchanted",
+        "Fiery","Forger","Fried","Frostbite","Frozen",
+        "Galactic","GIANT","Giraffe","Ghostly","Glacial","Glimmering","Gold","Golden",
+        "HyperHunger","Holy",
+        "Icy","Infernal","Inferno","Inverted","IronSkin",
+        "JollyDecorator","JUMBO",
+        "Lion","Lunar","Luminous",
+        "Mega","MerryNursery","Mimic","Mini","Moonlit","Mystic","Mythic",
+        "Nightmare","Nocturnal","Nutty",
+        "Oxpecker",
+        "Peppermint","Phantom","Plasma","Prismatic","Primal",
+        "Radiant","Rainbow","Rhino","Rideable","Royal",
+        "Shadow","Shiny","Shocked","Silver","SpiritSparkle","Solar","Soulflame","Sparkling","Spectral","Starlit","Stellar","Storm",
+        "Tempest","Tethered","Tiny","Toxic","Tranquil","Twilight",
+        "UFO",
+        "Venom","Verdant","Volcanic",
+        "Wet","Windy",
+        "Zombified",
+        -- Multi-word variants
+        "Christmas Rally","ChristmasRally",
+        "Giant Bean","GiantBean",
+        "Giant Golem","GiantGolem",
+        "Hyper Hunger",
+        "Iron Skin",
+        "Jolly Decorator",
+        "Merry Nursery","MerryNursery",
+        "Spirit Sparkle",
+    }
+    BH.MUTATION_PREFIXES = {}
+    for _, m in ipairs(BH.MUTATION_NAMES) do
+        table.insert(BH.MUTATION_PREFIXES, m..", ")  -- "Galactic, "
+        table.insert(BH.MUTATION_PREFIXES, m.." ")   -- "Galactic "
+    end
+
+    function BH.getBaseName(name)
+        if not name or name == "" then return name end
+        local result = name
+        local changed = true
+        -- Strip multi-layer mutations (e.g. "Shocked, Galactic Peacock" → "Peacock")
+        while changed do
+            changed = false
+            for _, prefix in ipairs(BH.MUTATION_PREFIXES) do
+                if result:sub(1, #prefix) == prefix then
+                    result = result:sub(#prefix + 1)
+                    changed = true
+                    break
+                end
+            end
+        end
+        return result
+    end
 end
 
 local CoreGui = game:GetService("CoreGui")
@@ -1672,8 +1734,9 @@ do
         for _, t in ipairs(di:GetChildren()) do
             if t:IsA("Tool") then
                 local pType = getPetType(t)
+                local pBaseType = BH.getBaseName(pType)  -- v8.35: strip mutations
                 local baseKg = getBaseKg(t) or getCurrentKg(t)
-                local typeOk = (not rule.type) or rule.type == pType
+                local typeOk = (not rule.type) or rule.type == pBaseType
                 local kgOk = baseKg >= rule.min and baseKg <= rule.max
                 if typeOk and kgOk then count = count + 1 end
             end
@@ -1823,24 +1886,31 @@ startBtn.MouseButton1Click:Connect(function()
                     local uuid = tostring(t:GetAttribute("PET_UUID") or t.Name)
                     local clean = uuid:gsub("^{",""):gsub("}$","")
                     local pType = getPetType(t)
+                    local pBaseType = BH.getBaseName(pType)  -- v8.35: strip mutations
                     local currentKg = getCurrentKg(t)
                     local baseKg = getBaseKg(t) or currentKg
                     table.insert(pets, {
                         braced="{"..clean.."}", clean=clean,
-                        type=pType, wt=baseKg, currentKg=currentKg,
+                        type=pType, baseType=pBaseType,  -- pType: "Galactic Peacock", baseType: "Peacock"
+                        wt=baseKg, currentKg=currentKg,
                     })
                 end
             end
 
-            -- v8.34: log how many pets match each rule
+            -- v8.34: log how many pets match each rule (v8.35: pakai baseType)
             for ri, r in ipairs(listingRules) do
                 local matchCount = 0
+                local mutCount = 0
                 for _, p in ipairs(pets) do
-                    local typeOk = (not r.type) or r.type == p.type
+                    local typeOk = (not r.type) or r.type == p.baseType
                     local kgOk = p.wt >= r.min and p.wt <= r.max
-                    if typeOk and kgOk then matchCount = matchCount + 1 end
+                    if typeOk and kgOk then
+                        matchCount = matchCount + 1
+                        if p.type ~= p.baseType then mutCount = mutCount + 1 end
+                    end
                 end
-                L("  r"..ri.." ("..(r.type or "All").." "..r.min.."-"..(r.max==math.huge and "∞" or r.max).."): "..matchCount.." match di backpack")
+                local mutInfo = mutCount > 0 and (" ("..mutCount.." mutated)") or ""
+                L("  r"..ri.." ("..(r.type or "All").." "..r.min.."-"..(r.max==math.huge and "∞" or r.max).."): "..matchCount.." match"..mutInfo)
             end
 
             local listedNow = 0
@@ -1848,14 +1918,14 @@ startBtn.MouseButton1Click:Connect(function()
             for _, p in ipairs(pets) do
                 if stopReq then break end
 
-                -- Find matching rule with available slot
+                -- Find matching rule with available slot (v8.35: pakai baseType)
                 local rule, ruleIdx = nil, nil
                 if #listingRules == 0 then
-                    rule = {price = perTypePrices[p.type] or 100, maxListings = math.huge}
+                    rule = {price = perTypePrices[p.baseType] or perTypePrices[p.type] or 100, maxListings = math.huge}
                     ruleIdx = 0
                 else
                     for ri, r in ipairs(listingRules) do
-                        local typeOk = (not r.type) or r.type == p.type
+                        local typeOk = (not r.type) or r.type == p.baseType
                         local kgOk = p.wt >= r.min and p.wt <= r.max
                         local ml = r.maxListings or math.huge
                         if typeOk and kgOk and countActive(ri) < ml then
