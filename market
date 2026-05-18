@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.47"
-local VERSION_DATE = "LIST HARGA search + SNIPE Buy tab"
+local VERSION = "8.48"
+local VERSION_DATE = "FIX: assume mature (age=100) when age unknown → base = cur/10"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1872,11 +1872,12 @@ local function snHdr(text, x, w)
     l.TextColor3 = C.accent l.Font = FB l.TextSize = 11
     l.TextXAlignment = Enum.TextXAlignment.Left l.Parent = snHeader
 end
-snHdr("Pet Type", 0, 0.3)
-snHdr("Mutation", 0.3, 0.22)
-snHdr("KG", 0.52, 0.12)
-snHdr("Price", 0.64, 0.16)
-snHdr("Owner", 0.8, 0.2)
+snHdr("Pet Type", 0, 0.20)
+snHdr("Mutation", 0.20, 0.14)
+snHdr("KG", 0.34, 0.10)
+snHdr("Owner", 0.44, 0.22)
+snHdr("Price", 0.66, 0.14)
+snHdr("Action", 0.80, 0.18)
 
 -- Listings table
 snScroll = Instance.new("ScrollingFrame")
@@ -2064,8 +2065,14 @@ local function getBaseKg(t)
     -- Fallback: formula baseKG = kg * 11 / (age + 10)
     local kg = getCurrentKg(t)
     local age = getAge(t)
-    if kg > 0 and age and age >= 2 then  -- age 2+ artinya beneran parsed, bukan fallback 1
-        return kg * 11 / (age + 10), "formula"
+    if kg > 0 then
+        -- v8.47: kalo age unknown (default 1), assume mature (age 100)
+        -- Most stored pets are matured (age 100), formula: base = current / 10
+        if age and age >= 2 then
+            return kg * 11 / (age + 10), "formula"
+        else
+            return kg * 11 / 110, "formula-mature"  -- age=100 assumed
+        end
     end
     -- v8.37: cache fallback untuk mutated pet (yang gak punya age info)
     -- v8.38: pass item biar bisa lookup by f attribute juga (untuk booth tools)
@@ -2962,6 +2969,28 @@ startBtn.MouseButton1Click:Connect(function()
                 if skipCount > 0 then table.insert(extras, skipCount.." sudah listed") end
                 local info = #extras > 0 and (" ("..table.concat(extras, ", ")..")") or ""
                 L("  r"..ri.." ("..(r.type or "All").." "..r.min.."-"..(r.max==math.huge and "∞" or r.max).."): "..matchCount.." available"..info)
+
+                -- v8.47: kalo matchCount=0, log pet type yang sama (siapa tau kg miss sedikit)
+                if matchCount == 0 then
+                    local sameTypeList = {}
+                    for _, p in ipairs(pets) do
+                        local typeOk = (not r.type) or r.type == p.baseType
+                        if typeOk and not alreadyListed[p.clean] then
+                            table.insert(sameTypeList, p)
+                        end
+                    end
+                    if #sameTypeList > 0 then
+                        L("    └─ "..#sameTypeList.." "..(r.type or "All").." di backpack TAPI kg gak match:")
+                        for i, p in ipairs(sameTypeList) do
+                            if i <= 6 then
+                                L(string.format("        • %s: base=%.2f cur=%.2f", p.type, p.wt or 0, p.currentKg or 0))
+                            end
+                        end
+                        if #sameTypeList > 6 then
+                            L("        ... +"..(#sameTypeList-6).." more")
+                        end
+                    end
+                end
             end
 
             local listedNow = 0
@@ -4081,7 +4110,7 @@ local function renderSnipe()
         if nameMatch and ageOk and kgOk and priceOk then
             shown = shown + 1
             local row = Instance.new("Frame")
-            row.Size = UDim2.new(1, -8, 0, 28) row.BackgroundColor3 = C.input
+            row.Size = UDim2.new(1, -8, 0, 32) row.BackgroundColor3 = C.input
             row.BorderSizePixel = 0 row.Parent = snScroll
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
 
@@ -4094,12 +4123,59 @@ local function renderSnipe()
                 l.TextXAlignment = Enum.TextXAlignment.Left
                 l.TextTruncate = Enum.TextTruncate.AtEnd l.Parent = row
             end
-            cell(p.type, 0, 0.3, C.text, FB)
-            cell(p.mutation, 0.3, 0.22, C.accent)
-            cell(string.format("%.1f", p.kg), 0.52, 0.12, C.textDim)
-            cell(p.price and tostring(p.price) or "?", 0.64, 0.16,
+            -- v8.47: layout baru — Type | Mutation | KG | Owner (tengah) | Price | BUY
+            cell(p.type, 0, 0.20, C.text, FB)
+            cell(p.mutation, 0.20, 0.14, C.accent)
+            cell(string.format("%.1f", p.kg), 0.34, 0.10, C.textDim)
+            cell(p.owner:sub(1, 12), 0.44, 0.22, C.textDim)  -- owner di TENGAH
+            cell(p.price and tostring(p.price) or "?", 0.66, 0.14,
                 p.price and C.accent or C.textDim, FB)
-            cell(p.owner:sub(1, 12), 0.8, 0.2, C.textDim)
+
+            -- BUY button (langsung sebelah price)
+            local buyBtn = Instance.new("TextButton")
+            buyBtn.Size = UDim2.new(0.18, -4, 0, 24)
+            buyBtn.Position = UDim2.new(0.80, 4, 0.5, -12)
+            buyBtn.BackgroundColor3 = (p.price and p.listingUuid) and C.success or C.textDim
+            buyBtn.Text = "💰 BUY"
+            buyBtn.TextColor3 = Color3.new(1, 1, 1)
+            buyBtn.Font = FB buyBtn.TextSize = 11
+            buyBtn.BorderSizePixel = 0
+            buyBtn.AutoButtonColor = (p.listingUuid ~= nil)
+            buyBtn.Parent = row
+            Instance.new("UICorner", buyBtn).CornerRadius = UDim.new(0, 4)
+
+            if p.listingUuid then
+                buyBtn.MouseButton1Click:Connect(function()
+                    if not buyRE then
+                        buyBtn.Text = "✗ NO RE"
+                        buyBtn.BackgroundColor3 = C.danger
+                        return
+                    end
+                    buyBtn.Text = "..."
+                    buyBtn.BackgroundColor3 = C.accent
+                    task.spawn(function()
+                        local clean = tostring(p.listingUuid):gsub("[{}]","")
+                        local braced = "{"..clean.."}"
+                        local success = false
+                        for _, arg in ipairs({clean, braced}) do
+                            local ok, ret = pcall(function() return buyRE:InvokeServer(arg) end)
+                            L("[Buy] "..arg:sub(1,12).." → "..tostring(ret))
+                            if ok and ret == true then success = true; break end
+                            task.wait(0.3)
+                        end
+                        if success then
+                            buyBtn.Text = "✅ OK"
+                            buyBtn.BackgroundColor3 = C.success
+                            L("[Buy] ✅ "..p.type.." @ "..tostring(p.price))
+                            task.wait(2)
+                            row:Destroy()
+                        else
+                            buyBtn.Text = "✗ FAIL"
+                            buyBtn.BackgroundColor3 = C.danger
+                        end
+                    end)
+                end)
+            end
         end
     end
     if #scanCache == 0 then
