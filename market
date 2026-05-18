@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.42"
-local VERSION_DATE = "verify booth ownership (sign+OWNER) sebelum cache"
+local VERSION = "8.43"
+local VERSION_DATE = "auto-claim background loop (toggleable)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1145,11 +1145,20 @@ local function makeCard(parent, height)
 end
 
 -- BOOTH MGMT CARD
-local boothCard = makeCard(miscPanel, 86)
+local boothCard = makeCard(miscPanel, 120)
 lblOf(boothCard, "🏠  BOOTH", 14, 10, 200, 22, C.accent, 14, FB)
 lblOf(boothCard, "Auto-claim booth empty, atau unlist all listings", 14, 32, 400, 18, C.textDim, 11)
 local claimBtn = btnOf(boothCard, 14, 54, 140, 26, "🏠 CLAIM BOOTH", C.accent)
 local unlistBtn = btnOf(boothCard, 164, 54, 140, 26, "📋 UNLIST ALL", C.accent)
+-- v8.43: Auto-Claim toggle
+local autoClaimState = false
+local autoClaimBtn = btnOf(boothCard, 14, 86, 200, 26, "🤖 Auto-Claim: OFF", C.danger)
+autoClaimBtn.MouseButton1Click:Connect(function()
+    autoClaimState = not autoClaimState
+    autoClaimBtn.Text = autoClaimState and "🤖 Auto-Claim: ON" or "🤖 Auto-Claim: OFF"
+    autoClaimBtn.BackgroundColor3 = autoClaimState and C.success or C.danger
+    L(autoClaimState and "[Auto-Claim] enabled (check 15s)" or "[Auto-Claim] disabled")
+end)
 
 -- DISPLAY PET CARD
 local petCard = makeCard(miscPanel, 86)
@@ -3042,6 +3051,42 @@ local function tryClaim()
     L("Claimed!")
 end
 claimBtn.MouseButton1Click:Connect(function() task.spawn(tryClaim) end)
+
+-- ===== AUTO-CLAIM BACKGROUND LOOP (v8.43) =====
+-- Tiap 15s cek: kalo gak punya booth claimed → auto claim
+task.spawn(function()
+    while gui.Parent do
+        task.wait(15)
+        if autoClaimState then
+            -- Cek status booth saat ini
+            local hasMyBooth = false
+
+            -- Method 1: cached booth masih valid?
+            if BH.myBoothUuid then
+                local b = BH.getMyBoothObj()
+                if b then
+                    local owned = BH.verifyBoothOwnership(b)
+                    if owned == true then hasMyBooth = true end
+                end
+            end
+
+            -- Method 2: scan OWNER attribute (lebih luas)
+            if not hasMyBooth then
+                local detected = BH.detectMyBoothByOwner()
+                if detected then hasMyBooth = true end
+            end
+
+            -- Kalo gak punya booth, claim baru
+            if not hasMyBooth then
+                L("[Auto-Claim] Lo gak punya booth → claim...")
+                tryClaim()
+                task.wait(3)  -- biar claim selesai
+                -- Re-detect untuk update cache
+                BH.smartDetectMyBooth()
+            end
+        end
+    end
+end)
 
 -- ===== AUTO-EQUIP TOGGLE =====
 autoEquipBtn.MouseButton1Click:Connect(function()
