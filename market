@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.29"
-local VERSION_DATE = "session-fallback (no other-booth blocking)"
+local VERSION = "8.30"
+local VERSION_DATE = "rate-limit detect + strict response parse"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1386,20 +1386,44 @@ local function listPet(uuidBraced, price)
         end
     end
 
-    -- Try with braced UUID first (most common format)
-    local rets = {pcall(function() return createRE:InvokeServer("Pet", uuidBraced, price) end)}
-    if rets[1] and rets[2] == true and rets[3] then return true, rets[3] end
+    -- v8.30: helper untuk detect UUID format (hex-hex-hex-hex-hex)
+    local function looksLikeUuid(s)
+        if type(s) ~= "string" then return false end
+        return s:match("^%{?%x+%-%x+%-%x+%-%x+%-%x+%}?$") ~= nil
+    end
 
-    -- Try without braces as fallback
+    -- v8.30: helper untuk parse error string dari any return val
+    local function extractErr(rets)
+        for i = 2, 5 do
+            if type(rets[i]) == "string" and not looksLikeUuid(rets[i]) then
+                return rets[i]
+            end
+        end
+        return nil
+    end
+
+    -- Try with braced UUID first
+    local rets = {pcall(function() return createRE:InvokeServer("Pet", uuidBraced, price) end)}
+
+    if rets[1] then
+        -- (true, uuid)
+        if rets[2] == true and looksLikeUuid(rets[3]) then return true, rets[3] end
+        -- direct uuid return
+        if looksLikeUuid(rets[2]) then return true, rets[2] end
+    end
+
+    -- Try without braces
     local clean = uuidBraced:gsub("[{}]", "")
     rets = {pcall(function() return createRE:InvokeServer("Pet", clean, price) end)}
-    if rets[1] and rets[2] == true and rets[3] then return true, rets[3] end
 
-    -- Some games return just the listing UUID (truthy non-bool)
-    if rets[1] and rets[2] and rets[2] ~= false then
-        return true, tostring(rets[2])
+    if rets[1] then
+        if rets[2] == true and looksLikeUuid(rets[3]) then return true, rets[3] end
+        if looksLikeUuid(rets[2]) then return true, rets[2] end
     end
-    return false
+
+    -- v8.30: kalau gak sukses, ambil error message
+    local err = extractErr(rets) or "unknown"
+    return false, err
 end
 
 -- ===== PICKER (modal-based, single select) =====
@@ -1832,20 +1856,32 @@ startBtn.MouseButton1Click:Connect(function()
                 if rule then
                     local mlInfo = ruleIdx > 0 and (" [r"..ruleIdx.."]") or ""
                     L(p.type.." (base "..string.format("%.1f", p.wt).."kg) @ "..rule.price..mlInfo)
-                    local ok, id = listPet(p.braced, rule.price)
+                    local ok, idOrErr = listPet(p.braced, rule.price)
                     if ok then
                         if ruleIdx > 0 then myListed[ruleIdx][p.clean] = true end
                         listedNow = listedNow + 1
-                        L("   ✅ "..tostring(id):sub(1,12).."...")
+                        L("   ✅ "..tostring(idOrErr):sub(1,12).."...")
                         setStats("Listed "..listedNow.." this round", C.accent)
-                        -- v8.28: detect BH.myBoothUuid setelah list pertama success
-                        if not BH.myBoothUuid then
-                            BH.detectMyBooth(p.clean)
-                        end
+                        if not BH.myBoothUuid then BH.detectMyBooth(p.clean) end
+                        task.wait(delaySec)
                     else
-                        L("   ❌ list call gagal")
+                        local errLow = tostring(idOrErr or ""):lower()
+                        L("   ❌ "..tostring(idOrErr):sub(1,60))
+                        -- v8.30: rate-limit detection
+                        if errLow:find("please wait") or errLow:find("cooldown") or errLow:find("rate") then
+                            L("   ⏸ RATE LIMIT — wait 8s")
+                            setStats("Rate limited — cooldown 8s", C.danger)
+                            task.wait(8)
+                        elseif errLow:find("favorit") then
+                            L("   ⏭ skip (favorited)")
+                            task.wait(0.5)
+                        elseif errLow:find("full") or errLow:find("max") then
+                            L("   ⏭ booth full")
+                            task.wait(1)
+                        else
+                            task.wait(delaySec)
+                        end
                     end
-                    task.wait(delaySec)
                 end
             end
             return listedNow
