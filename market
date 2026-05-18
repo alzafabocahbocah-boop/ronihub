@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "Merge garden helper: auto-accept + pet types breakdown"
+local VERSION_DATE = "Travel to Garden + merged garden helper"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1395,6 +1395,96 @@ local skinCard = makeCard(miscPanel, 86)
 lblOf(skinCard, "🎨  BOOTH SKIN", 14, 10, 250, 22, C.accent, 14, FB)
 lblOf(skinCard, "Pilih skin booth (perlu buka skin selector di game)", 14, 32, 400, 18, C.textDim, 11)
 local skinPickBtn = btnOf(skinCard, 14, 54, 200, 26, "🎨 BUKA SKIN PICKER", C.accent)
+
+-- v8.49: TRAVEL TO GARDEN card — TP balik dari market ke garden
+do
+    local travelCard = makeCard(miscPanel, 86)
+    lblOf(travelCard, "🌱  TRAVEL TO GARDEN", 14, 10, 300, 22, C.accent, 14, FB)
+    lblOf(travelCard, "TP balik dari trade world ke garden/plot lo", 14, 32, 400, 18, C.textDim, 11)
+    local travelBtn = btnOf(travelCard, 14, 54, 220, 26, "🌱 GO TO GARDEN", C.success)
+    travelBtn.TextColor3 = Color3.new(1, 1, 1)
+    local travelStatus = lblOf(travelCard, "", 240, 56, 200, 22, C.textDim, 10)
+
+    BH.travelToGarden = function()
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            travelStatus.Text = "❌ no character"
+            travelStatus.TextColor3 = C.danger
+            return false
+        end
+
+        -- Method 1: Cari garden cam part di Workspace (cek banyak nama umum)
+        local candidates = {
+            "FarmCamPart", "GardenCamPart", "SpawnCamPart", "MainSpawnPart",
+            "HomeCamPart", "PlotCamPart", "MainCamPart", "GameCamPart",
+            "BackToGardenPart", "LeaveTradePart",
+        }
+        for _, name in ipairs(candidates) do
+            local part = Workspace:FindFirstChild(name)
+            if part and part:IsA("BasePart") then
+                hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0)
+                travelStatus.Text = "✅ "..name
+                travelStatus.TextColor3 = C.success
+                L("[Travel] ✅ TP ke "..name)
+                return true
+            end
+        end
+
+        -- Method 2: Cari farm/plot punya lo
+        for _, parentName in ipairs({"Farms", "Plots", "PlayerFarms", "Gardens"}) do
+            local plots = Workspace:FindFirstChild(parentName)
+            if plots then
+                for _, plot in ipairs(plots:GetChildren()) do
+                    local owner = plot:GetAttribute("Owner") or plot:GetAttribute("a")
+                        or plot:GetAttribute("UserId") or plot:GetAttribute("OwnerId")
+                    local isMine = (owner == player.Name)
+                        or (tostring(owner) == tostring(player.UserId))
+                        or (plot.Name == player.Name)
+                        or (plot.Name == tostring(player.UserId))
+                    if isMine then
+                        local prim = plot.PrimaryPart or plot:FindFirstChildWhichIsA("BasePart", true)
+                        if prim then
+                            hrp.CFrame = prim.CFrame + Vector3.new(0, 10, 0)
+                            travelStatus.Text = "✅ ke plot lo"
+                            travelStatus.TextColor3 = C.success
+                            L("[Travel] ✅ TP ke plot lo di "..parentName)
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+
+        -- Method 3: Cari remote dengan nama travel/teleport/leave
+        for _, c in ipairs(RS:GetDescendants()) do
+            if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
+                local n = c.Name:lower()
+                if (n:find("leavetrad") or n:find("backtogarden") or n:find("returntogarden")
+                    or n:find("teleporttofarm") or n:find("gohome")) then
+                    pcall(function()
+                        if c:IsA("RemoteFunction") then c:InvokeServer()
+                        else c:FireServer() end
+                    end)
+                    travelStatus.Text = "✅ remote: "..c.Name
+                    travelStatus.TextColor3 = C.success
+                    L("[Travel] fired remote "..c:GetFullName())
+                    return true
+                end
+            end
+        end
+
+        travelStatus.Text = "❌ gak nemu garden"
+        travelStatus.TextColor3 = C.danger
+        L("[Travel] ❌ gak nemu garden cam / plot / remote")
+        return false
+    end
+
+    travelBtn.MouseButton1Click:Connect(function()
+        travelStatus.Text = "loading..."
+        task.spawn(BH.travelToGarden)
+    end)
+end
 
 -- v8.48: AUTO-START card — auto klik START pas script load (kalau rules ada)
 do
