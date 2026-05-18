@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.37"
-local VERSION_DATE = "maxKG cache — mutated pet baseKG dari non-mutated"
+local VERSION = "8.38"
+local VERSION_DATE = "booth count fix — cache lookup via f attribute"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -164,11 +164,32 @@ do
         end
     end
 
-    -- Lookup cache (try full name first, then base)
-    function BH.getCachedBaseKG(name)
-        if BH.maxKGCache[name] then return BH.maxKGCache[name] end
-        local base = BH.getBaseName(name)
-        if BH.maxKGCache[base] then return BH.maxKGCache[base] end
+    -- Lookup cache: try by Tool.Name, then f attribute (booth tool fallback)
+    function BH.getCachedBaseKG(item)
+        if type(item) == "string" then
+            -- Backward compat: kalo dikasih string (name)
+            if BH.maxKGCache[item] then return BH.maxKGCache[item] end
+            local base = BH.getBaseName(item)
+            if BH.maxKGCache[base] then return BH.maxKGCache[base] end
+            return nil
+        end
+        -- Item-based lookup
+        if not item then return nil end
+        -- Try 1: by display name (backpack pets)
+        local name = BH.getPetName(item)
+        if name and BH.maxKGCache[name] then return BH.maxKGCache[name] end
+        if name then
+            local base = BH.getBaseName(name)
+            if BH.maxKGCache[base] then return BH.maxKGCache[base] end
+        end
+        -- Try 2: by f attribute (booth tools where Name is "{uuid}")
+        local ok, f = pcall(function() return item:GetAttribute("f") end)
+        if ok and f then
+            local fStr = tostring(f)
+            if BH.maxKGCache[fStr] then return BH.maxKGCache[fStr] end
+            local fBase = BH.getBaseName(fStr)
+            if BH.maxKGCache[fBase] then return BH.maxKGCache[fBase] end
+        end
         return nil
     end
 end
@@ -1465,11 +1486,9 @@ local function getBaseKg(t)
         return kg * 11 / (age + 10), "formula"
     end
     -- v8.37: cache fallback untuk mutated pet (yang gak punya age info)
-    local name = BH.getPetName(t)
-    if name then
-        local cached = BH.getCachedBaseKG(name)
-        if cached then return cached, "cache" end
-    end
+    -- v8.38: pass item biar bisa lookup by f attribute juga (untuk booth tools)
+    local cached = BH.getCachedBaseKG(t)
+    if cached then return cached, "cache" end
     return nil
 end
 
@@ -2129,6 +2148,9 @@ startBtn.MouseButton1Click:Connect(function()
             -- v8.28: stream all booths biar countActive accurate
             setStats("Streaming booths...", C.accent)
             BH.ensureBoothsStreamed()
+
+            -- v8.38: build cache EARLIER (sebelum countActive) biar booth count benar
+            BH.buildMaxKGCache()
 
             -- Show current count per rule (real count dari booth scan)
             for ri, r in ipairs(listingRules) do
