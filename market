@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.46"
-local VERSION_DATE = "TBC.GetPlayerBoothData — accurate booth data, no streaming"
+local VERSION_DATE = "TBC.GetPlayerBoothData + Anti-AFK"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -15,6 +15,24 @@ local pg = player:WaitForChild("PlayerGui")
 
 _G.ZenxV8 = _G.ZenxV8 or {}
 local function L(s) table.insert(_G.ZenxV8, s) print("[ZV8]", s) end
+
+-- ===== v8.46: Anti-AFK (cegah kick karena idle 20 menit) =====
+local antiAfkEnabled = true
+do
+    local ok, VirtualUser = pcall(function() return game:GetService("VirtualUser") end)
+    if ok and VirtualUser then
+        player.Idled:Connect(function()
+            if antiAfkEnabled then
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new(), workspace.CurrentCamera)
+                end)
+                L("[anti-afk] idle ticked → faked click")
+            end
+        end)
+        L("[anti-afk] hook installed")
+    end
+end
 
 -- ===== v8.28: STATE FILE (BH.myBoothUuid persistence) — semua di BH =====
 local BH = {}
@@ -1245,6 +1263,22 @@ local autoEquipState = true
 local autoEquipBtn = btnOf(petCard, 14, 54, 140, 26, "👜 Equip: ON", C.success)
 local equipMode = "BIGGEST"
 local equipModeBtn = btnOf(petCard, 164, 54, 140, 26, "📦 BIGGEST", C.card, C.text)
+
+-- v8.46: ANTI-AFK CARD (wrapped in do-block to manage local count)
+do
+    local afkCard = makeCard(miscPanel, 86)
+    lblOf(afkCard, "🚫  ANTI-AFK", 14, 10, 250, 22, C.accent, 14, FB)
+    lblOf(afkCard, "Cegah kick karena idle (~20 menit)", 14, 32, 400, 18, C.textDim, 11)
+    local antiAfkBtn = btnOf(afkCard, 14, 54, 160, 26,
+        antiAfkEnabled and "🚫 Anti-AFK: ON" or "🚫 Anti-AFK: OFF",
+        antiAfkEnabled and C.success or C.danger)
+    antiAfkBtn.MouseButton1Click:Connect(function()
+        antiAfkEnabled = not antiAfkEnabled
+        antiAfkBtn.Text = antiAfkEnabled and "🚫 Anti-AFK: ON" or "🚫 Anti-AFK: OFF"
+        antiAfkBtn.BackgroundColor3 = antiAfkEnabled and C.success or C.danger
+        L(antiAfkEnabled and "[anti-afk] ON" or "[anti-afk] OFF")
+    end)
+end
 
 -- MIGRATE CARD
 local migCard = makeCard(miscPanel, 86)
@@ -3457,10 +3491,70 @@ local scanDiag = "(belum scan)"
 
 local function scanBoothListings()
     scanCache = {}
+    L("======= SNIPE SCAN START (TBC) =======")
+
+    -- v8.46: Use TBC.GetPlayerBoothData → iterate all players, no streaming
+    if BH.TBC then
+        local totalPlayers = 0
+        local boothsFound = 0
+        local listingsTotal = 0
+        local mineCount = 0
+
+        for _, pp in ipairs(Players:GetPlayers()) do
+            totalPlayers = totalPlayers + 1
+            local data = BH.fetchBoothData(pp)
+            if data and data.Booth and data.Listings then
+                boothsFound = boothsFound + 1
+                for listingUuid, listing in pairs(data.Listings) do
+                    listingsTotal = listingsTotal + 1
+                    if listing.ItemType == "Pet" and listing.ItemId then
+                        local item = data.Items and data.Items[listing.ItemId]
+                        if item and item.PetData then
+                            local pd = item.PetData
+                            local kg = BH.computeBaseKgFromPetData(pd)
+                            local mut = tostring(pd.MutationType or "")
+                            local pType = tostring(item.PetType or "?")
+                            local petNick = tostring(pd.Name or "")
+                            -- Combined search-friendly name
+                            local searchName = pType
+                            if mut ~= "" then searchName = mut.." "..searchName end
+                            if petNick ~= "" then searchName = searchName.." ~"..petNick end
+
+                            local isMine = (pp == player)
+                            if isMine then mineCount = mineCount + 1 end
+
+                            table.insert(scanCache, {
+                                type = pType,
+                                mutation = (mut ~= "" and mut or "-"),
+                                age = tonumber(pd.Level) or 0,
+                                kg = kg,
+                                price = tonumber(listing.Price) or 0,
+                                owner = pp.Name,
+                                name = searchName,
+                                listingUuid = listingUuid,
+                                itemId = listing.ItemId,
+                                boothUuid = data.Booth,
+                                isMine = isMine,
+                            })
+                        end
+                    end
+                end
+            end
+        end
+
+        L(string.format("Players:%d | Booths:%d | Listings:%d | Cached:%d | Mine:%d",
+            totalPlayers, boothsFound, listingsTotal, #scanCache, mineCount))
+        L("======= SCAN END =======")
+        scanDiag = string.format("Players:%d Booths:%d Listings:%d Mine:%d",
+            totalPlayers, boothsFound, listingsTotal, mineCount)
+        return
+    end
+
+    -- Fallback: workspace scan (kalo TBC gak loaded)
+    L("⚠ TBC gak loaded, fallback ke workspace scan")
     local diagLines = {}
 
     -- Inspect workspace top level (always log so user can see)
-    L("======= SNIPE SCAN START =======")
     local wsTop = {}
     for _, c in ipairs(Workspace:GetChildren()) do
         table.insert(wsTop, c.Name)
