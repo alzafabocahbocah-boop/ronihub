@@ -1,9 +1,9 @@
-=-- ZENX MARKET v8 — NodeHub style
+-- ZENX MARKET v8 — NodeHub style
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.35"
-local VERSION_DATE = "MUTATION strip — list mutated pets too"
+local VERSION = "8.36"
+local VERSION_DATE = "trust server response + skip already-listed (pets stay in backpack)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1891,83 +1891,99 @@ startBtn.MouseButton1Click:Connect(function()
                     local baseKg = getBaseKg(t) or currentKg
                     table.insert(pets, {
                         braced="{"..clean.."}", clean=clean,
-                        type=pType, baseType=pBaseType,  -- pType: "Galactic Peacock", baseType: "Peacock"
+                        type=pType, baseType=pBaseType,
                         wt=baseKg, currentKg=currentKg,
                     })
                 end
             end
 
+            -- v8.36: PRE-SCAN booth-mu → kumpulin UUID yang udah listed (skip nanti)
+            -- Pet TETEP ada di backpack walaupun udah listed (game's behavior)
+            local alreadyListed = {}
+            local alreadyListedCount = 0
+            if BH.myBoothUuid then
+                local myBooth = BH.getMyBoothObj()
+                if myBooth then
+                    local di = myBooth:FindFirstChild("DynamicInstances")
+                    if di then
+                        for _, t in ipairs(di:GetChildren()) do
+                            if t:IsA("Tool") then
+                                local boothUuid = t.Name:gsub("[{}]","")
+                                alreadyListed[boothUuid] = true
+                                alreadyListedCount = alreadyListedCount + 1
+                            end
+                        end
+                    end
+                end
+                L("  Sudah listed di booth-mu: "..alreadyListedCount.." pet")
+            else
+                L("  Booth belum cached — list dulu 1 buat detect")
+            end
+
             -- v8.34: log how many pets match each rule (v8.35: pakai baseType)
             for ri, r in ipairs(listingRules) do
                 local matchCount = 0
+                local skipCount = 0
                 local mutCount = 0
                 for _, p in ipairs(pets) do
                     local typeOk = (not r.type) or r.type == p.baseType
                     local kgOk = p.wt >= r.min and p.wt <= r.max
                     if typeOk and kgOk then
-                        matchCount = matchCount + 1
-                        if p.type ~= p.baseType then mutCount = mutCount + 1 end
+                        if alreadyListed[p.clean] then
+                            skipCount = skipCount + 1
+                        else
+                            matchCount = matchCount + 1
+                            if p.type ~= p.baseType then mutCount = mutCount + 1 end
+                        end
                     end
                 end
-                local mutInfo = mutCount > 0 and (" ("..mutCount.." mutated)") or ""
-                L("  r"..ri.." ("..(r.type or "All").." "..r.min.."-"..(r.max==math.huge and "∞" or r.max).."): "..matchCount.." match"..mutInfo)
+                local extras = {}
+                if mutCount > 0 then table.insert(extras, mutCount.." mutated") end
+                if skipCount > 0 then table.insert(extras, skipCount.." sudah listed") end
+                local info = #extras > 0 and (" ("..table.concat(extras, ", ")..")") or ""
+                L("  r"..ri.." ("..(r.type or "All").." "..r.min.."-"..(r.max==math.huge and "∞" or r.max).."): "..matchCount.." available"..info)
             end
 
             local listedNow = 0
-            local silentFailCount = 0
             for _, p in ipairs(pets) do
                 if stopReq then break end
 
-                -- Find matching rule with available slot (v8.35: pakai baseType)
-                local rule, ruleIdx = nil, nil
-                if #listingRules == 0 then
-                    rule = {price = perTypePrices[p.baseType] or perTypePrices[p.type] or 100, maxListings = math.huge}
-                    ruleIdx = 0
-                else
-                    for ri, r in ipairs(listingRules) do
-                        local typeOk = (not r.type) or r.type == p.baseType
-                        local kgOk = p.wt >= r.min and p.wt <= r.max
-                        local ml = r.maxListings or math.huge
-                        if typeOk and kgOk and countActive(ri) < ml then
-                            rule, ruleIdx = r, ri
-                            break
-                        end
-                    end
-                end
-
-                if rule then
-                    local mlInfo = ruleIdx > 0 and (" [r"..ruleIdx.."]") or ""
-                    L(p.type.." (base "..string.format("%.1f", p.wt).."kg) @ "..rule.price..mlInfo)
-                    local ok, idOrErr = listPet(p.braced, rule.price)
-
-                    if ok then
-                        -- v8.33: VERIFY via BACKPACK (lebih reliable & cepat dari scan booth)
-                        -- Pet pasti HILANG dari backpack kalo listing sukses
-                        task.wait(0.5)
-                        local stillInBackpack = false
-                        local bp = player:FindFirstChild("Backpack")
-                        if bp then
-                            for _, t in ipairs(bp:GetChildren()) do
-                                if t:IsA("Tool") then
-                                    local u = t:GetAttribute("PET_UUID")
-                                    if u and tostring(u):gsub("[{}]","") == p.clean then
-                                        stillInBackpack = true
-                                        break
-                                    end
-                                end
+                -- v8.36: Skip pets yang udah listed di booth-mu
+                if not alreadyListed[p.clean] then
+                    -- Find matching rule with available slot (v8.35: pakai baseType)
+                    local rule, ruleIdx = nil, nil
+                    if #listingRules == 0 then
+                        rule = {price = perTypePrices[p.baseType] or perTypePrices[p.type] or 100, maxListings = math.huge}
+                        ruleIdx = 0
+                    else
+                        for ri, r in ipairs(listingRules) do
+                            local typeOk = (not r.type) or r.type == p.baseType
+                            local kgOk = p.wt >= r.min and p.wt <= r.max
+                            local ml = r.maxListings or math.huge
+                            if typeOk and kgOk and countActive(ri) < ml then
+                                rule, ruleIdx = r, ri
+                                break
                             end
                         end
+                    end
 
-                        if not stillInBackpack then
-                            -- SUKSES — pet pindah dari backpack
+                    if rule then
+                        local mlInfo = ruleIdx > 0 and (" [r"..ruleIdx.."]") or ""
+                        L(p.type.." (base "..string.format("%.1f", p.wt).."kg) @ "..rule.price..mlInfo)
+                        local ok, idOrErr = listPet(p.braced, rule.price)
+
+                        if ok then
+                            -- v8.36: TRUST server response — (true, uuid) = listed
+                            -- Pet tetep di backpack (game's behavior), tapi udah ke-list di booth
                             if ruleIdx > 0 then myListed[ruleIdx][p.clean] = true end
                             listedNow = listedNow + 1
-                            L("   ✅ verified (pet gone from backpack)")
+                            alreadyListed[p.clean] = true  -- mark biar cycle ini gak nyoba lagi
+                            L("   ✅ listing: "..tostring(idOrErr):sub(1,12))
                             setStats("Listed "..listedNow.." this round", C.accent)
 
-                            -- Detect booth (cuma kalo belum cached)
+                            -- Detect booth pertama kali (kalo belum cached)
                             if not BH.myBoothUuid then
-                                task.wait(0.5)  -- biar streaming kasih chance
+                                task.wait(1)  -- replication delay
                                 local TW = Workspace:FindFirstChild("TradeWorld")
                                 local Booths = TW and TW:FindFirstChild("Booths")
                                 if Booths then
@@ -1991,30 +2007,21 @@ startBtn.MouseButton1Click:Connect(function()
                             end
                             task.wait(delaySec)
                         else
-                            -- SILENT FAIL — pet masih di backpack (rate limit)
-                            silentFailCount = (silentFailCount or 0) + 1
-                            L("   ⚠ SILENT FAIL #"..silentFailCount.." — pet masih di backpack")
-                            -- v8.34: adaptive backoff
-                            local waitTime = math.min(60, 15 + silentFailCount * 5)
-                            L("   ⏸ Wait "..waitTime.."s (adaptive)")
-                            setStats("Rate limited — wait "..waitTime.."s", C.danger)
-                            task.wait(waitTime)
-                        end
-                    else
-                        local errLow = tostring(idOrErr or ""):lower()
-                        L("   ❌ "..tostring(idOrErr):sub(1,60))
-                        if errLow:find("please wait") or errLow:find("cooldown") or errLow:find("rate") then
-                            L("   ⏸ RATE LIMIT — wait 15s")
-                            setStats("Rate limited — wait 15s", C.danger)
-                            task.wait(15)
-                        elseif errLow:find("favorit") then
-                            L("   ⏭ skip (favorited)")
-                            task.wait(0.5)
-                        elseif errLow:find("full") or errLow:find("max") then
-                            L("   ⏭ booth full")
-                            task.wait(1)
-                        else
-                            task.wait(delaySec)
+                            -- false = bisa karena udah listed, booth full, atau penolakan lain
+                            local errStr = tostring(idOrErr or "false")
+                            local errLow = errStr:lower()
+                            L("   ❌ "..errStr:sub(1,60))
+                            if errLow:find("please wait") or errLow:find("cooldown") then
+                                L("   ⏸ RATE LIMIT — wait 10s")
+                                setStats("Rate limited — wait 10s", C.danger)
+                                task.wait(10)
+                            elseif errLow:find("favorit") then
+                                L("   ⏭ skip (favorited)")
+                                task.wait(0.5)
+                            else
+                                -- "false"/"unknown" — kemungkinan udah listed, skip cepat
+                                task.wait(0.5)
+                            end
                         end
                     end
                 end
