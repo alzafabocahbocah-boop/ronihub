@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.43"
-local VERSION_DATE = "auto-claim background loop (toggleable)"
+local VERSION = "8.44"
+local VERSION_DATE = "split passive/smart detect — cycle gak click BOOTH btn"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2259,7 +2259,44 @@ do
         return nil  -- uncertain
     end
 
-    -- v8.41: Smart detect — combine BOOTH button click + proximity + owner attr
+    -- v8.44: Passive detect — TANPA click button (no UI side effects)
+    -- Untuk dipanggil di cycle/auto-claim (silent)
+    function BH.passiveDetectMyBooth()
+        -- Cached check
+        if BH.myBoothUuid then
+            local b = BH.getMyBoothObj()
+            if b then
+                local owned = BH.verifyBoothOwnership(b)
+                if owned == true then return BH.myBoothUuid, "cached" end
+                if owned == false then
+                    BH.myBoothUuid = nil
+                    BH.marketState.myBoothUuid = nil
+                    BH.saveMarketState(BH.marketState)
+                end
+            end
+        end
+
+        -- Stream + OWNER scan
+        BH.ensureBoothsStreamed()
+        task.wait(0.5)
+        local uuid = BH.detectMyBoothByOwner()
+        if uuid then return uuid, "owner" end
+
+        -- Proximity fallback (kalo kebetulan deket booth-mu)
+        uuid = BH.detectMyBoothByProximity(35)
+        if uuid then
+            local owned = BH.verifyBoothOwnership(BH.getMyBoothObj())
+            if owned == true then return uuid, "proximity+verified" end
+            -- proximity hit booth lain (e.g. lo nyamping booth player lain), batalkan
+            BH.myBoothUuid = nil
+            BH.marketState.myBoothUuid = nil
+            BH.saveMarketState(BH.marketState)
+        end
+
+        return nil, "not-found"
+    end
+
+    -- v8.41+v8.42: Smart detect (DENGAN click BOOTH btn) — untuk Pantau/explicit use
     function BH.smartDetectMyBooth()
         -- Sudah cached? confirm cepat via getMyBoothObj
         if BH.myBoothUuid then
@@ -2619,12 +2656,14 @@ startBtn.MouseButton1Click:Connect(function()
             setStats("Streaming booths...", C.accent)
             BH.ensureBoothsStreamed()
 
-            -- v8.40+v8.41: auto-detect booth (smart: BOOTH-button → proximity → owner)
+            -- v8.40+v8.41+v8.44: auto-detect booth PASSIVE (no BOOTH btn click, silent)
             if not BH.myBoothUuid then
-                local detected, method = BH.smartDetectMyBooth()
+                local detected, method = BH.passiveDetectMyBooth()
                 if detected then
                     L("⭐ Booth-mu DETECTED (via "..method.."): "..detected:sub(1,16))
                     L("  💾 Saved to state.json")
+                else
+                    L("⚠ Booth gak ke-detect passive — pakai session fallback")
                 end
             end
 
@@ -2886,11 +2925,11 @@ local function unlistAllInternal()
     local Booths = TW:FindFirstChild("Booths")
     if not Booths then L("│ ✗ Booths gak ada"); setStats("FAIL: Booths", C.danger); return 0 end
 
-    -- v8.40+v8.41: auto-detect booth (smart) kalo belum cached
+    -- v8.40+v8.41+v8.44: auto-detect booth PASSIVE kalo belum cached (no BOOTH btn)
     if not BH.myBoothUuid then
-        L("│ Booth belum cached, smart-detect...")
-        setStats("Detect booth (smart)...", C.accent)
-        local detected, method = BH.smartDetectMyBooth()
+        L("│ Booth belum cached, passive-detect...")
+        setStats("Detect booth...", C.accent)
+        local detected, method = BH.passiveDetectMyBooth()
         if detected then
             L("│ ⭐ Booth detected via "..method..": "..detected:sub(1,16))
             L("│ 💾 Saved")
@@ -3081,8 +3120,8 @@ task.spawn(function()
                 L("[Auto-Claim] Lo gak punya booth → claim...")
                 tryClaim()
                 task.wait(3)  -- biar claim selesai
-                -- Re-detect untuk update cache
-                BH.smartDetectMyBooth()
+                -- Re-detect untuk update cache (passive, no UI click)
+                BH.passiveDetectMyBooth()
             end
         end
     end
