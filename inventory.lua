@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v3.32 (rejoin debug visible + queue-on-tp)"
+local SCRIPT_VERSION = "v4.1 (mutated pet age detection via server attributes)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -104,15 +104,25 @@ local C = {
     Pink=Color3.fromRGB(220,100,160), Orange=Color3.fromRGB(230,140,60),
 }
 
--- v3.0: WEIGHT CATEGORIES dari game.guide
--- Pakai CURRENT KG (bukan baseKG) buat kategorisasi
-local CATEGORIES = {
-    {name="Small",   short="Small",   min=0, max=2, color=C.Blue},
-    {name="Large",   short="Large",   min=2, max=3, color=C.Cyan},
-    {name="S.Huge",  short="S.Huge",  min=3, max=5, color=C.Pink},
-    {name="Huge",    short="Huge",    min=5, max=6, color=C.Purple},
-    {name="S.Titan", short="S.Titan", min=6, max=math.huge, color=C.Orange},
+-- v4.0: Weight categories 2 rows
+-- Top: 0-2, 2-3, 3-3.7, 3.8-4 + Gajah Abu 38kg+
+-- Bot: 3-4, 4-5, 5-5.9, 5.9-6.4 + Gajah Merah 60kg+
+local CAT_TOP = {
+    {name="0-2",     min=0,    max=2,         color=C.Green},
+    {name="2-3",     min=2,    max=3,         color=C.Gold},
+    {name="3-3.7",   min=3,    max=3.7,       color=C.Orange},
+    {name="3.8-4",   min=3.8,  max=4,         color=C.Red},
+    {name="🐘Abu 38+",min=38,  max=math.huge, color=C.Gray},
 }
+local CAT_BOT = {
+    {name="3-4",     min=3,    max=4,         color=C.Green},
+    {name="4-5",     min=4,    max=5,         color=C.Gold},
+    {name="5-5.9",   min=5,    max=5.9,       color=C.Orange},
+    {name="5.9-6.4", min=5.9,  max=6.4,       color=C.Red},
+    {name="🐘Merah 60+",min=60,max=math.huge, color=C.Red},
+}
+-- Backward compat alias (CATEGORIES used elsewhere)
+local CATEGORIES = CAT_TOP
 
 local function categorize(kg)
     if not kg then return nil end
@@ -197,7 +207,7 @@ local function getKG(item)
     return nil
 end
 local function getAge(item)
-    -- v3.21: probe SEMUA attributes pet (cepet - cuma attribute lookup)
+    -- v4.1: probe SEMUA attributes pet (cepet - cuma attribute lookup)
     -- Source 1: scan all attributes, cari yg namanya kayak "age"/"level"
     local ok, attrs = pcall(function() return item:GetAttributes() end)
     if ok and attrs then
@@ -218,15 +228,19 @@ local function getAge(item)
         if c and c.Value and tonumber(c.Value) then return tonumber(c.Value) end
     end
 
-    -- Source 3: parse dari nama
+    -- v4.1: parse dari nama dengan banyak format (sync sm sc leveling)
     local n = item.Name
     for _, pat in ipairs({
-        "%[Age%s+(%d+)%]",
-        "%[Age(%d+)%]",
-        "[Aa][Gg][Ee][^%d]*(%d+)",
+        "%[Age%s+(%d+)%]","%[Age(%d+)%]",
+        "%[Lv%s+(%d+)%]","%[Lv(%d+)%]",
+        "%[Level%s+(%d+)%]","%[Level(%d+)%]",
+        "%[Lvl%s+(%d+)%]","%[Lvl(%d+)%]",
+        "Age%s*[:=]%s*(%d+)","Lv%s*[:=]%s*(%d+)","Level%s*[:=]%s*(%d+)",
     }) do
         local f = n:match(pat) if f then return tonumber(f) end
     end
+    -- v4.1: handle [Age MAX] / [MAX] = 100
+    if n:match("%[Age%s*MAX%]") or n:match("%[MAX%]") then return 100 end
     return nil
 end
 
@@ -322,31 +336,51 @@ local function getMaxKGForPet(name)
     return nil
 end
 
--- v3.15: getEstimatedAge tetep ada (untuk display), tapi kategori pakai getPetBaseKG langsung
+-- v4.1: getEstimatedAge — pakai server baseKG buat hitung age mutated pet
 local function getEstimatedAge(item)
     local age = getAge(item) if age then return age end
     local kg = getKG(item) if not kg then return nil end
+
+    -- v4.1: dari server baseKG (reliable for mutated)
+    local baseKG = nil
+    for _,attrName in ipairs({"BASE_KG","PET_BASE_KG","BaseKG","BaseWeight","PET_BASE_WEIGHT","BASE_WEIGHT","PET_KG_BASE","StartingWeight","STARTING_KG"}) do
+        local ok, v = pcall(function() return item:GetAttribute(attrName) end)
+        if ok and v and type(v) == "number" and v > 0 then baseKG = v break end
+    end
+    if baseKG and baseKG > 0 then
+        return math.max(1, math.min(200, math.floor(kg * 11 / baseKG - 10 + 0.5)))
+    end
+
+    -- Fallback: cache
     local maxKG = getMaxKGForPet(getPetName(item))
     if maxKG and maxKG > 0 then
         return math.max(1, math.min(200, math.floor(kg * 11 / maxKG - 10 + 0.5)))
     end
-    return nil  -- v3.15: gak ada cache = age unknown
+    return nil
 end
 
--- v3.15: hitung baseKG langsung. Prioritas: age di nama > cache lookup > skip
+-- v4.1: hitung baseKG. Prioritas: SERVER ATTRIBUTE (paling reliable buat mutated) > age formula > cache
 local function getPetBaseKG(item)
+    -- v4.1: PRIORITAS 1 — probe server attributes (sync sm sc leveling)
+    -- Ini yang bikin mutated pet bisa di-detect karena attribute set sm server
+    for _,attrName in ipairs({"BASE_KG","PET_BASE_KG","BaseKG","BaseWeight","PET_BASE_WEIGHT","BASE_WEIGHT","PET_KG_BASE","StartingWeight","STARTING_KG"}) do
+        local ok, v = pcall(function() return item:GetAttribute(attrName) end)
+        if ok and v and type(v) == "number" and v > 0 then return v end
+    end
+
+    -- Priority 2: hitung dari age + kg formula
     local kg = getKG(item)
     if not kg then return nil end
     local age = getAge(item)
     if age and age >= 1 then
         return kg * 11 / (age + 10)
     end
-    -- v3.23: cache namanya "maxKG" tapi sebenernya simpen BASE kg (formula kg*11/(age+10))
-    -- Pake langsung tanpa konversi
+
+    -- Priority 3: cache (dari pet sejenis yg punya age)
     local cached = getMaxKGForPet(getPetName(item))
     if cached then return cached end
+
     -- Fallback terakhir: assume pet baru hatched, baseKG = currentKG
-    -- Tapi kalo kg gede (>20), jangan asumsi (kemungkinan pet leveled)
     if kg < 20 then return kg end
     return nil  -- skip categorization
 end
@@ -359,7 +393,7 @@ end
 -- ============================================
 -- BUILD GUI
 -- ============================================
-local GUI_W = 330 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_COMPACT  -- v3.16: lebar 330
+local GUI_W = 420 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_COMPACT  -- v4.0: lebar 420 buat 5 pills per row
 
 -- Try parent ke CoreGui supaya tidak bisa di-destroy oleh script game/script lain
 local guiParent = player:WaitForChild("PlayerGui")
@@ -474,25 +508,40 @@ local invRefreshBtn = btn(invHeader, "Refresh", 9, C.TDim, C.Teal)
 invRefreshBtn.Size = UDim2.new(0,80,0,20) invRefreshBtn.Position = UDim2.new(1,-86,0.5,-10)
 stroke(invRefreshBtn, C.Teal, 1.2)
 
--- v3.12: WEIGHT CATEGORY PILLS - 2 rows: 3 atas (Small/Large/Semi Huge), 2 bawah (Huge/Semi Tit)
-local catRow1 = mk("Frame",{Size=UDim2.new(1,0,0,30), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
-mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,4), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow1})
+-- v4.0: WEIGHT CATEGORY PILLS - 2 rows × 5 pills each
+-- Top: 0-2, 2-3, 3-3.7, 3.8-4, Gajah Abu 38+
+-- Bot: 3-4, 4-5, 5-5.9, 5.9-6.4, Gajah Merah 60+
+local catRow1 = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
+mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,3), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow1})
 
-local catRow2 = mk("Frame",{Size=UDim2.new(1,0,0,30), BackgroundTransparency=1, LayoutOrder=3, Parent=content})
-mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,4), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow2})
+local catRow2 = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=3, Parent=content})
+mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,3), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow2})
 
-local catLabels = {}
-for i, cat in ipairs(CATEGORIES) do
-    -- v3.12: row 1 (i 1-3): 3 pills, row 2 (i 4-5): 2 pills
-    local row = i <= 3 and catRow1 or catRow2
-    local pillW = i <= 3 and 104 or 159  -- v3.16: row1 3x104=312, row2 2x159=318
-    local pill = mk("Frame",{Size=UDim2.new(0, pillW, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=row})
+-- Pill width: 5 pills + 4 gaps × 3px = 12, di GUI 420 dengan padding ~16 = ~78 per pill
+local PILL_W = 78
+
+local catTopLabels = {}
+for i, cat in ipairs(CAT_TOP) do
+    local pill = mk("Frame",{Size=UDim2.new(0, PILL_W, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow1})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, cat.name..": 0", 11, C.Gray, Enum.TextXAlignment.Center)
+    local pl = lbl(pill, cat.name..": 0", 9, C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
     pl.Font = Enum.Font.GothamBold
-    catLabels[i] = pl
+    catTopLabels[i] = pl
 end
+
+local catBotLabels = {}
+for i, cat in ipairs(CAT_BOT) do
+    local pill = mk("Frame",{Size=UDim2.new(0, PILL_W, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow2})
+    corner(pill, 5) stroke(pill, C.Dim, 1)
+    local pl = lbl(pill, cat.name..": 0", 9, C.Gray, Enum.TextXAlignment.Center)
+    pl.Size = UDim2.new(1,0,1,0)
+    pl.Font = Enum.Font.GothamBold
+    catBotLabels[i] = pl
+end
+
+-- Backward compat
+local catLabels = catTopLabels
 
 -- v3.11: detail panel dihapus (gak guna). Sisain stub vars buat backward-compat sama _doBuildInvShow.
 local detailTotal = {Text="", TextColor3=C.Teal}
@@ -513,7 +562,81 @@ rnBtn.Size = UDim2.new(1,0,0,24) rnBtn.LayoutOrder=6 stroke(rnBtn, C.Teal, 1.5)
 local rejoinMinutes = savedState.rejoinMinutes or 30
 cfgRow(content, "Interval (menit)", 7, rejoinMinutes, function(v)
     rejoinMinutes = math.max(1, math.min(120, v))
-    saveState({autoRejoin=savedState.autoRejoin, rejoinMinutes=rejoinMinutes})
+    saveState({autoRejoin=savedState.autoRejoin, rejoinMinutes=rejoinMinutes,
+               rejoinDelay=savedState.rejoinDelay, serverHistory=savedState.serverHistory})
+end)
+
+-- Rejoin delay (countdown sebelum teleport, biar bisa cancel)
+local rejoinDelay = tonumber(savedState.rejoinDelay) or 5
+savedState.rejoinDelay = rejoinDelay
+cfgRow(content, "Delay TP (detik)", 7.5, rejoinDelay, function(v)
+    rejoinDelay = math.max(0, math.min(30, v))
+    savedState.rejoinDelay = rejoinDelay
+    saveState(savedState)
+end)
+
+-- PS link input (private server link buat balik setelah bounce ke public)
+local psLink = savedState.psLink or ""
+local psLinkCode = savedState.psLinkCode or ""
+
+-- Parse PS link code dari URL
+local function parsePsLink(link)
+    if not link or link == "" then return "" end
+    -- Match: privateServerLinkCode=XXX
+    local code = link:match("privateServerLinkCode=([^&%s]+)")
+    if code then return code end
+    -- Match: bare code (just the part after =)
+    if link:match("^[%w%-_]+$") and #link >= 20 then return link end
+    return ""
+end
+
+do
+    local r = mk("Frame",{Size=UDim2.new(1,0,0,26), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=7.7, Parent=content})
+    corner(r, 6) stroke(r, C.Dim, 1.1)
+    local l = lbl(r, "PS Link", 9, C.Gray) l.Size = UDim2.new(0.25,0,1,0) l.Position = UDim2.new(0,8,0,0)
+    local box = mk("TextBox",{
+        Size=UDim2.new(0.7,-10,0,20), Position=UDim2.new(0.3,0,0.5,-10),
+        BackgroundColor3=C.Panel, Text=psLink, PlaceholderText="paste link / kosong = OFF",
+        TextColor3=C.White, PlaceholderColor3=C.Dim,
+        Font=Enum.Font.Gotham, TextSize=9, TextScaled=false,
+        TextXAlignment=Enum.TextXAlignment.Left, ClearTextOnFocus=false, Parent=r
+    })
+    corner(box, 5) stroke(box, C.Dim, 1)
+    box:GetPropertyChangedSignal("Text"):Connect(function()
+        psLink = box.Text
+        psLinkCode = parsePsLink(psLink)
+        savedState.psLink = psLink
+        savedState.psLinkCode = psLinkCode
+        saveState(savedState)
+        if psLinkCode ~= "" then
+            print("[ZenxInv] ✓ PS code OK: "..psLinkCode:sub(1, 12).."...")
+        end
+    end)
+    -- Auto-parse on load
+    if psLink ~= "" then
+        psLinkCode = parsePsLink(psLink)
+        savedState.psLinkCode = psLinkCode
+        saveState(savedState)
+    end
+end
+
+-- Toggle: Bounce via Public → balik ke PS
+local bounceMode = savedState.bounceMode or false
+local _, bcTog, bcTogStroke, bcStroke = togRow(content, "Bounce via Public", "Public dulu, terus balik ke PS", 7.8)
+local function setBounceTog(v)
+    bcTog.Text = v and "ON" or "OFF"
+    bcTog.BackgroundColor3 = v and C.TDim or C.Panel
+    bcTog.TextColor3 = v and C.Teal or C.Gray
+    bcTogStroke.Color = v and C.Teal or C.Dim
+    bcStroke.Color = v and C.Teal or C.Dim
+end
+setBounceTog(bounceMode)
+bcTog.MouseButton1Click:Connect(function()
+    bounceMode = not bounceMode
+    savedState.bounceMode = bounceMode
+    saveState(savedState)
+    setBounceTog(bounceMode)
+    print("[ZenxInv] Bounce mode: "..(bounceMode and "ON" or "OFF"))
 end)
 
 local _, arTog, arTogStroke, arStroke = togRow(content, "Auto Rejoin", "Rejoin otomatis sesuai interval", 8)
@@ -550,10 +673,11 @@ end
 dbgLbl.Text = ""
 -- Akan di-update setelah rejoinStatus diset di bawah
 
--- Baseline: simpan DistributedGameTime saat script load + clock saat itu
--- Lalu pas update tinggal tambah elapsed lokal
-local baselineDGT = workspace.DistributedGameTime or 0
-local baselineClock = tick()
+-- Debug raw value label
+local rawLbl = lbl(content, "", 8, C.Gray, Enum.TextXAlignment.Center)
+rawLbl.Size = UDim2.new(1,0,0,16) rawLbl.LayoutOrder=12
+rawLbl.BackgroundTransparency = 1
+rawLbl.TextSize = 9
 
 local function fmtAge(sec)
     sec = math.floor(sec)
@@ -569,12 +693,42 @@ local function fmtAge(sec)
     end
 end
 
+-- === SERVER HISTORY APPROACH ===
+-- Karena DGT executor returns client-time, kita track JobId+timestamp di state file
+-- Setiap script load, kalau JobId udah pernah kita liat → kita tau server udah running minimal sejak itu
+local serverHistory = savedState.serverHistory or {}
+local firstSeen = serverHistory[currentJobId]
+if not firstSeen then
+    firstSeen = os.time()
+    serverHistory[currentJobId] = firstSeen
+    savedState.serverHistory = serverHistory
+    saveState(savedState)
+    print("[ZenxInv] First time liat server "..currentJobId:sub(1,8).." → recorded "..firstSeen)
+else
+    print("[ZenxInv] Server ini udah pernah ke-record di "..firstSeen.." ("..(os.time()-firstSeen).." detik lalu)")
+end
+
+-- Cleanup old entries (>24 jam = anggap server udah mati)
+do
+    local now = os.time()
+    local cleaned = {}
+    for jid, ts in pairs(serverHistory) do
+        if now - ts < 86400 then cleaned[jid] = ts end
+    end
+    serverHistory = cleaned
+    savedState.serverHistory = cleaned
+    saveState(savedState)
+end
+
 local function updateServerAge()
-    -- Pakai baseline + elapsed (DistributedGameTime kadang gak update tiap detik di client)
-    local elapsed = tick() - baselineClock
-    local age = baselineDGT + elapsed
-    ageLbl.Text = "🕒 Server age: "..fmtAge(age)
-    -- Color hint: fresh ≤30m hijau | warm 30-60m gold | tua >60m merah
+    -- Server age = os.time() - firstSeen (minimal age, server mungkin lebih tua)
+    local age = os.time() - firstSeen
+    local dgt = workspace.DistributedGameTime or 0
+    local count = 0
+    for _ in pairs(serverHistory) do count = count + 1 end
+    ageLbl.Text = "🕒 Server age: "..fmtAge(age).." (min)"
+    rawLbl.Text = string.format("[Tracked %d servers | DGT=%.0f]", count, dgt)
+    -- Color
     local color = C.Green
     if age > 3600 then color = C.Red
     elseif age > 1800 then color = C.Gold end
@@ -585,17 +739,6 @@ task.spawn(function()
     while ageLbl.Parent do
         task.wait(1)
         pcall(updateServerAge)
-    end
-end)
--- Resync baseline tiap 30 detik (in case server time drift)
-task.spawn(function()
-    while ageLbl.Parent do
-        task.wait(30)
-        local newDGT = workspace.DistributedGameTime or 0
-        if newDGT > 0 then
-            baselineDGT = newDGT
-            baselineClock = tick()
-        end
     end
 end)
 
@@ -612,8 +755,9 @@ local function _doBuildInvShow()
     local petsList = {}
     local minKG, maxKG, sumKG, kgCount = math.huge, 0, 0, 0
     local favCount = 0 local highAgeCount = 0 local unreadCount = 0
-    local catCounts = {}  -- per category
-    for i = 1, #CATEGORIES do catCounts[i] = 0 end
+    local catTopCounts = {} local catBotCounts = {}
+    for i = 1, #CAT_TOP do catTopCounts[i] = 0 end
+    for i = 1, #CAT_BOT do catBotCounts[i] = 0 end
 
     for _, item in pairs(bp:GetChildren()) do
         if isPet(item) then
@@ -630,10 +774,15 @@ local function _doBuildInvShow()
                 -- v3.15: pakai getPetBaseKG (handles cache lookup biar pet age tinggi gak salah kategori)
                 local baseKG = getPetBaseKG(item)
                 if baseKG then
-                    local cat = categorize(baseKG)
-                    if cat then
-                        for i, c in ipairs(CATEGORIES) do
-                            if c == cat then catCounts[i] = catCounts[i] + 1 break end
+                    -- v4.0: count for BOTH rows independently
+                    for i, c in ipairs(CAT_TOP) do
+                        if baseKG >= c.min and baseKG < c.max then
+                            catTopCounts[i] = catTopCounts[i] + 1
+                        end
+                    end
+                    for i, c in ipairs(CAT_BOT) do
+                        if baseKG >= c.min and baseKG < c.max then
+                            catBotCounts[i] = catBotCounts[i] + 1
                         end
                     end
                 end
@@ -651,17 +800,18 @@ local function _doBuildInvShow()
     invHeaderLbl.Text = "Total: "..#petsList.." pet"
     invHeaderLbl.TextColor3 = C.Teal
 
-    for i, lblWidget in ipairs(catLabels) do
-        local cat = CATEGORIES[i]
-        local count = catCounts[i]
-        -- v3.2: tampilin range KG di pill
-        local rangeStr
-        if cat.max == math.huge then
-            rangeStr = cat.min.."+"
-        else
-            rangeStr = cat.min.."-"..cat.max
-        end
-        lblWidget.Text = cat.name..": "..count  -- v3.18: no range, biar count keliatan
+    -- v4.0: render TOP row pills
+    for i, lblWidget in ipairs(catTopLabels) do
+        local cat = CAT_TOP[i]
+        local count = catTopCounts[i]
+        lblWidget.Text = cat.name..": "..count
+        lblWidget.TextColor3 = count > 0 and cat.color or C.Gray
+    end
+    -- v4.0: render BOTTOM row pills
+    for i, lblWidget in ipairs(catBotLabels) do
+        local cat = CAT_BOT[i]
+        local count = catBotCounts[i]
+        lblWidget.Text = cat.name..": "..count
         lblWidget.TextColor3 = count > 0 and cat.color or C.Gray
     end
 
@@ -712,53 +862,89 @@ local function teleportToDifferentServer()
     local req = (syn and syn.request) or http_request or request
     if fluxus and fluxus.request then req = fluxus.request end
     if not req then
-        print("[ZenxInv] no http function — fallback to normal teleport")
+        cdLbl.Text = "✗ Executor gak support HTTP — pakai TP biasa"
+        cdLbl.TextColor3 = C.Red
+        print("[ZenxInv] ✗ no http function")
+        task.wait(1.5)
         TS:Teleport(game.PlaceId, player)
         return
     end
-    local url = "https://games.roblox.com/v1/games/"..tostring(game.PlaceId).."/servers/Public?limit=100"
-    local ok, resp = pcall(function() return req({Url=url, Method="GET"}) end)
-    if not ok or not resp then
-        print("[ZenxInv] server list fetch fail — fallback normal teleport")
+
+    -- Try fetch dengan retry
+    local data = nil
+    for attempt = 1, 3 do
+        cdLbl.Text = "Fetch server list (try "..attempt.."/3)..."
+        local url = "https://games.roblox.com/v1/games/"..tostring(game.PlaceId).."/servers/Public?limit=100"
+        local ok, resp = pcall(function() return req({Url=url, Method="GET"}) end)
+        if ok and resp then
+            local body = resp.Body or resp.body or ""
+            local status = resp.StatusCode or resp.status_code or 0
+            print("[ZenxInv] Fetch attempt "..attempt..": status="..tostring(status).." body_len="..#body)
+            if #body > 0 then
+                local okd, parsed = pcall(function() return HttpService:JSONDecode(body) end)
+                if okd and parsed and parsed.data then
+                    data = parsed
+                    break
+                else
+                    print("[ZenxInv] JSON decode fail attempt "..attempt)
+                end
+            end
+        else
+            print("[ZenxInv] Fetch fail attempt "..attempt..": "..tostring(resp))
+        end
+        task.wait(1)
+    end
+
+    if not data then
+        cdLbl.Text = "✗ Server list fetch GAGAL 3x"
+        cdLbl.TextColor3 = C.Red
+        print("[ZenxInv] ✗ semua fetch gagal — pakai TP biasa sebagai fallback")
+        task.wait(2)
         TS:Teleport(game.PlaceId, player)
         return
     end
-    local body = resp.Body or resp.body or ""
-    local okd, data = pcall(function() return HttpService:JSONDecode(body) end)
-    if not okd or not data or not data.data then
-        print("[ZenxInv] parse fail — fallback")
-        TS:Teleport(game.PlaceId, player)
-        return
-    end
+
+    print("[ZenxInv] ✓ Fetched "..#data.data.." servers")
+
     -- Build set of tried JobIds
     local triedSet = {}
     for _, j in ipairs(savedState.triedJobIds or {}) do triedSet[j] = true end
-    -- Find server with different JobId, not in tried list
+
     local candidates = {}
     for _, s in ipairs(data.data) do
         if s.id ~= currentJobId and not triedSet[s.id] and (s.playing or 0) < (s.maxPlayers or 30) then
             table.insert(candidates, s)
         end
     end
+    print("[ZenxInv] Candidates (after filter tried+full): "..#candidates)
+
     if #candidates == 0 then
         print("[ZenxInv] Semua server udah dicoba — reset list & retry")
-        -- Reset and try again with any different server
         savedState.triedJobIds = {currentJobId}
         saveState(savedState)
         for _, s in ipairs(data.data) do
             if s.id ~= currentJobId and (s.playing or 0) < (s.maxPlayers or 30) then
-                print("[ZenxInv] Hop ke server "..tostring(s.playing).."/"..tostring(s.maxPlayers))
-                TS:TeleportToPlaceInstance(game.PlaceId, s.id, player)
-                return
+                table.insert(candidates, s)
             end
         end
+    end
+
+    if #candidates == 0 then
+        cdLbl.Text = "✗ Gak ada server lain available"
+        cdLbl.TextColor3 = C.Red
+        task.wait(2)
         TS:Teleport(game.PlaceId, player)
         return
     end
+
     -- Pick first candidate
     local target = candidates[1]
-    print(string.format("[ZenxInv] Hop ke server (%d/%d players, %d kandidat tersisa)",
-        target.playing or 0, target.maxPlayers or 30, #candidates))
+    cdLbl.Text = string.format("✓ Hop %d/%d players (JobId %s)",
+        target.playing or 0, target.maxPlayers or 30, target.id:sub(1, 8))
+    cdLbl.TextColor3 = C.Teal
+    print(string.format("[ZenxInv] ✓ TeleportToPlaceInstance to %s (%d/%d players)",
+        target.id:sub(1,12), target.playing or 0, target.maxPlayers or 30))
+    task.wait(0.5)
     TS:TeleportToPlaceInstance(game.PlaceId, target.id, player)
 end
 
@@ -790,6 +976,8 @@ local function tryQueueOnTeleport()
     end
 end
 
+-- Delay countdown before actual teleport (configurable via savedState.rejoinDelay)
+local rejoinCancelled = false
 local function markRejoinAndTeleport(useDifferent, isRetry)
     -- 1. Build state
     savedState.lastJobId = currentJobId
@@ -815,18 +1003,53 @@ local function markRejoinAndTeleport(useDifferent, isRetry)
     -- 4. Queue auto-rerun
     tryQueueOnTeleport()
 
-    -- 5. Teleport
-    task.wait(0.5)
-    if useDifferent then
+    -- 5. Countdown sebelum teleport
+    local delaySec = tonumber(savedState.rejoinDelay) or 5
+    rejoinCancelled = false
+    for i = delaySec, 1, -1 do
+        if rejoinCancelled then
+            print("[ZenxInv] Rejoin CANCELLED")
+            cdLbl.Text = "Rejoin cancelled"
+            cdLbl.TextColor3 = C.Gold
+            rnBtn.Text = "Rejoin Now"
+            return
+        end
+        cdLbl.Text = "🚀 Rejoin dalam "..i.." detik (klik lagi buat cancel)"
+        cdLbl.TextColor3 = C.Teal
+        rnBtn.Text = "Cancel ("..i..")"
+        task.wait(1)
+    end
+
+    -- 6. Teleport
+    cdLbl.Text = "Teleporting..."
+    if bounceMode and psLinkCode ~= "" then
+        -- BOUNCE MODE: set flag biar setelah landing di public, langsung TP ke PS
+        savedState.bouncePending = true
+        savedState.bouncePsCode = psLinkCode
+        saveState(savedState)
+        print("[ZenxInv] BOUNCE: TP ke public dulu, lalu balik ke PS")
+        TS:Teleport(game.PlaceId, player)  -- public TP
+    elseif useDifferent then
         teleportToDifferentServer()
     else
         TS:Teleport(game.PlaceId, player)
     end
 end
 
+local rejoinInProgress = false
 rnBtn.MouseButton1Click:Connect(function()
+    if rejoinInProgress then
+        rejoinCancelled = true
+        rejoinInProgress = false
+        return
+    end
+    rejoinInProgress = true
     rnBtn.Text = "Rejoining..."
-    markRejoinAndTeleport(false, false)  -- normal teleport, fresh attempt
+    task.spawn(function()
+        -- DEFAULT: pakai TeleportToPlaceInstance ke server beda (biar gak balik ke same server)
+        markRejoinAndTeleport(true, false)
+        rejoinInProgress = false
+    end)
 end)
 
 local function setArTog(val)
@@ -862,13 +1085,21 @@ local function startAR()
                 task.wait(1)
             end
             if isAR then
-                cdLbl.Text = "Rejoining..."
                 -- Save JobId before teleport
                 local currentSt = loadState() or {}
                 currentSt.lastJobId = currentJobId
                 currentSt.rejoinTime = os.time()
                 saveState(currentSt)
-                task.wait(0.5)
+                tryQueueOnTeleport()
+                -- Countdown sebelum TP (juga pakai rejoinDelay)
+                local delaySec = rejoinDelay
+                for j = delaySec, 1, -1 do
+                    if not isAR then return end
+                    cdLbl.Text = "🚀 Auto-rejoin dalam "..j.." detik"
+                    cdLbl.TextColor3 = C.Gold
+                    task.wait(1)
+                end
+                cdLbl.Text = "Teleporting..."
                 TS:Teleport(game.PlaceId, player)
             end
         end
@@ -933,11 +1164,43 @@ elseif rejoinStatus == "same" then
     local nextRetry = (retryCount or 0) + 1
     cdLbl.Text = "⚠ Server LAMA — Retry #"..nextRetry
     cdLbl.TextColor3 = C.Red
-    print("[ZenxInv] Rejoin gagal — auto-retry #"..nextRetry.." dalam 3 detik")
+    local retryDelay = tonumber(savedState.rejoinDelay) or 5
+    print("[ZenxInv] Rejoin gagal — auto-retry #"..nextRetry.." dalam "..retryDelay.." detik")
     print("[ZenxInv] Tried so far: "..#triedJobIds.." servers")
     task.spawn(function()
-        task.wait(3)
+        for j = retryDelay, 1, -1 do
+            cdLbl.Text = "⚠ Retry #"..nextRetry.." dalam "..j.." detik"
+            task.wait(1)
+        end
         markRejoinAndTeleport(true, true)
+    end)
+end
+
+-- ===== BOUNCE RETURN TO PS =====
+-- Kalau script load detect bouncePending, langsung TP balik ke PS
+if savedState.bouncePending and savedState.bouncePsCode and savedState.bouncePsCode ~= "" then
+    local psCode = savedState.bouncePsCode
+    print("[ZenxInv] BOUNCE: landed in public, prep TP back to PS")
+    savedState.bouncePending = false
+    saveState(savedState)
+    cdLbl.Text = "🔁 Bouncing back to PS..."
+    cdLbl.TextColor3 = C.Gold
+    task.spawn(function()
+        local delaySec = tonumber(savedState.rejoinDelay) or 5
+        for i = delaySec, 1, -1 do
+            cdLbl.Text = "🔁 TP ke PS dalam "..i.." detik..."
+            task.wait(1)
+        end
+        cdLbl.Text = "Teleporting ke PS..."
+        tryQueueOnTeleport()
+        local ok, err = pcall(function()
+            TS:TeleportToPrivateServer(game.PlaceId, psCode, {player})
+        end)
+        if not ok then
+            print("[ZenxInv] ✗ TeleportToPrivateServer fail: "..tostring(err))
+            cdLbl.Text = "✗ PS TP fail — code salah?"
+            cdLbl.TextColor3 = C.Red
+        end
     end)
 end
 
