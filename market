@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.33"
-local VERSION_DATE = "backpack verify (fast & reliable) + 15s cooldown"
+local VERSION = "8.34"
+local VERSION_DATE = "adaptive backoff + match count log"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1832,7 +1832,19 @@ startBtn.MouseButton1Click:Connect(function()
                 end
             end
 
+            -- v8.34: log how many pets match each rule
+            for ri, r in ipairs(listingRules) do
+                local matchCount = 0
+                for _, p in ipairs(pets) do
+                    local typeOk = (not r.type) or r.type == p.type
+                    local kgOk = p.wt >= r.min and p.wt <= r.max
+                    if typeOk and kgOk then matchCount = matchCount + 1 end
+                end
+                L("  r"..ri.." ("..(r.type or "All").." "..r.min.."-"..(r.max==math.huge and "∞" or r.max).."): "..matchCount.." match di backpack")
+            end
+
             local listedNow = 0
+            local silentFailCount = 0
             for _, p in ipairs(pets) do
                 if stopReq then break end
 
@@ -1910,10 +1922,13 @@ startBtn.MouseButton1Click:Connect(function()
                             task.wait(delaySec)
                         else
                             -- SILENT FAIL — pet masih di backpack (rate limit)
-                            L("   ⚠ SILENT FAIL — pet masih di backpack")
-                            L("   ⏸ RATE LIMIT — wait 15s")
-                            setStats("Rate limited — wait 15s", C.danger)
-                            task.wait(15)
+                            silentFailCount = (silentFailCount or 0) + 1
+                            L("   ⚠ SILENT FAIL #"..silentFailCount.." — pet masih di backpack")
+                            -- v8.34: adaptive backoff
+                            local waitTime = math.min(60, 15 + silentFailCount * 5)
+                            L("   ⏸ Wait "..waitTime.."s (adaptive)")
+                            setStats("Rate limited — wait "..waitTime.."s", C.danger)
+                            task.wait(waitTime)
                         end
                     else
                         local errLow = tostring(idOrErr or ""):lower()
