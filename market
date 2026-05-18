@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.30"
-local VERSION_DATE = "rate-limit detect + strict response parse"
+local VERSION = "8.31"
+local VERSION_DATE = "post-list verify (anti silent-fail)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1857,20 +1857,57 @@ startBtn.MouseButton1Click:Connect(function()
                     local mlInfo = ruleIdx > 0 and (" [r"..ruleIdx.."]") or ""
                     L(p.type.." (base "..string.format("%.1f", p.wt).."kg) @ "..rule.price..mlInfo)
                     local ok, idOrErr = listPet(p.braced, rule.price)
+
                     if ok then
-                        if ruleIdx > 0 then myListed[ruleIdx][p.clean] = true end
-                        listedNow = listedNow + 1
-                        L("   ✅ "..tostring(idOrErr):sub(1,12).."...")
-                        setStats("Listed "..listedNow.." this round", C.accent)
-                        if not BH.myBoothUuid then BH.detectMyBooth(p.clean) end
-                        task.wait(delaySec)
+                        -- v8.31: VERIFY pet beneran muncul di booth (anti silent-fail)
+                        task.wait(1)
+                        local verified = false
+                        local foundInBooth = nil
+                        local TW = Workspace:FindFirstChild("TradeWorld")
+                        local Booths = TW and TW:FindFirstChild("Booths")
+                        if Booths then
+                            for _, b in ipairs(Booths:GetChildren()) do
+                                local di = b:FindFirstChild("DynamicInstances")
+                                if di then
+                                    for _, t in ipairs(di:GetChildren()) do
+                                        if t:IsA("Tool") and t.Name:gsub("[{}]","") == p.clean then
+                                            verified = true
+                                            foundInBooth = b
+                                            break
+                                        end
+                                    end
+                                end
+                                if verified then break end
+                            end
+                        end
+
+                        if verified then
+                            if ruleIdx > 0 then myListed[ruleIdx][p.clean] = true end
+                            listedNow = listedNow + 1
+                            L("   ✅ verified in booth: "..tostring(idOrErr):sub(1,12))
+                            setStats("Listed "..listedNow.." this round", C.accent)
+                            -- Detect booth-mu from first verified listing
+                            if not BH.myBoothUuid and foundInBooth then
+                                BH.myBoothUuid = foundInBooth.Name:gsub("[{}]","")
+                                BH.marketState.myBoothUuid = BH.myBoothUuid
+                                BH.saveMarketState(BH.marketState)
+                                L("   ⭐ Booth-mu DETECTED: "..BH.myBoothUuid:sub(1,16))
+                                L("   💾 Saved to state.json")
+                            end
+                            task.wait(delaySec)
+                        else
+                            -- Silent fail: server return UUID tapi pet gak muncul (rate-limited)
+                            L("   ⚠ SILENT FAIL — server say ok tapi pet gak di booth")
+                            L("   ⏸ RATE LIMIT detected — wait 8s")
+                            setStats("Rate limited (silent) — wait 8s", C.danger)
+                            task.wait(8)
+                        end
                     else
                         local errLow = tostring(idOrErr or ""):lower()
                         L("   ❌ "..tostring(idOrErr):sub(1,60))
-                        -- v8.30: rate-limit detection
                         if errLow:find("please wait") or errLow:find("cooldown") or errLow:find("rate") then
                             L("   ⏸ RATE LIMIT — wait 8s")
-                            setStats("Rate limited — cooldown 8s", C.danger)
+                            setStats("Rate limited — wait 8s", C.danger)
                             task.wait(8)
                         elseif errLow:find("favorit") then
                             L("   ⏭ skip (favorited)")
