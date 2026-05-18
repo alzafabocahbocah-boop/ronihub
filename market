@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "Travel to Garden + merged garden helper"
+local VERSION_DATE = "Fix claim spam: TBC priority check + travel to garden"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -3918,10 +3918,21 @@ local function tryClaim()
     L("==== CLAIM BOOTH ====")
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then L("[skip] no char") return end
+
+    -- v8.49: cek TBC dulu — authoritative dari server, GAK PERLU workspace scan
+    if BH.TBC then
+        local data = BH.getMyBoothData()
+        if data and data.Booth then
+            BH.myBoothUuid = data.Booth
+            L("[OK] booth-mu udah ada (via TBC): "..tostring(data.Booth):sub(1, 16).."...")
+            return
+        end
+    end
+
     local TW = Workspace:FindFirstChild("TradeWorld")
     local Booths = TW and TW:FindFirstChild("Booths")
     if not Booths then L("[skip] gak di TradeWorld") return end
-    if findMyBooth(Booths) then L("[OK] booth-mu udah ada") return end
+    if findMyBooth(Booths) then L("[OK] booth-mu udah ada (via workspace)") return end
     local nearestDist, nearestBooth, nearestPart = math.huge, nil, nil
     for _, b in ipairs(Booths:GetChildren()) do
         if b:IsA("Model") and getBoothState(b) == "unclaimed" then
@@ -3943,16 +3954,24 @@ end
 claimBtn.MouseButton1Click:Connect(function() task.spawn(tryClaim) end)
 
 -- ===== AUTO-CLAIM BACKGROUND LOOP (v8.43) =====
--- Tiap 15s cek: kalo gak punya booth claimed → auto claim
+-- v8.49: pakai TBC sebagai PRIMARY detection (authoritative, fast)
 task.spawn(function()
     while gui.Parent do
         task.wait(15)
         if autoClaimState then
-            -- Cek status booth saat ini
             local hasMyBooth = false
 
-            -- Method 1: cached booth masih valid?
-            if BH.myBoothUuid then
+            -- v8.49: Method PRIMARY: TBC (instant + authoritative)
+            if BH.TBC then
+                local data = BH.getMyBoothData()
+                if data and data.Booth then
+                    hasMyBooth = true
+                    BH.myBoothUuid = data.Booth  -- update cache
+                end
+            end
+
+            -- Fallback 1: cached booth masih valid?
+            if not hasMyBooth and BH.myBoothUuid then
                 local b = BH.getMyBoothObj()
                 if b then
                     local owned = BH.verifyBoothOwnership(b)
@@ -3960,20 +3979,20 @@ task.spawn(function()
                 end
             end
 
-            -- Method 2: scan OWNER attribute (lebih luas)
+            -- Fallback 2: scan OWNER attribute (lebih luas)
             if not hasMyBooth then
                 local detected = BH.detectMyBoothByOwner()
                 if detected then hasMyBooth = true end
             end
 
-            -- Kalo gak punya booth, claim baru
+            -- Kalo gak punya booth → claim baru
             if not hasMyBooth then
-                L("[Auto-Claim] Lo gak punya booth → claim...")
+                L("[Auto-Claim] gak punya booth (TBC + 2 fallback miss) → claim...")
                 tryClaim()
-                task.wait(3)  -- biar claim selesai
-                -- Re-detect untuk update cache (passive, no UI click)
+                task.wait(3)
                 BH.passiveDetectMyBooth()
             end
+            -- else: silent (don't spam "already have booth" tiap 15s)
         end
     end
 end)
