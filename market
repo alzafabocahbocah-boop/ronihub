@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.46"
-local VERSION_DATE = "TBC.GetPlayerBoothData + Anti-AFK"
+local VERSION = "8.47"
+local VERSION_DATE = "TBC cache per cycle — fix multi-rule slowness"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -139,8 +139,9 @@ do
     end
 
     -- v8.46: Count active listings dari TBC data (akurat, no streaming)
-    function BH.countActiveFromData(rule)
-        local data = BH.getMyBoothData()
+    -- v8.47: accept optional dataIn untuk skip redundant fetches
+    function BH.countActiveFromData(rule, dataIn)
+        local data = dataIn or BH.getMyBoothData()
         if not data or not data.Listings then return 0 end
         local count = 0
         for _, listing in pairs(data.Listings) do
@@ -2559,6 +2560,21 @@ startBtn.MouseButton1Click:Connect(function()
         local myListed = {}
         for i, _ in ipairs(listingRules) do myListed[i] = {} end
 
+        -- v8.47: TBC data cache (refresh setelah list atau 1s TTL)
+        local tbcDataCache = nil
+        local tbcDataT = 0
+        local function getCachedTbcData()
+            local now = tick()
+            if not tbcDataCache or (now - tbcDataT) > 1 then
+                tbcDataCache = BH.getMyBoothData()
+                tbcDataT = now
+            end
+            return tbcDataCache
+        end
+        local function invalidateTbcCache()
+            tbcDataCache = nil
+        end
+
         local TW = Workspace:FindFirstChild("TradeWorld")
         local Booths = TW and TW:FindFirstChild("Booths")
 
@@ -2573,7 +2589,8 @@ startBtn.MouseButton1Click:Connect(function()
             for _ in pairs(myListed[ri]) do sessionCount = sessionCount + 1 end
 
             -- v8.46: TBC data (akurat, no streaming dependency)
-            local tbcCount = BH.countActiveFromData(rule)
+            -- v8.47: pakai cache biar gak spam TBC call (138 pets × N rules per cycle)
+            local tbcCount = BH.countActiveFromData(rule, getCachedTbcData())
 
             -- Fallback: workspace scan (kalo TBC gak available)
             local boothCount = 0
@@ -2731,6 +2748,7 @@ startBtn.MouseButton1Click:Connect(function()
                             if ruleIdx > 0 then myListed[ruleIdx][p.clean] = true end
                             listedNow = listedNow + 1
                             alreadyListed[p.clean] = true  -- mark biar cycle ini gak nyoba lagi
+                            invalidateTbcCache()  -- v8.47: data baru, force refresh next countActive
                             L("   ✅ listing: "..tostring(idOrErr):sub(1,12))
                             setStats("Listed "..listedNow.." this round", C.accent)
 
@@ -2790,9 +2808,13 @@ startBtn.MouseButton1Click:Connect(function()
             L("")
             L("==== CYCLE "..cycleNum.." ====")
 
-            -- v8.28: stream all booths biar countActive accurate
-            setStats("Streaming booths...", C.accent)
-            BH.ensureBoothsStreamed()
+            -- v8.46+v8.47: stream cuma kalo TBC gak loaded (TBC bypasses streaming entirely)
+            if not BH.TBC then
+                setStats("Streaming booths...", C.accent)
+                BH.ensureBoothsStreamed()
+            else
+                setStats("Cycle "..cycleNum, C.accent)
+            end
 
             -- v8.40+v8.41+v8.44: auto-detect booth PASSIVE (no BOOTH btn click, silent)
             if not BH.myBoothUuid then
