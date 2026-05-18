@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.47"
-local VERSION_DATE = "Auto-replenish mode — never stop, prune session on sale"
+local VERSION_DATE = "auto-replenish + persist rules + dynamic add + unlist fix"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -40,7 +40,23 @@ do
     BH.STATE_FILE = "ZenxMarket_state.json"
     function BH.saveMarketState(s)
         if not writefile then return end
-        pcall(function() writefile(BH.STATE_FILE, HttpService:JSONEncode(s)) end)
+        -- v8.47: sanitize math.huge → nil (JSON gak support Infinity)
+        local clean = {}
+        for k, v in pairs(s) do
+            if k == "listingRules" and type(v) == "table" then
+                clean[k] = {}
+                for i, r in ipairs(v) do
+                    local cr = {}
+                    for rk, rv in pairs(r) do
+                        if rv ~= math.huge then cr[rk] = rv end
+                    end
+                    clean[k][i] = cr
+                end
+            else
+                clean[k] = v
+            end
+        end
+        pcall(function() writefile(BH.STATE_FILE, HttpService:JSONEncode(clean)) end)
     end
     function BH.loadMarketState()
         if not (isfile and readfile and isfile(BH.STATE_FILE)) then return {} end
@@ -944,6 +960,9 @@ local function buildRuleRow(parent, r, idx, big)
     delBtn.MouseButton1Click:Connect(function()
         table.remove(listingRules, idx)
         rebuildRulesUI()
+        -- v8.47: persist
+        BH.marketState.listingRules = listingRules
+        BH.saveMarketState(BH.marketState)
     end)
 end
 
@@ -992,6 +1011,9 @@ addRuleBtn.MouseButton1Click:Connect(function()
         maxListings = maxList,
     })
     rebuildRulesUI()
+    -- v8.47: persist rules to state file
+    BH.marketState.listingRules = listingRules
+    BH.saveMarketState(BH.marketState)
     -- Reset inputs
     minKgBox.Text = ""
     maxKgBox.Text = ""
@@ -1016,6 +1038,9 @@ lhAddBtn.MouseButton1Click:Connect(function()
         maxListings = maxList,
     })
     rebuildRulesUI()
+    -- v8.47: persist
+    BH.marketState.listingRules = listingRules
+    BH.saveMarketState(BH.marketState)
     lhMinKgBox.Text = ""
     lhMaxKgBox.Text = ""
     lhPriceBox.Text = ""
@@ -1029,6 +1054,17 @@ end)
 lhTypeDrop.MouseButton1Click:Connect(function()
     modalOverlay.Visible = true
 end)
+
+-- v8.47: Restore listingRules dari state file (persist across rejoin)
+if BH.marketState.listingRules and type(BH.marketState.listingRules) == "table" then
+    for _, r in ipairs(BH.marketState.listingRules) do
+        -- math.huge gak ke-serialize ke JSON, jadi nil → restore ke math.huge
+        if r.max == nil then r.max = math.huge end
+        if r.maxListings == nil then r.maxListings = math.huge end
+        table.insert(listingRules, r)
+    end
+    L("[State] restored "..#listingRules.." rule(s) from previous session")
+end
 
 rebuildRulesUI()
 
@@ -1491,9 +1527,27 @@ do
 
             local removed = 0
             for _, uuid in ipairs(toUnlist) do
-                local ok, ret = pcall(function() return removeRE:InvokeServer(uuid) end)
-                if ok and ret == true then removed = removed + 1 end
-                task.wait(0.3)
+                -- v8.47: try multiple uuid formats (clean / braced)
+                local clean = tostring(uuid):gsub("[{}]","")
+                local braced = "{"..clean.."}"
+                local success = false
+                local lastErr = ""
+                -- Try clean
+                local ok, ret = pcall(function() return removeRE:InvokeServer(clean) end)
+                if ok and ret == true then success = true end
+                if not success then
+                    lastErr = tostring(ret)
+                    -- Try braced
+                    ok, ret = pcall(function() return removeRE:InvokeServer(braced) end)
+                    if ok and ret == true then success = true else lastErr = tostring(ret) end
+                end
+                if success then
+                    removed = removed + 1
+                    L("[Pantau] ✅ unlisted "..clean:sub(1,12))
+                else
+                    L("[Pantau] ❌ "..clean:sub(1,12).." err: "..lastErr:sub(1,40))
+                end
+                task.wait(0.5)
             end
 
             statusLbl.Text = "✅ Unlisted "..removed.." / "..#toUnlist
@@ -2583,6 +2637,8 @@ startBtn.MouseButton1Click:Connect(function()
         local function countActive(ri)
             local rule = listingRules[ri]
             if not rule then return 0 end
+            -- v8.47: auto-init untuk rule yang baru ditambahin saat script lagi running
+            if not myListed[ri] then myListed[ri] = {} end
 
             -- v8.47: TBC available → TRUST it (real-time, auto-update kalo pet kejual/unlist)
             -- Session tracking masih dipake sebagai cap pendek dalam satu cycle iter
@@ -2756,7 +2812,10 @@ startBtn.MouseButton1Click:Connect(function()
                         if ok then
                             -- v8.36: TRUST server response — (true, uuid) = listed
                             -- Pet tetep di backpack (game's behavior), tapi udah ke-list di booth
-                            if ruleIdx > 0 then myListed[ruleIdx][p.clean] = true end
+                            if ruleIdx > 0 then
+                                if not myListed[ruleIdx] then myListed[ruleIdx] = {} end  -- v8.47: safe init
+                                myListed[ruleIdx][p.clean] = true
+                            end
                             listedNow = listedNow + 1
                             alreadyListed[p.clean] = true  -- mark biar cycle ini gak nyoba lagi
                             invalidateTbcCache()  -- v8.47: data baru, force refresh next countActive
