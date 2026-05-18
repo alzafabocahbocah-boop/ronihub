@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.44"
-local VERSION_DATE = "split passive/smart detect — cycle gak click BOOTH btn"
+local VERSION = "8.45"
+local VERSION_DATE = "countActive max(session, booth) — prevent over-list"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2432,20 +2432,25 @@ startBtn.MouseButton1Click:Connect(function()
         local TW = Workspace:FindFirstChild("TradeWorld")
         local Booths = TW and TW:FindFirstChild("Booths")
 
-        -- v8.29: countActive — scan booth-mu (akurat), atau session tracking (fallback)
-        -- Hindari count semua booth, karena listing player lain bakal nge-block kita
+        -- v8.45: countActive — max(boothScan, sessionTracking)
+        -- Mencegah over-list kalo booth scan return 0 (tools gak ke-stream)
         local function countActive(ri)
             local rule = listingRules[ri]
             if not rule then return 0 end
-            -- Path 1: boothUuid known → real count from MY booth only
+
+            -- Session tracking (UUID yg di-list session ini)
+            local sessionCount = 0
+            for _ in pairs(myListed[ri]) do sessionCount = sessionCount + 1 end
+
+            -- Booth scan (real count dari workspace)
+            local boothCount = 0
             if BH.myBoothUuid then
                 local myBooth = BH.getMyBoothObj()
-                if myBooth then return BH.countInBooth(myBooth, rule) end
+                if myBooth then boothCount = BH.countInBooth(myBooth, rule) end
             end
-            -- Path 2: belum tau booth → session tracking (UUID yg di-list session ini)
-            local c = 0
-            for _ in pairs(myListed[ri]) do c = c + 1 end
-            return c
+
+            -- Max-of-both: session prevents over-list (cap), booth detects pre-existing/sold
+            return math.max(sessionCount, boothCount)
         end
 
         -- Helper: rescan workspace, prune sold/unlisted UUIDs
