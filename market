@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.47"
-local VERSION_DATE = "auto-replenish + persist rules + dynamic add + unlist fix"
+local VERSION_DATE = "Pantau unlist all + remove Misc unlist + auto-refresh SNIPE"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1279,9 +1279,8 @@ end
 -- BOOTH MGMT CARD
 local boothCard = makeCard(miscPanel, 120)
 lblOf(boothCard, "🏠  BOOTH", 14, 10, 200, 22, C.accent, 14, FB)
-lblOf(boothCard, "Auto-claim booth empty, atau unlist all listings", 14, 32, 400, 18, C.textDim, 11)
+lblOf(boothCard, "Auto-claim booth empty (unlist all dipindah ke Pantau)", 14, 32, 400, 18, C.textDim, 11)
 local claimBtn = btnOf(boothCard, 14, 54, 140, 26, "🏠 CLAIM BOOTH", C.accent)
-local unlistBtn = btnOf(boothCard, 164, 54, 140, 26, "📋 UNLIST ALL", C.accent)
 -- v8.43: Auto-Claim toggle
 local autoClaimState = false
 local autoClaimBtn = btnOf(boothCard, 14, 86, 200, 26, "🤖 Auto-Claim: OFF", C.danger)
@@ -1350,8 +1349,9 @@ do
 
     lblOf(hdrCard, "📋  PANTAU BOOTH-MU", 14, 8, 240, 22, C.accent, 14, FB)
     local statusLbl = lblOf(hdrCard, "Klik REFRESH untuk scan", 14, 30, 380, 18, C.textDim, 11)
-    local refreshBtn = btnOf(hdrCard, 14, 50, 110, 26, "🔄 REFRESH", C.accent)
-    local unlistOneBtn = btnOf(hdrCard, 134, 50, 130, 26, "🗑️ UNLIST PILIH", C.danger)
+    local refreshBtn = btnOf(hdrCard, 14, 50, 100, 26, "🔄 REFRESH", C.accent)
+    local unlistOneBtn = btnOf(hdrCard, 122, 50, 130, 26, "🗑️ UNLIST PILIH", C.danger)
+    local unlistAllBtn = btnOf(hdrCard, 260, 50, 120, 26, "🗑️ UNLIST ALL", C.danger)
 
     -- Scrollable list area
     local listFrame = Instance.new("Frame")
@@ -1526,34 +1526,124 @@ do
             statusLbl.TextColor3 = C.accent
 
             local removed = 0
-            for _, uuid in ipairs(toUnlist) do
-                -- v8.47: try multiple uuid formats (clean / braced)
-                local clean = tostring(uuid):gsub("[{}]","")
-                local braced = "{"..clean.."}"
+            for _, listingUuid in ipairs(toUnlist) do
+                -- v8.47: Brute force semua format + log mana yang work
+                local data = BH.getMyBoothData()
+                local itemId = nil
+                if data and data.Listings and data.Listings[listingUuid] then
+                    itemId = data.Listings[listingUuid].ItemId
+                end
+
+                local cleanListing = tostring(listingUuid):gsub("[{}]","")
+                local bracedListing = "{"..cleanListing.."}"
+                local cleanItem = itemId and tostring(itemId):gsub("[{}]","") or nil
+                local bracedItem = itemId and ("{"..(cleanItem or "").."}") or nil
+
+                local attempts = {
+                    {label="listing-clean", arg=cleanListing},
+                    {label="listing-braced", arg=bracedListing},
+                }
+                if cleanItem then
+                    table.insert(attempts, {label="item-clean", arg=cleanItem})
+                    table.insert(attempts, {label="item-braced", arg=bracedItem})
+                end
+
                 local success = false
-                local lastErr = ""
-                -- Try clean
-                local ok, ret = pcall(function() return removeRE:InvokeServer(clean) end)
-                if ok and ret == true then success = true end
-                if not success then
-                    lastErr = tostring(ret)
-                    -- Try braced
-                    ok, ret = pcall(function() return removeRE:InvokeServer(braced) end)
-                    if ok and ret == true then success = true else lastErr = tostring(ret) end
+                for _, a in ipairs(attempts) do
+                    local ok, ret = pcall(function() return removeRE:InvokeServer(a.arg) end)
+                    if ok and ret == true then
+                        success = true
+                        L("[Pantau] ✅ "..a.label.." → "..tostring(a.arg):sub(1,20))
+                        break
+                    else
+                        L("[Pantau] ✗ "..a.label..": ret="..tostring(ret):sub(1,30))
+                    end
+                    task.wait(0.2)
                 end
-                if success then
-                    removed = removed + 1
-                    L("[Pantau] ✅ unlisted "..clean:sub(1,12))
-                else
-                    L("[Pantau] ❌ "..clean:sub(1,12).." err: "..lastErr:sub(1,40))
-                end
-                task.wait(0.5)
+
+                if success then removed = removed + 1 end
+                task.wait(0.3)
             end
 
             statusLbl.Text = "✅ Unlisted "..removed.." / "..#toUnlist
             statusLbl.TextColor3 = C.success
             task.wait(1)
             refreshList()  -- auto refresh after unlist
+        end)
+    end)
+
+    -- v8.47: UNLIST ALL button — unlist semua listing di booth-mu
+    unlistAllBtn.MouseButton1Click:Connect(function()
+        task.spawn(function()
+            statusLbl.Text = "🔄 Fetching booth data..."
+            statusLbl.TextColor3 = C.textDim
+
+            if not BH.TBC then
+                statusLbl.Text = "❌ TBC gak load"
+                statusLbl.TextColor3 = C.danger
+                return
+            end
+
+            local data = BH.getMyBoothData()
+            if not data or not data.Listings then
+                statusLbl.Text = "❌ Gak ada data booth"
+                statusLbl.TextColor3 = C.danger
+                return
+            end
+
+            -- Collect semua listingUuid
+            local allUuids = {}
+            for listingUuid, _ in pairs(data.Listings) do
+                table.insert(allUuids, listingUuid)
+            end
+
+            if #allUuids == 0 then
+                statusLbl.Text = "ℹ Booth-mu kosong"
+                statusLbl.TextColor3 = C.textDim
+                return
+            end
+
+            statusLbl.Text = "🗑️ Unlist "..#allUuids.." pet..."
+            statusLbl.TextColor3 = C.accent
+
+            local removed = 0
+            for i, listingUuid in ipairs(allUuids) do
+                statusLbl.Text = string.format("🗑️ [%d/%d] unlisting...", i, #allUuids)
+
+                local itemId = data.Listings[listingUuid] and data.Listings[listingUuid].ItemId
+                local cleanListing = tostring(listingUuid):gsub("[{}]","")
+                local bracedListing = "{"..cleanListing.."}"
+                local cleanItem = itemId and tostring(itemId):gsub("[{}]","") or nil
+                local bracedItem = itemId and ("{"..(cleanItem or "").."}") or nil
+
+                local attempts = {
+                    {label="listing-clean", arg=cleanListing},
+                    {label="listing-braced", arg=bracedListing},
+                }
+                if cleanItem then
+                    table.insert(attempts, {label="item-clean", arg=cleanItem})
+                    table.insert(attempts, {label="item-braced", arg=bracedItem})
+                end
+
+                local success = false
+                for _, a in ipairs(attempts) do
+                    local ok, ret = pcall(function() return removeRE:InvokeServer(a.arg) end)
+                    if ok and ret == true then
+                        success = true
+                        L("[Pantau-ALL] ✅ "..a.label.." → "..tostring(a.arg):sub(1,20))
+                        break
+                    end
+                    task.wait(0.2)
+                end
+
+                if success then removed = removed + 1 end
+                task.wait(0.3)
+            end
+
+            statusLbl.Text = "✅ Unlisted "..removed.." / "..#allUuids
+            statusLbl.TextColor3 = C.success
+            task.wait(1)
+            refreshList()
         end)
     end)
 
@@ -3321,7 +3411,6 @@ local function runUnlistAll()
         L("Final removed: "..n)
     end)
 end
-unlistBtn.MouseButton1Click:Connect(runUnlistAll)
 unlistAllListingBtn.MouseButton1Click:Connect(runUnlistAll)
 
 -- ===== CLAIM BOOTH =====
@@ -3934,6 +4023,31 @@ do
     for _, b in ipairs({snSearch, snMinAge, snMaxAge, snMinKg, snMaxKg, snMinPrice, snMaxPrice}) do
         b:GetPropertyChangedSignal("Text"):Connect(renderSnipe)
     end
+
+    -- v8.47: auto-refresh every 10s
+    task.spawn(function()
+        while true do
+            task.wait(10)
+            -- Skip kalo SNIPE panel gak visible biar hemat resource
+            if snManualPanel and snManualPanel.Visible then
+                pcall(function()
+                    scanBoothListings()
+                    renderSnipe()
+                end)
+            end
+        end
+    end)
+
+    -- v8.47: auto-refresh sekali pas pertama buka SNIPE tab
+    snSubBtns.Manual.btn.MouseButton1Click:Connect(function()
+        task.wait(0.1)
+        if #scanCache == 0 then
+            task.spawn(function()
+                scanBoothListings()
+                renderSnipe()
+            end)
+        end
+    end)
 end
 
 end  -- end setupSnipeScanner function
