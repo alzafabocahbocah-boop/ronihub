@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.28"
-local VERSION_DATE = "real-booth-count + auto-detect-booth"
+local VERSION = "8.29"
+local VERSION_DATE = "session-fallback (no other-booth blocking)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1736,16 +1736,20 @@ startBtn.MouseButton1Click:Connect(function()
         local TW = Workspace:FindFirstChild("TradeWorld")
         local Booths = TW and TW:FindFirstChild("Booths")
 
-        -- v8.28: countActive — scan booth-mu (if known), atau all booths (fallback)
+        -- v8.29: countActive — scan booth-mu (akurat), atau session tracking (fallback)
+        -- Hindari count semua booth, karena listing player lain bakal nge-block kita
         local function countActive(ri)
             local rule = listingRules[ri]
             if not rule then return 0 end
+            -- Path 1: boothUuid known → real count from MY booth only
             if BH.myBoothUuid then
                 local myBooth = BH.getMyBoothObj()
                 if myBooth then return BH.countInBooth(myBooth, rule) end
             end
-            -- Fallback: count across all booths (over-count safe)
-            return BH.countInAllBooths(rule)
+            -- Path 2: belum tau booth → session tracking (UUID yg di-list session ini)
+            local c = 0
+            for _ in pairs(myListed[ri]) do c = c + 1 end
+            return c
         end
 
         -- Helper: rescan workspace, prune sold/unlisted UUIDs
