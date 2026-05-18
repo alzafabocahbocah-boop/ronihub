@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.47"
-local VERSION_DATE = "TBC cache per cycle — fix multi-rule slowness"
+local VERSION_DATE = "TBC cache + paced list (delay enforced before list)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -638,7 +638,7 @@ addRuleBtn.TextSize = 14
 
 -- Inputs row 2: Delay | Retry (MAX dipindah jadi per-rule)
 lblOf(listingPanel, "DELAY", 0, 298, 60, 18, C.textDim, 12, FB)
-local delayBox = boxOf(listingPanel, 0, 318, 100, 34, "1.5")
+local delayBox = boxOf(listingPanel, 0, 318, 100, 34, "2")
 delayBox.TextSize = 15
 lblOf(listingPanel, "RETRY", 112, 298, 60, 18, C.textDim, 12, FB)
 local retryBox = boxOf(listingPanel, 112, 318, 100, 34, "2")
@@ -2715,6 +2715,7 @@ startBtn.MouseButton1Click:Connect(function()
             end
 
             local listedNow = 0
+            local listAttempts = 0  -- v8.47: pace lister biar gak spam
             for _, p in ipairs(pets) do
                 if stopReq then break end
 
@@ -2738,6 +2739,12 @@ startBtn.MouseButton1Click:Connect(function()
                     end
 
                     if rule then
+                        -- v8.47: pace BEFORE listPet (always runs, gak peduli result)
+                        if listAttempts > 0 then
+                            task.wait(delaySec)
+                        end
+                        listAttempts = listAttempts + 1
+
                         local mlInfo = ruleIdx > 0 and (" [r"..ruleIdx.."]") or ""
                         L(p.type.." (base "..string.format("%.1f", p.wt).."kg) @ "..rule.price..mlInfo)
                         local ok, idOrErr = listPet(p.braced, rule.price)
@@ -2776,7 +2783,7 @@ startBtn.MouseButton1Click:Connect(function()
                                     end
                                 end
                             end
-                            task.wait(delaySec)
+                            -- v8.47: delay udah dipindah ke front (sebelum listPet), gak perlu di sini
                         else
                             -- false = bisa karena udah listed, booth full, atau penolakan lain
                             local errStr = tostring(idOrErr or "false")
@@ -2788,10 +2795,10 @@ startBtn.MouseButton1Click:Connect(function()
                                 task.wait(10)
                             elseif errLow:find("favorit") then
                                 L("   ⏭ skip (favorited)")
-                                task.wait(0.5)
+                                -- v8.47: gak perlu extra wait, front-load udah handle
                             else
                                 -- "false"/"unknown" — kemungkinan udah listed, skip cepat
-                                task.wait(0.5)
+                                -- v8.47: gak perlu extra wait, front-load udah handle
                             end
                         end
                     end
