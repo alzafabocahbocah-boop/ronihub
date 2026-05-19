@@ -2,11 +2,11 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.59"
-local VERSION_DATE = "[3E1-3E6] inside setupSnipeScanner"
+local VERSION = "8.61"
+local VERSION_DATE = "marker pindah ke right side"
 
 local Players = game:GetService("Players")
-local RS = game:GetService("ReplicatedStorage") 
+local RS = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
@@ -469,23 +469,25 @@ local snipePanel = makePanel("SNIPE")
 local gardenPanel = makePanel("GARDEN")
 BH.gardenPanel = gardenPanel  -- store for cross-scope access
 
--- Helper buat stage marker (avoid local var count)
+-- Helper buat stage marker (avoid local var count) — auto-stack right side
+BH.markerCount = 0
 BH.stageMarker = function(num, color, text, y)
     if not gardenPanel then return end
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(0, 200, 0, 20)
-    t.Position = UDim2.new(0, 10, 0, y)
+    t.Size = UDim2.new(0, 180, 0, 11)
+    t.Position = UDim2.new(1, -185, 0, 5 + BH.markerCount * 12)
     t.BackgroundColor3 = color
     t.BorderSizePixel = 0
     t.Text = text
     t.TextColor3 = Color3.new(1, 1, 1)
     t.Font = Enum.Font.SourceSans
-    t.TextSize = 11
+    t.TextSize = 9
     t.Parent = gardenPanel
+    BH.markerCount = BH.markerCount + 1
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.59 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.61 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -4885,6 +4887,7 @@ do
             end
         end
     end)
+    BH.stageMarker(3531, Color3.fromRGB(80, 220, 100), "[3E3a] after auto-refresh spawn", 305)
 
     -- v8.47: auto-refresh sekali pas pertama buka SNIPE tab
     snSubBtns.Manual.btn.MouseButton1Click:Connect(function()
@@ -4896,6 +4899,7 @@ do
             end)
         end
     end)
+    BH.stageMarker(3532, Color3.fromRGB(120, 220, 100), "[3E3b] after Manual click", 305)
 
     -- v8.47: BUY TAB
     BH.stageMarker(354, Color3.fromRGB(100, 220, 0), "[3E4] before snBuy connects", 315)
