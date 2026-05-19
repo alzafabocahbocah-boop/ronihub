@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.73"
-local VERSION_DATE = "Snipe: compact sub-tabs, search top, instant auto-refresh"
+local VERSION = "8.74"
+local VERSION_DATE = "List Harga search restored (compact), Snipe search+refresh split"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -857,9 +857,9 @@ lhDescLbl.Visible = false
 -- Forward declare labels (used by refreshBackpackStats later)
 local lhPetCount, lhFavCount, lhCapacity
 do
-    -- v8.72: stats card compact — cuma PET count (FAV+CAPACITY hidden)
+    -- v8.74: stats card compact — 40% kiri (search ambil 60% kanan)
     local statsCardLH = Instance.new("Frame")
-    statsCardLH.Size = UDim2.new(1, 0, 0, 24) statsCardLH.Position = UDim2.new(0, 0, 0, 0)
+    statsCardLH.Size = UDim2.new(0.4, -4, 0, 24) statsCardLH.Position = UDim2.new(0, 0, 0, 0)
     statsCardLH.BackgroundTransparency = 1
     statsCardLH.Parent = pricePanel
 
@@ -950,8 +950,33 @@ do
     end
 end
 
--- v8.73: search box removed — tab list harga full width
+-- v8.74: small search box di kanan (40% stats kiri | 60% search kanan)
 local priceSearchText = ""
+do
+    local lhSearchBox = Instance.new("TextBox")
+    lhSearchBox.Size = UDim2.new(0.6, -4, 0, 22)
+    lhSearchBox.Position = UDim2.new(0.4, 4, 0, 1)
+    lhSearchBox.BackgroundColor3 = C.input
+    lhSearchBox.BorderSizePixel = 0
+    lhSearchBox.Text = ""
+    lhSearchBox.TextColor3 = C.text
+    lhSearchBox.PlaceholderText = "🔍 cari rule..."
+    lhSearchBox.PlaceholderColor3 = C.textDim
+    lhSearchBox.Font = F
+    lhSearchBox.TextSize = 11
+    lhSearchBox.TextXAlignment = Enum.TextXAlignment.Left
+    lhSearchBox.ClearTextOnFocus = false
+    lhSearchBox.Parent = pricePanel
+    Instance.new("UICorner", lhSearchBox).CornerRadius = UDim.new(0, 5)
+    local lhSearchPad = Instance.new("UIPadding")
+    lhSearchPad.PaddingLeft = UDim.new(0, 8)
+    lhSearchPad.Parent = lhSearchBox
+
+    lhSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+        priceSearchText = lhSearchBox.Text or ""
+        rebuildRulesUI()
+    end)
+end
 
 -- ============================================================
 -- PET TYPE MODAL (popup overlay)
@@ -2435,9 +2460,9 @@ snTpBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Search box
+-- Search box (80%)
 snSearch = Instance.new("TextBox")
-snSearch.Size = UDim2.new(1, 0, 0, 28) snSearch.Position = UDim2.new(0, 0, 0, 0)  -- v8.73: y=62 → 0
+snSearch.Size = UDim2.new(0.8, -4, 0, 28) snSearch.Position = UDim2.new(0, 0, 0, 0)  -- v8.74: 100% → 80%
 snSearch.BackgroundColor3 = C.input snSearch.BorderSizePixel = 0
 snSearch.Text = (BH.marketState and BH.marketState.snSearch) or ""
 snSearch.TextColor3 = C.text
@@ -2448,6 +2473,13 @@ snSearch.ClearTextOnFocus = false snSearch.Parent = snManualPanel
 Instance.new("UICorner", snSearch).CornerRadius = UDim.new(0, 6)
 local snSearchPad = Instance.new("UIPadding")
 snSearchPad.PaddingLeft = UDim.new(0, 12) snSearchPad.Parent = snSearch
+
+-- v8.74: refresh button (20% kanan)
+snRefreshBtn.Size = UDim2.new(0.2, 0, 0, 28)
+snRefreshBtn.Position = UDim2.new(0.8, 4, 0, 0)
+snRefreshBtn.Text = "🔄"
+snRefreshBtn.TextSize = 14
+snRefreshBtn.Visible = true
 
 -- Filter chips row
 local snFilterFrame = Instance.new("Frame")
