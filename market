@@ -6,7 +6,7 @@ local VERSION = "8.59"
 local VERSION_DATE = "[3E1-3E6] inside setupSnipeScanner"
 
 local Players = game:GetService("Players")
-local RS = game:GetService("ReplicatedStorage")
+local RS = game:GetService("ReplicatedStorage") 
 local Workspace = game:GetService("Workspace")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
