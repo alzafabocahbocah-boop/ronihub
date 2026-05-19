@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.71"
-local VERSION_DATE = "Persist semua setting Market (toggle + filter)"
+local VERSION = "8.73"
+local VERSION_DATE = "Snipe: compact sub-tabs, search top, instant auto-refresh"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -115,12 +115,70 @@ do
         table.insert(BH.MUTATION_PREFIXES, m.." ")   -- "Galactic "
     end
 
-    -- v8.46: Mutation multipliers (BaseWeight × mult = weight at age 1 displayed)
-    -- Default 1.0 untuk yang belum diketahui. Tambah seiring ditemukan.
+    -- v8.69: Mutation multipliers — seed + auto-learn at runtime
+    -- mult = displayed_kg_at_age_1 / raw_BaseWeight
     BH.MUTATION_MULT = {
-        EV = 1.10,        -- Everchanted (derived from user data: 5.58 × 1.09 ≈ 6.087)
-        -- TODO: tambah multiplier untuk mutation lain (Shocked, Rainbow, Nightmare, dll)
+        -- Confirmed seed values
+        Everchanted = 1.10,
+        EV          = 1.10,  -- legacy short-code (kalo server return code instead of name)
+        -- Mutation lain auto-learned saat script lihat pet-nya
     }
+
+    -- v8.69: Helper — convert kg saat ini ke kg pas age 1 (growth formula linear)
+    function BH.kgAtAge1(currentKg, age)
+        if not currentKg or not age or age < 1 then return nil end
+        if age == 1 then return currentKg end
+        return currentKg * 11 / (age + 10)
+    end
+
+    -- v8.69: Learn mult dari satu sample. Aman dipanggil berulang.
+    function BH.learnMutationMult(mut, baseWeight, displayedKgAtAge1)
+        if not mut or mut == "" or mut == "None" then return false end
+        if not baseWeight or baseWeight <= 0 then return false end
+        if not displayedKgAtAge1 or displayedKgAtAge1 <= 0 then return false end
+        local mult = displayedKgAtAge1 / baseWeight
+        -- Sanity check: mult masuk akal antara 0.5x – 5x
+        if mult < 0.5 or mult > 5.0 then return false end
+        local existing = BH.MUTATION_MULT[mut]
+        -- Prefer sample baru kalo beda signifikan, atau first time
+        if not existing or math.abs(existing - mult) > 0.02 then
+            BH.MUTATION_MULT[mut] = mult
+            L(string.format("[MutLearn] '%s' mult = %.4f (base=%.3f, kg@1=%.3f)",
+                mut, mult, baseWeight, displayedKgAtAge1))
+            return true
+        end
+        return false
+    end
+
+    -- v8.69: Scan TBC data, auto-learn semua mutation yang ke-detect
+    function BH.autoLearnMutations()
+        if not BH.TBC then return 0 end
+        local data = BH.getMyBoothData()
+        if not data or not data.Items then return 0 end
+        local learned = 0
+        for _, item in pairs(data.Items) do
+            if item.PetData then
+                local pd = item.PetData
+                local mut = pd.MutationType
+                if mut and mut ~= "" and mut ~= "None" then
+                    local bw = pd.BaseWeight
+                    -- Defensive: petData field name bisa beda-beda
+                    local currentKg = pd.Weight or pd.CurrentWeight or pd.Kg or pd.kg
+                    local age = pd.Age or pd.Level or pd.age
+                    if bw and currentKg and age then
+                        local kgAt1 = BH.kgAtAge1(currentKg, age)
+                        if BH.learnMutationMult(mut, bw, kgAt1) then
+                            learned = learned + 1
+                        end
+                    end
+                end
+            end
+        end
+        if learned > 0 then
+            L(string.format("[MutLearn] %d mutation baru ke-learn dari TBC", learned))
+        end
+        return learned
+    end
 
     -- v8.46: TradeBoothController — kunci akses data booth server-wide
     BH.TBC = nil
@@ -278,6 +336,8 @@ do
                 end
             end
         end
+        -- v8.69: auto-learn mutation multipliers sekalian
+        pcall(function() BH.autoLearnMutations() end)
     end
 
     -- Lookup cache: try by Tool.Name, then f attribute (booth tool fallback)
@@ -787,59 +847,48 @@ plPad.PaddingTop = UDim.new(0, 14) plPad.PaddingLeft = UDim.new(0, 14)
 plPad.PaddingRight = UDim.new(0, 14) plPad.PaddingBottom = UDim.new(0, 14)
 plPad.Parent = pricePanel
 
-lblOf(pricePanel, "💰  LIST HARGA (Rules)", 0, 0, 400, 28, C.accent, 18, FB)
-lblOf(pricePanel, "Sama kayak rules di Listing — bisa tambah & edit harga di sini.", 0, 32, 700, 20, C.textDim, 13)
+-- v8.72: hide header biar tab rules lebar
+local lhTitleLbl = lblOf(pricePanel, "💰  LIST HARGA (Rules)", 0, 0, 400, 28, C.accent, 18, FB)
+local lhDescLbl = lblOf(pricePanel, "Sama kayak rules di Listing — bisa tambah & edit harga di sini.", 0, 32, 700, 20, C.textDim, 13)
+lhTitleLbl.Visible = false
+lhDescLbl.Visible = false
 
 -- ===== BACKPACK STATS CARD =====
 -- Forward declare labels (used by refreshBackpackStats later)
 local lhPetCount, lhFavCount, lhCapacity
 do
+    -- v8.72: stats card compact — cuma PET count (FAV+CAPACITY hidden)
     local statsCardLH = Instance.new("Frame")
-    statsCardLH.Size = UDim2.new(1, 0, 0, 56) statsCardLH.Position = UDim2.new(0, 0, 0, 56)
-    statsCardLH.BackgroundColor3 = C.card statsCardLH.BorderSizePixel = 0
+    statsCardLH.Size = UDim2.new(1, 0, 0, 24) statsCardLH.Position = UDim2.new(0, 0, 0, 0)
+    statsCardLH.BackgroundTransparency = 1
     statsCardLH.Parent = pricePanel
-    Instance.new("UICorner", statsCardLH).CornerRadius = UDim.new(0, 8)
-    local statsStroke = Instance.new("UIStroke", statsCardLH)
-    statsStroke.Color = C.accent statsStroke.Thickness = 1 statsStroke.Transparency = 0.6
 
     lhPetCount = Instance.new("TextLabel")
-    lhPetCount.Size = UDim2.new(0.33, -8, 1, 0) lhPetCount.Position = UDim2.new(0, 12, 0, 0)
+    lhPetCount.Size = UDim2.new(1, 0, 1, 0) lhPetCount.Position = UDim2.new(0, 0, 0, 0)
     lhPetCount.BackgroundTransparency = 1
-    lhPetCount.Text = "🐾  PET\n0"
-    lhPetCount.TextColor3 = C.text lhPetCount.Font = FB lhPetCount.TextSize = 13
+    lhPetCount.Text = "0 pet"
+    lhPetCount.TextColor3 = C.textDim lhPetCount.Font = FM lhPetCount.TextSize = 11
     lhPetCount.TextXAlignment = Enum.TextXAlignment.Left
     lhPetCount.TextYAlignment = Enum.TextYAlignment.Center
     lhPetCount.RichText = true lhPetCount.Parent = statsCardLH
 
+    -- v8.72: kept for backward compat, hidden
     lhFavCount = Instance.new("TextLabel")
-    lhFavCount.Size = UDim2.new(0.33, -8, 1, 0) lhFavCount.Position = UDim2.new(0.33, 4, 0, 0)
-    lhFavCount.BackgroundTransparency = 1
-    lhFavCount.Text = "⭐  FAV\n0"
-    lhFavCount.TextColor3 = C.text lhFavCount.Font = FB lhFavCount.TextSize = 13
-    lhFavCount.TextXAlignment = Enum.TextXAlignment.Left
-    lhFavCount.TextYAlignment = Enum.TextYAlignment.Center
-    lhFavCount.RichText = true lhFavCount.Parent = statsCardLH
-
+    lhFavCount.Visible = false lhFavCount.Parent = statsCardLH
     lhCapacity = Instance.new("TextLabel")
-    lhCapacity.Size = UDim2.new(0.33, -8, 1, 0) lhCapacity.Position = UDim2.new(0.66, 4, 0, 0)
-    lhCapacity.BackgroundTransparency = 1
-    lhCapacity.Text = "📦  CAPACITY\n? / ?"
-    lhCapacity.TextColor3 = C.text lhCapacity.Font = FB lhCapacity.TextSize = 13
-    lhCapacity.TextXAlignment = Enum.TextXAlignment.Left
-    lhCapacity.TextYAlignment = Enum.TextYAlignment.Center
-    lhCapacity.RichText = true lhCapacity.Parent = statsCardLH
+    lhCapacity.Visible = false lhCapacity.Parent = statsCardLH
 end
 
--- Rules display (shifted down by 70px for stats card)
+-- v8.73: priceScroll fill all space (search removed, header hidden, FAV/CAPACITY hidden)
 local priceScroll = Instance.new("ScrollingFrame")
-priceScroll.Size = UDim2.new(1, 0, 0, 200) priceScroll.Position = UDim2.new(0, 0, 0, 124)
+priceScroll.Size = UDim2.new(1, 0, 1, -32) priceScroll.Position = UDim2.new(0, 0, 0, 28)
 priceScroll.BackgroundColor3 = C.card priceScroll.BorderSizePixel = 0
 priceScroll.ScrollBarThickness = 4 priceScroll.Parent = pricePanel
 Instance.new("UICorner", priceScroll).CornerRadius = UDim.new(0, 8)
-local priceLayout = Instance.new("UIListLayout") priceLayout.Padding = UDim.new(0, 6) priceLayout.Parent = priceScroll
+local priceLayout = Instance.new("UIListLayout") priceLayout.Padding = UDim.new(0, 4) priceLayout.Parent = priceScroll
 local pricePadInner = Instance.new("UIPadding")
-pricePadInner.PaddingTop = UDim.new(0, 8) pricePadInner.PaddingLeft = UDim.new(0, 8) pricePadInner.PaddingRight = UDim.new(0, 8)
-pricePadInner.PaddingBottom = UDim.new(0, 8) pricePadInner.Parent = priceScroll
+pricePadInner.PaddingTop = UDim.new(0, 6) pricePadInner.PaddingLeft = UDim.new(0, 6) pricePadInner.PaddingRight = UDim.new(0, 6)
+pricePadInner.PaddingBottom = UDim.new(0, 6) pricePadInner.Parent = priceScroll
 
 -- Add rule form (mirror of Listing tab)
 lblOf(pricePanel, "SELECT PET TYPE", 0, 344, 200, 18, C.accent, 13, FB)
@@ -901,26 +950,8 @@ do
     end
 end
 
--- v8.47: search box di LIST HARGA (filter rules)
+-- v8.73: search box removed — tab list harga full width
 local priceSearchText = ""
-do
-    local lhSearchBox = boxOf(pricePanel, 0, 118, 1, 34, "")
-    lhSearchBox.Size = UDim2.new(1, 0, 0, 34)
-    lhSearchBox.PlaceholderText = "🔍 cari rule by pet type..."
-    lhSearchBox.TextSize = 14
-    local lhSearchPad = Instance.new("UIPadding")
-    lhSearchPad.PaddingLeft = UDim.new(0, 12)
-    lhSearchPad.Parent = lhSearchBox
-
-    -- Pindahin priceScroll biar gak overlap dengan search
-    priceScroll.Position = UDim2.new(0, 0, 0, 160)
-    priceScroll.Size = UDim2.new(1, 0, 1, -180)
-
-    lhSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-        priceSearchText = lhSearchBox.Text or ""
-        rebuildRulesUI()
-    end)
-end
 
 -- ============================================================
 -- PET TYPE MODAL (popup overlay)
@@ -1127,7 +1158,7 @@ function rebuildRulesUI()
                 searchOk = typeName:find(q, 1, true) ~= nil
             end
             if searchOk then
-                buildRuleRow(priceScroll, r, idx, true)  -- list harga: bigger
+                buildRuleRow(priceScroll, r, idx, false)  -- v8.73: compact (was true/bigger)
             end
         end
     end
@@ -2300,16 +2331,17 @@ BH.snSubBtns = {}
 BH.snSubPanels = {}
 
 do
--- Snipe sub-tab bar
+-- v8.73: Snipe sub-tab bar — compact (was h=40 y=12, now h=26 y=8)
 local snSubTabBar = Instance.new("Frame")
-snSubTabBar.Size = UDim2.new(1, -24, 0, 40) snSubTabBar.Position = UDim2.new(0, 12, 0, 12)
+snSubTabBar.Size = UDim2.new(1, -24, 0, 26) snSubTabBar.Position = UDim2.new(0, 12, 0, 8)
 snSubTabBar.BackgroundTransparency = 1 snSubTabBar.Parent = snipePanel
 local snSubLayout = Instance.new("UIListLayout") snSubLayout.FillDirection = Enum.FillDirection.Horizontal
 snSubLayout.Padding = UDim.new(0, 8) snSubLayout.Parent = snSubTabBar
 
 local function makeSnSubPanel(name)
     local sp = Instance.new("Frame")
-    sp.Size = UDim2.new(1, -24, 1, -64) sp.Position = UDim2.new(0, 12, 0, 60)
+    -- v8.73: panel start y=40 (was 60) — sub-tab smaller
+    sp.Size = UDim2.new(1, -24, 1, -44) sp.Position = UDim2.new(0, 12, 0, 40)
     sp.BackgroundColor3 = C.panel sp.BorderSizePixel = 0
     sp.Visible = false sp.Parent = snipePanel
     Instance.new("UICorner", sp).CornerRadius = UDim.new(0, 10)
@@ -2324,14 +2356,14 @@ local function makeSnSubBtn(name)
     b.Size = UDim2.new(0.33, -4, 1, 0) b.AutoButtonColor = false
     b.BackgroundColor3 = C.card b.BorderSizePixel = 0
     b.Text = "" b.Parent = snSubTabBar
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)  -- v8.73: smaller corner
     local stroke = Instance.new("UIStroke", b)
     stroke.Color = C.accent stroke.Thickness = 0
     stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border stroke.Transparency = 0.3
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 1, 0) lbl.BackgroundTransparency = 1
     lbl.Text = name lbl.TextColor3 = C.textDim
-    lbl.Font = FB lbl.TextSize = 12 lbl.Parent = b
+    lbl.Font = FB lbl.TextSize = 10 lbl.Parent = b  -- v8.73: 12 → 10
     BH.snSubBtns[name] = {btn=b, stroke=stroke, lbl=lbl}
     b.MouseButton1Click:Connect(function()
         for n, d in pairs(BH.snSubBtns) do
@@ -2364,8 +2396,11 @@ snPad.PaddingTop = UDim.new(0, 14) snPad.PaddingLeft = UDim.new(0, 14)
 snPad.PaddingRight = UDim.new(0, 14) snPad.PaddingBottom = UDim.new(0, 14)
 snPad.Parent = snManualPanel
 
-lblOf(snManualPanel, "🎯  SNIPE MANUAL", 0, 0, 400, 24, C.accent, 14, FB)
-lblOf(snManualPanel, "Scan semua pet — auto-refresh 10s", 0, 24, 600, 16, C.textDim, 10)
+-- v8.73: title, subtitle, count label di-hide — search jadi y=0
+local snTitleLbl = lblOf(snManualPanel, "🎯  SNIPE MANUAL", 0, 0, 400, 24, C.accent, 14, FB)
+local snSubLbl = lblOf(snManualPanel, "Scan semua pet — auto-refresh 10s", 0, 24, 600, 16, C.textDim, 10)
+snTitleLbl.Visible = false
+snSubLbl.Visible = false
 
 -- v8.49: hide refresh+TP, counter inline
 snRefreshBtn = btnOf(snManualPanel, 0, 0, 1, 1, "🔄 MUAT ULANG", C.accent)
@@ -2378,6 +2413,7 @@ snCountLbl.BackgroundTransparency = 1
 snCountLbl.Text = "Loading scan..."
 snCountLbl.TextColor3 = C.success snCountLbl.Font = FM snCountLbl.TextSize = 10
 snCountLbl.TextXAlignment = Enum.TextXAlignment.Left snCountLbl.Parent = snManualPanel
+snCountLbl.Visible = false  -- v8.73: hidden (text updates still happen in code, just not displayed)
 
 -- TP handler (kept for compat — bisa di-call dari handler)
 snTpBtn.MouseButton1Click:Connect(function()
@@ -2401,7 +2437,7 @@ end)
 
 -- Search box
 snSearch = Instance.new("TextBox")
-snSearch.Size = UDim2.new(1, 0, 0, 28) snSearch.Position = UDim2.new(0, 0, 0, 62)
+snSearch.Size = UDim2.new(1, 0, 0, 28) snSearch.Position = UDim2.new(0, 0, 0, 0)  -- v8.73: y=62 → 0
 snSearch.BackgroundColor3 = C.input snSearch.BorderSizePixel = 0
 snSearch.Text = (BH.marketState and BH.marketState.snSearch) or ""
 snSearch.TextColor3 = C.text
@@ -2415,7 +2451,7 @@ snSearchPad.PaddingLeft = UDim.new(0, 12) snSearchPad.Parent = snSearch
 
 -- Filter chips row
 local snFilterFrame = Instance.new("Frame")
-snFilterFrame.Size = UDim2.new(1, 0, 0, 28) snFilterFrame.Position = UDim2.new(0, 0, 0, 96)
+snFilterFrame.Size = UDim2.new(1, 0, 0, 28) snFilterFrame.Position = UDim2.new(0, 0, 0, 34)  -- v8.73: y=96 → 34
 snFilterFrame.BackgroundTransparency = 1 snFilterFrame.Parent = snManualPanel
 local snFilterLayout = Instance.new("UIListLayout") snFilterLayout.FillDirection = Enum.FillDirection.Horizontal
 snFilterLayout.Padding = UDim.new(0, 4) snFilterLayout.Parent = snFilterFrame
@@ -2458,7 +2494,7 @@ Instance.new("UICorner", snResetBtn).CornerRadius = UDim.new(0, 5)
 
 -- Table header
 local snHeader = Instance.new("Frame")
-snHeader.Size = UDim2.new(1, 0, 0, 22) snHeader.Position = UDim2.new(0, 0, 0, 134)
+snHeader.Size = UDim2.new(1, 0, 0, 22) snHeader.Position = UDim2.new(0, 0, 0, 72)  -- v8.73: y=134 → 72
 snHeader.BackgroundColor3 = C.card snHeader.BorderSizePixel = 0
 snHeader.Parent = snManualPanel
 Instance.new("UICorner", snHeader).CornerRadius = UDim.new(0, 4)
@@ -2478,7 +2514,7 @@ snHdr("Action", 0.80, 0.18)
 
 -- Listings table (big now!)
 snScroll = Instance.new("ScrollingFrame")
-snScroll.Size = UDim2.new(1, 0, 1, -160) snScroll.Position = UDim2.new(0, 0, 0, 160)
+snScroll.Size = UDim2.new(1, 0, 1, -98) snScroll.Position = UDim2.new(0, 0, 0, 98)  -- v8.73: y=160 → 98
 snScroll.BackgroundColor3 = C.card snScroll.BorderSizePixel = 0
 snScroll.ScrollBarThickness = 4 snScroll.Parent = snManualPanel
 Instance.new("UICorner", snScroll).CornerRadius = UDim.new(0, 8)
@@ -2928,16 +2964,8 @@ do
             end
         end
         local nonFav = total - favCount
-        lhPetCount.Text = "🐾  PET\n<font color='rgb(255,215,0)'>"..total.."</font> <font color='rgb(160,160,160)'>("..nonFav.." non-fav)</font>"
-        lhFavCount.Text = "⭐  FAV\n<font color='rgb(255,215,0)'>"..favCount.."</font>"
-        local cap = getInventoryCapacity()
-        if cap then
-            local pct = math.floor(total / cap * 100)
-            local color = pct >= 90 and "rgb(220,80,90)" or (pct >= 70 and "rgb(255,165,0)" or "rgb(80,200,130)")
-            lhCapacity.Text = "📦  CAPACITY\n<font color='"..color.."'>"..total.." / "..cap.."</font> <font color='rgb(160,160,160)'>("..pct.."%)</font>"
-        else
-            lhCapacity.Text = "📦  CAPACITY\n<font color='rgb(255,215,0)'>"..total.."</font> / <font color='rgb(160,160,160)'>?</font>"
-        end
+        lhPetCount.Text = total.." pet"
+        -- v8.72: FAV+CAPACITY hidden, no update
     end
 
     -- Auto refresh on backpack changes
@@ -4456,20 +4484,18 @@ end)
 
 -- ===== SNIPE SCANNER =====
 local function setupSnipeScanner()
-local MUTATIONS = {
-    "Nightmare","Rainbow","Venom","Golden","Everchanted","Mythic","UFO",
-    "Albino","Amethyst","Angora","Apple","Arctic","Cyber","Frosted","Magma",
-    "Crystal","Dark","Diamond","Inferno","Jade","Ocean","Shadow","Solar","Toxic",
-    "Vampire","Void","Zen","Glowing","Holographic","Iron","Neon","Plasma",
-    "Wet","Windy","Stone","Wood","Ghostly","Mimic","Empress","Bumble","Honey",
-    "Polar","Grizzly",
-}
+-- v8.69: parseMutation pake BH.MUTATION_NAMES (lengkap ~90 mutations) via getBaseName
+-- Otomatis handle multi-layer mutation ("Shocked, Galactic Peacock" → "Shocked, Galactic")
 local function parseMutation(name, baseType)
-    -- Try to find any mutation prefix before the type
-    for _, mut in ipairs(MUTATIONS) do
-        if string.find(name, mut, 1, true) then return mut end
-    end
-    return "-"
+    if not name or name == "" then return "-" end
+    -- Strip "[Age X]" "[X KG]" dulu → display name aja
+    local petName = name:match("^(.-)%s*%[") or name
+    -- Strip mutation prefix berlapis → dapet base name
+    local base = BH.getBaseName(petName)
+    if base == petName then return "-" end  -- pet biasa, no mutation
+    -- Mutation = petName minus base (trim trailing comma/space)
+    local mut = petName:sub(1, #petName - #base):gsub("[,%s]+$", "")
+    return mut ~= "" and mut or "-"
 end
 
 local function findPriceForTool(tool, booth)
@@ -4828,39 +4854,28 @@ local function renderSnipe()
                     buyBtn.BackgroundColor3 = C.accent
                     task.spawn(function()
                         local clean = tostring(p.listingUuid):gsub("[{}]","")
-                        local braced = "{"..clean.."}"
-                        local boothClean = p.boothUuid and tostring(p.boothUuid):gsub("[{}]","") or nil
                         local seller = p.sellerPlayer
-                        local sellerId = seller and seller.UserId or nil
 
-                        -- v8.48: brute force semua kemungkinan format
-                        local attempts = {
-                            {label="seller+listing", args={seller, clean}},
-                            {label="seller+braced", args={seller, braced}},
-                            {label="listing+seller", args={clean, seller}},
-                            {label="sellerId+listing", args={sellerId, clean}},
-                            {label="booth+listing", args={boothClean, clean}},
-                            {label="listing-clean", args={clean}},
-                            {label="listing-braced", args={braced}},
-                        }
-
-                        local success = false
-                        for _, a in ipairs(attempts) do
-                            if a.args[1] ~= nil then  -- skip kalo arg utama nil
-                                local ok, r1, r2, r3 = pcall(function()
-                                    return buyRE:InvokeServer(table.unpack(a.args))
-                                end)
-                                L("[Buy] "..a.label.." → ok="..tostring(ok).." r1="..tostring(r1):sub(1,30)
-                                    .." r2="..tostring(r2):sub(1,30)
-                                    .." r3="..tostring(r3):sub(1,30))
-                                if ok and r1 == true then
-                                    success = true
-                                    L("[Buy] ✅✅ WORKING FORMAT: "..a.label)
-                                    break
-                                end
-                                task.wait(0.3)
-                            end
+                        -- v8.72: format confirmed via debug hook capture:
+                        -- BuyListing:InvokeServer(sellerPlayer, listingUuidClean)
+                        if not seller then
+                            buyBtn.Text = "✗ NO SELLER"
+                            buyBtn.BackgroundColor3 = C.danger
+                            L("[Buy] ❌ sellerPlayer is nil — re-scan dulu")
+                            return
                         end
+
+                        local ok, r1, r2 = pcall(function()
+                            return buyRE:InvokeServer(seller, clean)
+                        end)
+                        L("[Buy] result: ok="..tostring(ok)
+                            .." r1="..tostring(r1):sub(1,40)
+                            .." r2="..tostring(r2):sub(1,40))
+
+                        -- Success kriteria: pcall ok + r1 not false/error string
+                        -- Server return bisa: true | nil | "OK" | error string
+                        local success = ok and (r1 == true or r1 == nil or r1 == "OK"
+                            or (type(r1) == "string" and not r1:lower():find("err") and not r1:lower():find("fail")))
 
                         if success then
                             buyBtn.Text = "✅ OK"
@@ -4871,6 +4886,7 @@ local function renderSnipe()
                         else
                             buyBtn.Text = "✗ FAIL"
                             buyBtn.BackgroundColor3 = C.danger
+                            L("[Buy] ❌ failed — possibly listing dah ke-beli orang lain / lo gak ada duit")
                         end
                     end)
                 end)
@@ -4960,39 +4976,25 @@ local function renderBuy()
                     return
                 end
                 local clean = tostring(listingUuid):gsub("[{}]","")
-                local braced = "{"..clean.."}"
-                local boothClean = p.boothUuid and tostring(p.boothUuid):gsub("[{}]","") or nil
                 local seller = p.sellerPlayer
-                local sellerId = seller and seller.UserId or nil
 
-                -- v8.48: brute force semua kemungkinan format buy
-                local attempts = {
-                    {label="seller+listing", args={seller, clean}},
-                    {label="seller+braced", args={seller, braced}},
-                    {label="listing+seller", args={clean, seller}},
-                    {label="sellerId+listing", args={sellerId, clean}},
-                    {label="booth+listing", args={boothClean, clean}},
-                    {label="listing-clean", args={clean}},
-                    {label="listing-braced", args={braced}},
-                }
-
-                local success = false
-                for _, a in ipairs(attempts) do
-                    if a.args[1] ~= nil then
-                        local ok, r1, r2, r3 = pcall(function()
-                            return buyRE:InvokeServer(table.unpack(a.args))
-                        end)
-                        L("[Buy] "..a.label.." → ok="..tostring(ok).." r1="..tostring(r1):sub(1,30)
-                            .." r2="..tostring(r2):sub(1,30)
-                            .." r3="..tostring(r3):sub(1,30))
-                        if ok and r1 == true then
-                            success = true
-                            L("[Buy] ✅✅ WORKING FORMAT: "..a.label)
-                            break
-                        end
-                        task.wait(0.3)
-                    end
+                -- v8.72: confirmed format BuyListing(sellerPlayer, listingUuidClean)
+                if not seller then
+                    buyBtn.Text = "✗ NO SELLER"
+                    buyBtn.BackgroundColor3 = C.danger
+                    L("[Buy] ❌ sellerPlayer is nil")
+                    return
                 end
+
+                local ok, r1, r2 = pcall(function()
+                    return buyRE:InvokeServer(seller, clean)
+                end)
+                L("[Buy] result: ok="..tostring(ok)
+                    .." r1="..tostring(r1):sub(1,40)
+                    .." r2="..tostring(r2):sub(1,40))
+
+                local success = ok and (r1 == true or r1 == nil or r1 == "OK"
+                    or (type(r1) == "string" and not r1:lower():find("err") and not r1:lower():find("fail")))
 
                 if success then
                     buyBtn.Text = "✅ OK"
@@ -5003,7 +5005,7 @@ local function renderBuy()
                 else
                     buyBtn.Text = "✗ FAIL"
                     buyBtn.BackgroundColor3 = C.danger
-                    L("[Buy] ❌ failed "..p.type)
+                    L("[Buy] ❌ failed (listing dah ke-beli / duit kurang)")
                 end
             end)
         end)
@@ -5059,20 +5061,36 @@ do
     end)
 
     -- v8.47: auto-refresh sekali pas pertama buka SNIPE tab
-    local ok, err = pcall(function()
-        BH.snSubBtns.Manual.btn.MouseButton1Click:Connect(function()
-            task.wait(0.1)
-            if #scanCache == 0 then
-                task.spawn(function()
-                    scanBoothListings()
-                    renderSnipe()
-                end)
-            end
-        end)
-    end)
-    if not ok then
-    else
+    -- v8.73: juga trigger pas klik SNIPE sidebar (kalo Manual udah aktif, click sub-tab gak ke-fire)
+    local function triggerInitialScan()
+        task.wait(0.1)
+        if #scanCache == 0 then
+            task.spawn(function()
+                pcall(scanBoothListings)
+                if snManualPanel and snManualPanel.Visible then
+                    pcall(renderSnipe)
+                elseif snBuyPanel and snBuyPanel.Visible then
+                    pcall(renderBuy)
+                end
+            end)
+        end
     end
+    pcall(function()
+        BH.snSubBtns.Manual.btn.MouseButton1Click:Connect(triggerInitialScan)
+    end)
+    pcall(function()
+        if sbBtns.SNIPE and sbBtns.SNIPE.btn then
+            sbBtns.SNIPE.btn.MouseButton1Click:Connect(triggerInitialScan)
+        end
+    end)
+    -- v8.73: also try kick scan kalo SNIPE udah visible pas script load
+    task.spawn(function()
+        task.wait(1.5)
+        if snipePanel and snipePanel.Visible and #scanCache == 0 then
+            pcall(scanBoothListings)
+            if snManualPanel and snManualPanel.Visible then pcall(renderSnipe) end
+        end
+    end)
 
     -- v8.47: BUY TAB
     BH.snBuy.refresh.MouseButton1Click:Connect(function()
