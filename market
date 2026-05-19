@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.55"
-local VERSION_DATE = "[2D 2E] check connects"
+local VERSION = "8.56"
+local VERSION_DATE = "FIX startStroke nil"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -485,7 +485,7 @@ BH.stageMarker = function(num, color, text, y)
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.55 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.56 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -770,11 +770,9 @@ startBtn.BackgroundColor3 = C.card startBtn.AutoButtonColor = false
 startBtn.Text = "⚡ START" startBtn.TextColor3 = C.textDim
 startBtn.Font = FB startBtn.TextSize = 15 startBtn.Parent = listingPanel
 Instance.new("UICorner", startBtn).CornerRadius = UDim.new(0, 8)
-do
-    local s = Instance.new("UIStroke", startBtn)
-    s.Color = C.accent s.Thickness = 1.5
-    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border s.Transparency = 0.4
-end
+BH.BH.startStroke = Instance.new("UIStroke", startBtn)
+BH.BH.startStroke.Color = C.accent BH.BH.startStroke.Thickness = 1.5
+BH.BH.startStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border BH.BH.startStroke.Transparency = 0.4
 
 -- UNLIST ALL button (hidden, kept for compat)
 local unlistAllListingBtn = Instance.new("TextButton")
@@ -2811,9 +2809,9 @@ local function setStartIdle()
     startBtn.BackgroundColor3 = C.card
     startBtn.TextColor3 = C.textDim
     startBtn.Text = "⚡ START"
-    startStroke.Color = C.accent
-    startStroke.Transparency = 0.5
-    startStroke.Thickness = 1.5
+    BH.startStroke.Color = C.accent
+    BH.startStroke.Transparency = 0.5
+    BH.startStroke.Thickness = 1.5
     -- Stop & remove animated gradient
     if startGradient then
         pcall(function() startGradient:Destroy() end)
@@ -2827,9 +2825,9 @@ local function setStartRunning()
     startBtn.BackgroundColor3 = C.card
     startBtn.TextColor3 = C.accent
     startBtn.Text = "⏸ STOP"
-    startStroke.Color = Color3.fromRGB(255, 255, 255)  -- white base so gradient shows
-    startStroke.Thickness = 2
-    startStroke.Transparency = 0
+    BH.startStroke.Color = Color3.fromRGB(255, 255, 255)  -- white base so gradient shows
+    BH.startStroke.Thickness = 2
+    BH.startStroke.Transparency = 0
 
     -- Add rotating gradient on outline (sweeping border animation)
     if startGradient then pcall(function() startGradient:Destroy() end) end
@@ -2839,7 +2837,7 @@ local function setStartRunning()
         ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 200)),
         ColorSequenceKeypoint.new(1, C.accent),
     })
-    startGradient.Parent = startStroke
+    startGradient.Parent = BH.startStroke
 
     -- Spin the gradient
     task.spawn(function()
