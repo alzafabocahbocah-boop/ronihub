@@ -469,6 +469,17 @@ local snipePanel = makePanel("SNIPE")
 local gardenPanel = makePanel("GARDEN")
 BH.gardenPanel = gardenPanel  -- store for cross-scope access
 
+-- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
+do
+    local t = Instance.new("TextLabel")
+    t.Name = "SyncTest"
+    t.Size = UDim2.new(1, -20, 0, 30) t.Position = UDim2.new(0, 10, 0, 10)
+    t.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    t.BorderSizePixel = 0 t.Text = "[SYNC TEST] gardenPanel render OK"
+    t.TextColor3 = Color3.new(1, 1, 1) t.Font = Enum.Font.SourceSansBold
+    t.TextSize = 14 t.Parent = gardenPanel
+end
+
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
 if isGardenServer then
