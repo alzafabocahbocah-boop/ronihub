@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.64"
-local VERSION_DATE = "FIX snBuy scope"
+local VERSION = "8.65"
+local VERSION_DATE = "Garden clean design + cleanup debug"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -468,26 +468,6 @@ local pricePanel = makePanel("LIST HARGA")
 local snipePanel = makePanel("SNIPE")
 local gardenPanel = makePanel("GARDEN")
 BH.gardenPanel = gardenPanel  -- store for cross-scope access
-
--- Helper buat stage marker (avoid local var count) — auto-stack right side
-BH.markerCount = 0
-BH.stageMarker = function(num, color, text, y)
-    if not gardenPanel then return end
-    local t = Instance.new("TextLabel")
-    t.Size = UDim2.new(0, 180, 0, 11)
-    t.Position = UDim2.new(1, -185, 0, 5 + BH.markerCount * 12)
-    t.BackgroundColor3 = color
-    t.BorderSizePixel = 0
-    t.Text = text
-    t.TextColor3 = Color3.new(1, 1, 1)
-    t.Font = Enum.Font.SourceSans
-    t.TextSize = 9
-    t.Parent = gardenPanel
-    BH.markerCount = BH.markerCount + 1
-end
-
--- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.64 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -2412,8 +2392,6 @@ end)
 
 end  -- end do block for snipe UI
 
--- STAGE 2 marker
-BH.stageMarker(2, Color3.fromRGB(255, 165, 0), "[STAGE 2] snipe UI done", 35)
 
 -- ============================================================
 -- LOGIC
@@ -2432,10 +2410,8 @@ pcall(function()
         removeBoothRE = Booths:FindFirstChild("RemoveBooth")
     end
 end)
-BH.stageMarker(21, Color3.fromRGB(255, 200, 0), "[STAGE 2A] after pcall fix", 60)
 local skinRE
 pcall(function() skinRE = RS.GameEvents.TradeBoothSkinService.Equip end)
-BH.stageMarker(22, Color3.fromRGB(255, 220, 0), "[STAGE 2B] after skinRE", 85)
 
 local function isPet(t) return t:IsA("Tool") and (t:FindFirstChild("PetToolLocal") or t:GetAttribute("PET_UUID")) end
 local function isFav(t)
@@ -2713,11 +2689,9 @@ local function populateModalList()
 
     modalList.CanvasSize = UDim2.new(0, 0, 0, modalListLayout.AbsoluteContentSize.Y + 8)
 end
-BH.stageMarker(24, Color3.fromRGB(180, 50, 200), "[STAGE 2D] before connects", 110)
 
 modalSearch:GetPropertyChangedSignal("Text"):Connect(populateModalList)
 typeDrop.MouseButton1Click:Connect(populateModalList)
-BH.stageMarker(25, Color3.fromRGB(180, 0, 200), "[STAGE 2E] after connects", 135)
 
 -- ===== PET INVENTORY BROWSER =====
 local perTypePrices = {}  -- keep for compat with startBtn
@@ -2853,7 +2827,6 @@ local function setStartRunning()
     end)
 end
 setStartIdle()
-BH.stageMarker(23, Color3.fromRGB(255, 100, 0), "[STAGE 2C] after setStartIdle", 160)
 
 local function setStats(text, color)
     statsLbl.Text = text
@@ -3237,8 +3210,6 @@ do
     end
 end
 
--- STAGE 3 marker
-BH.stageMarker(3, Color3.fromRGB(150, 100, 200), "[STAGE 3] before onStartClick", 185)
 
 BH.onStartClick = function()
     -- If already running → request stop
@@ -3711,7 +3682,6 @@ BH.onStartClick = function()
     end)
 end
 startBtn.MouseButton1Click:Connect(BH.onStartClick)
-BH.stageMarker(31, Color3.fromRGB(120, 0, 200), "[3A] onStartClick done", 200)
 
 -- ===== REJOIN =====
 rejoinBtn.MouseButton1Click:Connect(function()
@@ -3839,7 +3809,6 @@ local function hopToBestServer()
 end
 
 hopNowBtn.MouseButton1Click:Connect(function() task.spawn(hopToBestServer) end)
-BH.stageMarker(32, Color3.fromRGB(80, 0, 200), "[3B] after hopNowBtn", 215)
 
 -- Scan players button
 hopScanBtn.MouseButton1Click:Connect(function()
@@ -4070,7 +4039,6 @@ local function tryClaim()
     L("Claimed!")
 end
 claimBtn.MouseButton1Click:Connect(function() task.spawn(tryClaim) end)
-BH.stageMarker(33, Color3.fromRGB(60, 0, 200), "[3C] after claimBtn", 230)
 
 -- ===== AUTO-CLAIM BACKGROUND LOOP (v8.43) =====
 -- v8.49: pakai TBC sebagai PRIMARY detection (authoritative, fast)
@@ -4184,7 +4152,6 @@ task.spawn(function()
 end)
 
 -- ===== AUTO-MIGRATE =====
-BH.stageMarker(34, Color3.fromRGB(40, 0, 200), "[3D] before autoMigBtn", 245)
 autoMigBtn.MouseButton1Click:Connect(function()
     autoMigState = not autoMigState
     autoMigBtn.Text = autoMigState and "🤖 Auto: ON" or "🤖 Auto: OFF"
@@ -4856,7 +4823,6 @@ local function renderBuy()
 end
 
 do
-    BH.stageMarker(351, Color3.fromRGB(0, 200, 100), "[3E1] do-block start", 285)
     snRefreshBtn.MouseButton1Click:Connect(function()
         snCountLbl.Text = "Scanning..."
         task.spawn(function()
@@ -4864,11 +4830,9 @@ do
             renderSnipe()
         end)
     end)
-    BH.stageMarker(352, Color3.fromRGB(0, 220, 100), "[3E2] after snRefreshBtn", 295)
     for _, b in ipairs({snSearch, snMinAge, snMaxAge, snMinKg, snMaxKg, snMinPrice, snMaxPrice}) do
         b:GetPropertyChangedSignal("Text"):Connect(renderSnipe)
     end
-    BH.stageMarker(353, Color3.fromRGB(50, 220, 100), "[3E3] after filter loop", 305)
 
     -- v8.47: auto-refresh every 10s
     task.spawn(function()
@@ -4888,7 +4852,6 @@ do
             end
         end
     end)
-    BH.stageMarker(3531, Color3.fromRGB(80, 220, 100), "[3E3a] after auto-refresh spawn", 305)
 
     -- v8.47: auto-refresh sekali pas pertama buka SNIPE tab
     local ok, err = pcall(function()
@@ -4903,14 +4866,10 @@ do
         end)
     end)
     if not ok then
-        BH.stageMarker(35311, Color3.fromRGB(200, 0, 0), "[3E3a ERR] "..tostring(err):sub(1, 40))
     else
-        BH.stageMarker(35311, Color3.fromRGB(80, 220, 100), "[3E3a] Manual ok")
     end
-    BH.stageMarker(3532, Color3.fromRGB(120, 220, 100), "[3E3b] after Manual click", 305)
 
     -- v8.47: BUY TAB
-    BH.stageMarker(354, Color3.fromRGB(100, 220, 0), "[3E4] before snBuy connects", 315)
     BH.snBuy.refresh.MouseButton1Click:Connect(function()
         BH.snBuy.countLbl.Text = "Scanning..."
         task.spawn(function()
@@ -4918,10 +4877,8 @@ do
             renderBuy()
         end)
     end)
-    BH.stageMarker(355, Color3.fromRGB(150, 220, 0), "[3E5] after BH.snBuy.refresh", 315)
     BH.snBuy.search:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
     BH.snBuy.maxPrice:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
-    BH.stageMarker(356, Color3.fromRGB(200, 220, 0), "[3E6] after snBuy listeners", 315)
 
     BH.snSubBtns.Buy.btn.MouseButton1Click:Connect(function()
         task.wait(0.1)
@@ -4937,9 +4894,7 @@ do
 end
 
 end  -- end setupSnipeScanner function
-BH.stageMarker(35, Color3.fromRGB(20, 100, 220), "[3E] before setupSnipeScanner()", 260)
 setupSnipeScanner()
-BH.stageMarker(36, Color3.fromRGB(0, 120, 240), "[3F] after setupSnipeScanner()", 275)
 
 -- ===== INIT =====
 L("════════════════════════════════════")
@@ -4957,70 +4912,57 @@ L("  - Total pet di backpack")
 L("  - Fav count")
 L("  - Inventory capacity")
 
--- STAGE 4 marker
-BH.stageMarker(4, Color3.fromRGB(0, 150, 200), "[STAGE 4] before func def", 210)
 
 -- v8.49: GARDEN PANEL UI build (server-detect)
 BH.buildGardenPanel = function()
     local gp = BH.gardenPanel
-    if not gp then
-        L("[Garden] ❌ BH.gardenPanel is nil")
-        return
-    end
-    L("[Garden] building panel...")
-
-    -- IMMEDIATELY add visible status banner di top — confirms function ran
-    local topDiag = Instance.new("TextLabel")
-    topDiag.Size = UDim2.new(1, 0, 0, 18) topDiag.Position = UDim2.new(0, 0, 0, 0)
-    topDiag.BackgroundColor3 = Color3.fromRGB(0, 100, 0)  -- green = build started
-    topDiag.BorderSizePixel = 0
-    topDiag.Text = "🌱 GARDEN HELPER (build ok)"
-    topDiag.TextColor3 = Color3.new(1, 1, 1)
-    topDiag.Font = FB topDiag.TextSize = 11
-    topDiag.Parent = gp
+    if not gp then return end
 
     local btnPad = 4
     local btnRow = Instance.new("Frame")
-    btnRow.Size = UDim2.new(1, -28, 0, 30) btnRow.Position = UDim2.new(0, 14, 0, 24)
+    btnRow.Size = UDim2.new(1, -28, 0, 28) btnRow.Position = UDim2.new(0, 14, 0, 14)
     btnRow.BackgroundTransparency = 1 btnRow.Parent = gp
 
     local gGiftBtn = Instance.new("TextButton")
     gGiftBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
     gGiftBtn.Position = UDim2.new(0, 0, 0, 0)
-    gGiftBtn.BackgroundColor3 = C.danger
-    gGiftBtn.Text = "🎁 Gift: OFF" gGiftBtn.TextColor3 = Color3.new(1, 1, 1)
-    gGiftBtn.Font = FB gGiftBtn.TextSize = 11
+    gGiftBtn.BackgroundColor3 = C.card
+    gGiftBtn.AutoButtonColor = false
+    gGiftBtn.Text = "Auto Accept Gift: OFF" gGiftBtn.TextColor3 = C.textDim
+    gGiftBtn.Font = FM gGiftBtn.TextSize = 11
     gGiftBtn.BorderSizePixel = 0 gGiftBtn.Parent = btnRow
     Instance.new("UICorner", gGiftBtn).CornerRadius = UDim.new(0, 6)
 
     local gTradeBtn = Instance.new("TextButton")
     gTradeBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
     gTradeBtn.Position = UDim2.new(0.335, btnPad/2, 0, 0)
-    gTradeBtn.BackgroundColor3 = C.danger
-    gTradeBtn.Text = "🤝 Trade: OFF" gTradeBtn.TextColor3 = Color3.new(1, 1, 1)
-    gTradeBtn.Font = FB gTradeBtn.TextSize = 11
+    gTradeBtn.BackgroundColor3 = C.card
+    gTradeBtn.AutoButtonColor = false
+    gTradeBtn.Text = "Auto Accept Trade: OFF" gTradeBtn.TextColor3 = C.textDim
+    gTradeBtn.Font = FM gTradeBtn.TextSize = 11
     gTradeBtn.BorderSizePixel = 0 gTradeBtn.Parent = btnRow
     Instance.new("UICorner", gTradeBtn).CornerRadius = UDim.new(0, 6)
 
     local gTravelBtn = Instance.new("TextButton")
     gTravelBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
     gTravelBtn.Position = UDim2.new(0.67, btnPad, 0, 0)
-    gTravelBtn.BackgroundColor3 = C.success
-    gTravelBtn.Text = "🌱 TP Market" gTravelBtn.TextColor3 = Color3.new(1, 1, 1)
-    gTravelBtn.Font = FB gTravelBtn.TextSize = 11
+    gTravelBtn.BackgroundColor3 = C.card
+    gTravelBtn.AutoButtonColor = false
+    gTravelBtn.Text = "TP to Market" gTravelBtn.TextColor3 = C.textDim
+    gTravelBtn.Font = FM gTravelBtn.TextSize = 11
     gTravelBtn.BorderSizePixel = 0 gTravelBtn.Parent = btnRow
     Instance.new("UICorner", gTravelBtn).CornerRadius = UDim.new(0, 6)
 
     gGiftBtn.MouseButton1Click:Connect(function()
         BH.autoGift = not BH.autoGift
-        gGiftBtn.Text = BH.autoGift and "🎁 Gift: ON" or "🎁 Gift: OFF"
-        gGiftBtn.BackgroundColor3 = BH.autoGift and C.success or C.danger
+        gGiftBtn.Text = "Auto Accept Gift: "..(BH.autoGift and "ON" or "OFF")
+        gGiftBtn.TextColor3 = BH.autoGift and C.accent or C.textDim
         if BH.hookGiftsFn then BH.hookGiftsFn() end
     end)
     gTradeBtn.MouseButton1Click:Connect(function()
         BH.autoTrade = not BH.autoTrade
-        gTradeBtn.Text = BH.autoTrade and "🤝 Trade: ON" or "🤝 Trade: OFF"
-        gTradeBtn.BackgroundColor3 = BH.autoTrade and C.success or C.danger
+        gTradeBtn.Text = "Auto Accept Trade: "..(BH.autoTrade and "ON" or "OFF")
+        gTradeBtn.TextColor3 = BH.autoTrade and C.accent or C.textDim
         if BH.hookTradesFn then BH.hookTradesFn() end
     end)
     gTravelBtn.MouseButton1Click:Connect(function()
@@ -5051,21 +4993,21 @@ BH.buildGardenPanel = function()
     end)
 
     local statsCard = Instance.new("Frame")
-    statsCard.Size = UDim2.new(1, -28, 0, 50) statsCard.Position = UDim2.new(0, 14, 0, 62)
+    statsCard.Size = UDim2.new(1, -28, 0, 44) statsCard.Position = UDim2.new(0, 14, 0, 50)
     statsCard.BackgroundColor3 = C.card statsCard.BorderSizePixel = 0
     statsCard.Parent = gp
     Instance.new("UICorner", statsCard).CornerRadius = UDim.new(0, 8)
     local gStatsLbl = Instance.new("TextLabel")
     gStatsLbl.Size = UDim2.new(1, -20, 1, -8) gStatsLbl.Position = UDim2.new(0, 12, 0, 4)
     gStatsLbl.BackgroundTransparency = 1
-    gStatsLbl.Text = "🎒 Loading backpack..."
+    gStatsLbl.Text = "Loading backpack..."
     gStatsLbl.TextColor3 = C.text gStatsLbl.Font = FM gStatsLbl.TextSize = 11
     gStatsLbl.TextXAlignment = Enum.TextXAlignment.Left
     gStatsLbl.TextYAlignment = Enum.TextYAlignment.Top
     gStatsLbl.TextWrapped = true gStatsLbl.Parent = statsCard
 
     local gListScroll = Instance.new("ScrollingFrame")
-    gListScroll.Size = UDim2.new(1, -28, 1, -126) gListScroll.Position = UDim2.new(0, 14, 0, 120)
+    gListScroll.Size = UDim2.new(1, -28, 1, -110) gListScroll.Position = UDim2.new(0, 14, 0, 102)
     gListScroll.BackgroundColor3 = C.input gListScroll.BorderSizePixel = 0
     gListScroll.ScrollBarThickness = 4 gListScroll.ScrollBarImageColor3 = C.accent
     gListScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -5086,7 +5028,7 @@ BH.buildGardenPanel = function()
             if c:IsA("Frame") then c:Destroy() end
         end
         local bp = player:FindFirstChild("Backpack")
-        if not bp then gStatsLbl.Text = "❌ no backpack"; return end
+        if not bp then gStatsLbl.Text = "no backpack"; return end
         local total, favC = 0, 0
         local tc = {}
         for _, t in ipairs(bp:GetChildren()) do
@@ -5104,7 +5046,7 @@ BH.buildGardenPanel = function()
             end
         end
         local nTypes = 0 for _ in pairs(tc) do nTypes = nTypes + 1 end
-        gStatsLbl.Text = string.format("🎒 %d pets  |  ⭐ %d fav  |  %d types", total, favC, nTypes)
+        gStatsLbl.Text = string.format("%d pets  |  %d fav  |  %d types", total, favC, nTypes)
         local sorted = {}
         for pt, info in pairs(tc) do table.insert(sorted, {pt=pt, info=info}) end
         table.sort(sorted, function(a, b) return a.info.n > b.info.n end)
@@ -5135,10 +5077,10 @@ BH.buildGardenPanel = function()
     end
 
     if BH.autoGift then
-        gGiftBtn.Text = "🎁 Gift: ON" gGiftBtn.BackgroundColor3 = C.success
+        gGiftBtn.Text = "Auto Accept Gift: ON" gGiftBtn.TextColor3 = C.accent
     end
     if BH.autoTrade then
-        gTradeBtn.Text = "🤝 Trade: ON" gTradeBtn.BackgroundColor3 = C.success
+        gTradeBtn.Text = "Auto Accept Trade: ON" gTradeBtn.TextColor3 = C.accent
     end
 
     do
@@ -5154,14 +5096,9 @@ BH.buildGardenPanel = function()
         pcall(BH.refreshGardenStats)
     end)
 end
--- STAGE 5 marker (after function def)
-BH.stageMarker(5, Color3.fromRGB(200, 0, 200), "[STAGE 5] func type="..type(BH.buildGardenPanel), 235)
 
--- v8.50: SYNC call
+-- v8.49: build garden panel after all helpers defined
 BH.buildGardenPanel()
-
--- STAGE 6 marker (after sync call)
-BH.stageMarker(6, Color3.fromRGB(0, 200, 0), "[STAGE 6] call returned", 260)
 
 populateModalList()
 refreshPriceList()
