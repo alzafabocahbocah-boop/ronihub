@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.83"
-local VERSION_DATE = "Force-stream booth tiap cycle → workspace scan accurate (no TBC field guessing)"
+local VERSION = "8.84"
+local VERSION_DATE = "Auto Snipe — auto-buy berdasarkan rules + smart streaming"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2617,28 +2617,192 @@ local snScrollPad = Instance.new("UIPadding")
 snScrollPad.PaddingTop = UDim.new(0, 4) snScrollPad.PaddingLeft = UDim.new(0, 4) snScrollPad.PaddingRight = UDim.new(0, 4)
 snScrollPad.Parent = snScroll
 
--- ===== OTOMATIS SNIPE TAB (coming soon placeholder) =====
-local snAutoCenter = Instance.new("Frame")
-snAutoCenter.Size = UDim2.new(0, 400, 0, 240)
-snAutoCenter.Position = UDim2.new(0.5, -200, 0.5, -120)
-snAutoCenter.BackgroundTransparency = 1 snAutoCenter.Parent = snAutoPanel
-local snAutoIcon = Instance.new("TextLabel")
-snAutoIcon.Size = UDim2.new(1, 0, 0, 80) snAutoIcon.BackgroundTransparency = 1
-snAutoIcon.Text = "🤖" snAutoIcon.TextColor3 = C.accent
-snAutoIcon.Font = FB snAutoIcon.TextSize = 64
-snAutoIcon.TextXAlignment = Enum.TextXAlignment.Center snAutoIcon.Parent = snAutoCenter
-local snAutoTitle = Instance.new("TextLabel")
-snAutoTitle.Size = UDim2.new(1, 0, 0, 36) snAutoTitle.Position = UDim2.new(0, 0, 0, 88)
-snAutoTitle.BackgroundTransparency = 1 snAutoTitle.Text = "AUTO SNIPE — Coming Soon"
-snAutoTitle.TextColor3 = C.accent snAutoTitle.Font = FB snAutoTitle.TextSize = 22
-snAutoTitle.TextXAlignment = Enum.TextXAlignment.Center snAutoTitle.Parent = snAutoCenter
-local snAutoDesc = Instance.new("TextLabel")
-snAutoDesc.Size = UDim2.new(1, 0, 0, 80) snAutoDesc.Position = UDim2.new(0, 0, 0, 134)
-snAutoDesc.BackgroundTransparency = 1
-snAutoDesc.Text = "Auto-buy berdasarkan rules.\nLagi dikembangkan, stay tuned!"
-snAutoDesc.TextColor3 = C.textDim snAutoDesc.Font = FM snAutoDesc.TextSize = 14
-snAutoDesc.TextXAlignment = Enum.TextXAlignment.Center
-snAutoDesc.TextWrapped = true snAutoDesc.Parent = snAutoCenter
+-- v8.84: ===== AUTO SNIPE TAB (auto-buy berdasarkan rules) =====
+-- Continuously scan market di server ini, auto-buy pet yang match rules
+BH.autoSnipe = BH.autoSnipe or {
+    active = false,
+    rules = {},          -- list of {petType, mutation, maxKg, maxPrice}
+    bought = {},         -- listingUuid → true (skip yang udah dibeli)
+    boughtCount = 0,
+}
+-- Restore rules dari state file
+if BH.marketState and BH.marketState.autoSnipeRules then
+    BH.autoSnipe.rules = BH.marketState.autoSnipeRules
+end
+
+do
+    local snAutoPad = Instance.new("UIPadding")
+    snAutoPad.PaddingTop = UDim.new(0, 10) snAutoPad.PaddingLeft = UDim.new(0, 12)
+    snAutoPad.PaddingRight = UDim.new(0, 12) snAutoPad.PaddingBottom = UDim.new(0, 10)
+    snAutoPad.Parent = snAutoPanel
+
+    -- Helper untuk bikin input box
+    local function makeAutoInput(xs, ws, ph, ts)
+        local b = Instance.new("TextBox")
+        b.Size = UDim2.new(ws, -3, 0, 26)
+        b.Position = UDim2.new(xs, xs == 0 and 0 or 3, 0, 0)
+        b.BackgroundColor3 = C.input b.BorderSizePixel = 0
+        b.Text = "" b.TextColor3 = C.text
+        b.PlaceholderText = ph b.PlaceholderColor3 = C.textDim
+        b.Font = F b.TextSize = ts or 11
+        b.TextXAlignment = Enum.TextXAlignment.Left
+        b.ClearTextOnFocus = false
+        b.Parent = snAutoPanel
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft = UDim.new(0, 8) pad.Parent = b
+        return b
+    end
+
+    -- Row 1 (y=0): inputs — Pet Type 35% | Mutation 20% | Max KG 20% | Max Price 25%
+    BH.autoSnipe.typeInput = makeAutoInput(0, 0.35, "🐾 Pet type")
+    BH.autoSnipe.mutInput = makeAutoInput(0.35, 0.20, "✨ Mut")
+    BH.autoSnipe.kgInput = makeAutoInput(0.55, 0.20, "Max KG")
+    BH.autoSnipe.priceInput = makeAutoInput(0.75, 0.25, "💰 Max Price")
+    BH.autoSnipe.kgInput.TextXAlignment = Enum.TextXAlignment.Center
+    BH.autoSnipe.priceInput.TextXAlignment = Enum.TextXAlignment.Center
+
+    -- Row 2 (y=30): + ADD RULE (40%) | START/STOP (60%)
+    BH.autoSnipe.addBtn = btnOf(snAutoPanel, 0, 0, 1, 1, "+ ADD RULE", C.accent)
+    BH.autoSnipe.addBtn.Size = UDim2.new(0.4, -3, 0, 26)
+    BH.autoSnipe.addBtn.Position = UDim2.new(0, 0, 0, 30)
+    BH.autoSnipe.addBtn.TextSize = 11
+
+    BH.autoSnipe.toggleBtn = btnOf(snAutoPanel, 0, 0, 1, 1, "▶ START AUTO-BUY", C.success)
+    BH.autoSnipe.toggleBtn.Size = UDim2.new(0.6, 0, 0, 26)
+    BH.autoSnipe.toggleBtn.Position = UDim2.new(0.4, 3, 0, 30)
+    BH.autoSnipe.toggleBtn.TextSize = 11
+
+    -- Row 3 (y=62): status label
+    BH.autoSnipe.statusLbl = Instance.new("TextLabel")
+    BH.autoSnipe.statusLbl.Size = UDim2.new(1, 0, 0, 18)
+    BH.autoSnipe.statusLbl.Position = UDim2.new(0, 0, 0, 62)
+    BH.autoSnipe.statusLbl.BackgroundTransparency = 1
+    BH.autoSnipe.statusLbl.Text = "Idle — tambah rule lalu klik START"
+    BH.autoSnipe.statusLbl.TextColor3 = C.textDim
+    BH.autoSnipe.statusLbl.Font = FM
+    BH.autoSnipe.statusLbl.TextSize = 10
+    BH.autoSnipe.statusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    BH.autoSnipe.statusLbl.Parent = snAutoPanel
+
+    -- Row 4 (y=84 → bottom): Rules list scroll
+    BH.autoSnipe.scroll = Instance.new("ScrollingFrame")
+    BH.autoSnipe.scroll.Size = UDim2.new(1, 0, 1, -88)
+    BH.autoSnipe.scroll.Position = UDim2.new(0, 0, 0, 84)
+    BH.autoSnipe.scroll.BackgroundColor3 = C.card
+    BH.autoSnipe.scroll.BorderSizePixel = 0
+    BH.autoSnipe.scroll.ScrollBarThickness = 4
+    BH.autoSnipe.scroll.ScrollBarImageColor3 = C.accent
+    BH.autoSnipe.scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    BH.autoSnipe.scroll.Parent = snAutoPanel
+    Instance.new("UICorner", BH.autoSnipe.scroll).CornerRadius = UDim.new(0, 6)
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 3) layout.Parent = BH.autoSnipe.scroll
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 4) pad.PaddingLeft = UDim.new(0, 4) pad.PaddingRight = UDim.new(0, 4)
+    pad.Parent = BH.autoSnipe.scroll
+    BH.autoSnipe.layout = layout
+
+    -- Rebuild rules UI
+    local function rebuildAutoSnipeRules()
+        for _, c in ipairs(BH.autoSnipe.scroll:GetChildren()) do
+            if c:IsA("Frame") then c:Destroy() end
+        end
+        for idx, r in ipairs(BH.autoSnipe.rules) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, -8, 0, 28)
+            row.BackgroundColor3 = C.input row.BorderSizePixel = 0
+            row.Parent = BH.autoSnipe.scroll
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
+
+            local info = Instance.new("TextLabel")
+            info.Size = UDim2.new(1, -34, 1, 0) info.Position = UDim2.new(0, 8, 0, 0)
+            info.BackgroundTransparency = 1
+            local mutStr = (r.mutation and r.mutation ~= "") and (" ["..r.mutation.."]") or ""
+            local kgStr = (r.maxKg and r.maxKg > 0) and (" ≤"..r.maxKg.."kg") or ""
+            local typeStr = (r.petType and r.petType ~= "") and r.petType or "any"
+            info.Text = string.format("<b>%s</b>%s%s • <font color='#FFD700'>≤%s</font>",
+                typeStr, mutStr, kgStr, tostring(r.maxPrice))
+            info.RichText = true
+            info.TextColor3 = C.text info.Font = FM info.TextSize = 11
+            info.TextXAlignment = Enum.TextXAlignment.Left
+            info.TextTruncate = Enum.TextTruncate.AtEnd
+            info.Parent = row
+
+            local delBtn = Instance.new("TextButton")
+            delBtn.Size = UDim2.new(0, 24, 0, 22)
+            delBtn.Position = UDim2.new(1, -28, 0.5, -11)
+            delBtn.BackgroundColor3 = C.danger
+            delBtn.Text = "✕" delBtn.TextColor3 = Color3.new(1,1,1)
+            delBtn.Font = FB delBtn.TextSize = 10
+            delBtn.BorderSizePixel = 0 delBtn.Parent = row
+            Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 4)
+            delBtn.MouseButton1Click:Connect(function()
+                table.remove(BH.autoSnipe.rules, idx)
+                rebuildAutoSnipeRules()
+                if BH.marketState then
+                    BH.marketState.autoSnipeRules = BH.autoSnipe.rules
+                    pcall(function() BH.saveMarketState(BH.marketState) end)
+                end
+            end)
+        end
+        BH.autoSnipe.scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
+    end
+    BH.autoSnipe.rebuildRules = rebuildAutoSnipeRules
+
+    -- Add rule handler
+    BH.autoSnipe.addBtn.MouseButton1Click:Connect(function()
+        local maxPrice = tonumber(BH.autoSnipe.priceInput.Text)
+        if not maxPrice or maxPrice <= 0 then
+            BH.autoSnipe.statusLbl.Text = "❌ Max Price wajib diisi (angka > 0)"
+            BH.autoSnipe.statusLbl.TextColor3 = C.danger
+            return
+        end
+        table.insert(BH.autoSnipe.rules, {
+            petType = BH.autoSnipe.typeInput.Text or "",
+            mutation = BH.autoSnipe.mutInput.Text or "",
+            maxKg = tonumber(BH.autoSnipe.kgInput.Text) or 0,
+            maxPrice = maxPrice,
+        })
+        BH.autoSnipe.typeInput.Text = ""
+        BH.autoSnipe.mutInput.Text = ""
+        BH.autoSnipe.kgInput.Text = ""
+        BH.autoSnipe.priceInput.Text = ""
+        rebuildAutoSnipeRules()
+        if BH.marketState then
+            BH.marketState.autoSnipeRules = BH.autoSnipe.rules
+            pcall(function() BH.saveMarketState(BH.marketState) end)
+        end
+        BH.autoSnipe.statusLbl.Text = "✅ Rule added ("..#BH.autoSnipe.rules.." total)"
+        BH.autoSnipe.statusLbl.TextColor3 = C.success
+    end)
+
+    -- Toggle handler
+    BH.autoSnipe.toggleBtn.MouseButton1Click:Connect(function()
+        BH.autoSnipe.active = not BH.autoSnipe.active
+        if BH.autoSnipe.active then
+            if #BH.autoSnipe.rules == 0 then
+                BH.autoSnipe.statusLbl.Text = "❌ Tambah rule dulu sebelum START"
+                BH.autoSnipe.statusLbl.TextColor3 = C.danger
+                BH.autoSnipe.active = false
+                return
+            end
+            BH.autoSnipe.toggleBtn.Text = "⛔ STOP AUTO-BUY"
+            BH.autoSnipe.toggleBtn.BackgroundColor3 = C.danger
+            BH.autoSnipe.statusLbl.Text = "🎯 Active — scanning..."
+            BH.autoSnipe.statusLbl.TextColor3 = C.accent
+            L("[AutoSnipe] START dengan "..#BH.autoSnipe.rules.." rule(s)")
+        else
+            BH.autoSnipe.toggleBtn.Text = "▶ START AUTO-BUY"
+            BH.autoSnipe.toggleBtn.BackgroundColor3 = C.success
+            BH.autoSnipe.statusLbl.Text = "⛔ Stopped. Bought "..BH.autoSnipe.boughtCount.." pet"
+            BH.autoSnipe.statusLbl.TextColor3 = C.textDim
+            L("[AutoSnipe] STOPPED. Total bought: "..BH.autoSnipe.boughtCount)
+        end
+    end)
+
+    rebuildAutoSnipeRules()
+end
 
 -- v8.75: ===== SERVER HUNTER TAB (gantiin Buy yang mubazir) =====
 -- Auto-hop ke server lain sampe nemu pet sesuai kriteria
@@ -3341,12 +3505,44 @@ do
         if not myBooth then return false, "booth_not_in_workspace" end
         local part = myBooth:FindFirstChildWhichIsA("BasePart", true)
         if not part then return false, "no_basepart" end
-        -- 3 rounds dengan jeda — kasih server waktu replicate
-        for i = 1, 3 do
+        -- v8.84: 2 rounds aja (was 3), total ~0.6s instead of 1.2s
+        for i = 1, 2 do
             pcall(function() player:RequestStreamAroundAsync(part.Position) end)
-            task.wait(0.4)
+            task.wait(0.3)
         end
         return true, "ok"
+    end
+
+    -- v8.84: Smart stream — cuma stream kalo workspace count mismatch TBC
+    -- Kalo booth udah ke-stream dari cycle sebelumnya, skip biar gak waste 0.6s tiap cycle
+    function BH.streamMyBoothIfNeeded()
+        if not BH.myBoothUuid then return false, "no_booth" end
+        local myBooth = BH.getMyBoothObj()
+        if not myBooth then
+            -- Booth gak ada di workspace sama sekali → stream
+            return BH.streamMyBooth()
+        end
+        local di = myBooth:FindFirstChild("DynamicInstances")
+        local workspaceCount = di and #di:GetChildren() or 0
+
+        -- Compare with expected count dari TBC
+        local expectedCount = 0
+        if BH.TBC then
+            local data = BH.getMyBoothData()
+            if data and data.Listings then
+                for _, l in pairs(data.Listings) do
+                    if l.ItemType == "Pet" then
+                        expectedCount = expectedCount + 1
+                    end
+                end
+            end
+        end
+
+        if workspaceCount < expectedCount then
+            -- Workspace miss → stream
+            return BH.streamMyBooth()
+        end
+        return true, "cached"  -- workspace already accurate
     end
 
     function BH.detectMyBooth(listedCleanUuid)
@@ -4248,18 +4444,17 @@ BH.onStartClick = function()
 
             -- v8.46+v8.47: stream cuma kalo TBC gak loaded (TBC bypasses streaming entirely)
             -- v8.83: ALWAYS stream booth-mu di awal cycle — workspace scan ngandelin ini
-            -- Tanpa stream, DynamicInstances kosong di workspace meski booth-mu ada listing
+            -- v8.84: tapi pake streamMyBoothIfNeeded → skip kalo workspace count udah match TBC
             if not BH.TBC then
                 setStats("Streaming booths...", C.accent)
                 BH.ensureBoothsStreamed()
             else
                 setStats("Cycle "..cycleNum, C.accent)
-                -- TBC available tapi tetep stream booth-mu biar workspace scan accurate
-                pcall(BH.streamMyBooth)
-                -- Fallback: kalo booth-mu masih belum di workspace (mungkin streaming radius issue),
-                -- trigger full stream sekali
+                -- Smart stream: cuma kalo perlu (workspace miss vs TBC)
+                pcall(BH.streamMyBoothIfNeeded)
+                -- Fallback: kalo booth-mu masih belum di workspace setelah smart stream
                 if BH.myBoothUuid and not BH.getMyBoothObj() then
-                    L("  ⚠ booth-mu belum ke-stream setelah streamMyBooth, full stream...")
+                    L("  ⚠ booth-mu belum ke-stream, full stream...")
                     BH.ensureBoothsStreamed()
                 end
             end
@@ -5673,6 +5868,99 @@ do
         if snipePanel and snipePanel.Visible and #scanCache == 0 then
             pcall(scanBoothListings)
             if snManualPanel and snManualPanel.Visible then pcall(renderSnipe) end
+        end
+    end)
+
+    -- v8.84: ===== AUTO SNIPE — scan + buy loop =====
+    -- Continuously scan market, match each entry against user rules, buy on match
+    task.spawn(function()
+        local function matchRule(p, rule)
+            -- petType: substring match (case insensitive). Kosong = match semua.
+            if rule.petType and rule.petType ~= "" then
+                local needle = string.lower(rule.petType)
+                local hay = string.lower(p.type or "")
+                if not string.find(hay, needle, 1, true) then return false end
+            end
+            -- mutation: substring match. Kosong = match semua.
+            if rule.mutation and rule.mutation ~= "" then
+                local needle = string.lower(rule.mutation)
+                local hay = string.lower(p.mutation or "")
+                if not string.find(hay, needle, 1, true) then return false end
+            end
+            -- maxKg: optional. 0 atau nil = no limit
+            if rule.maxKg and rule.maxKg > 0 then
+                if (p.kg or 0) > rule.maxKg then return false end
+            end
+            -- maxPrice: wajib
+            if not p.price or p.price > rule.maxPrice then return false end
+            return true
+        end
+
+        while gui.Parent do
+            task.wait(5)  -- scan interval 5s
+            if not BH.autoSnipe.active then
+                -- not running, skip
+            elseif #BH.autoSnipe.rules == 0 then
+                -- no rules
+            elseif not buyRE then
+                BH.autoSnipe.statusLbl.Text = "❌ buyRE belum cached (klik SNIPE dulu)"
+                BH.autoSnipe.statusLbl.TextColor3 = C.danger
+            else
+                -- Run scan
+                local scanOk = pcall(scanBoothListings)
+                if not scanOk then
+                    BH.autoSnipe.statusLbl.Text = "⚠ Scan error, retry..."
+                    BH.autoSnipe.statusLbl.TextColor3 = C.warn
+                else
+                    local boughtThisRound = 0
+                    local matchedCount = 0
+                    for _, p in ipairs(scanCache) do
+                        if not BH.autoSnipe.active then break end
+                        local skip = p.isMine
+                            or BH.autoSnipe.bought[p.listingUuid]
+                            or not p.sellerPlayer
+                            or not p.listingUuid
+                        if not skip then
+                            for _, rule in ipairs(BH.autoSnipe.rules) do
+                                if matchRule(p, rule) then
+                                    matchedCount = matchedCount + 1
+                                    -- BUY
+                                    local clean = tostring(p.listingUuid):gsub("[{}]","")
+                                    local ok, ret = pcall(function()
+                                        return buyRE:InvokeServer(p.sellerPlayer, clean)
+                                    end)
+                                    -- Mark as attempted regardless (gak retry)
+                                    BH.autoSnipe.bought[p.listingUuid] = true
+                                    if ok and (ret == true or ret == nil) then
+                                        BH.autoSnipe.boughtCount = BH.autoSnipe.boughtCount + 1
+                                        boughtThisRound = boughtThisRound + 1
+                                        L(string.format("[AutoSnipe] ✅ Bought %s%s @ %s from %s",
+                                            p.type or "?",
+                                            (p.mutation and p.mutation ~= "-" and " ["..p.mutation.."]") or "",
+                                            tostring(p.price), p.owner or "?"))
+                                        BH.autoSnipe.statusLbl.Text = string.format(
+                                            "✅ %d bought | latest: %s @ %s",
+                                            BH.autoSnipe.boughtCount,
+                                            p.type or "?", tostring(p.price))
+                                        BH.autoSnipe.statusLbl.TextColor3 = C.success
+                                    else
+                                        L(string.format("[AutoSnipe] ❌ Buy fail %s: %s",
+                                            p.type or "?", tostring(ret):sub(1, 50)))
+                                    end
+                                    task.wait(0.5)  -- gap antara buy
+                                    break  -- match satu rule → next pet
+                                end
+                            end
+                        end
+                    end
+                    if boughtThisRound == 0 and BH.autoSnipe.active then
+                        BH.autoSnipe.statusLbl.Text = string.format(
+                            "🔍 Scanning... %d listings | %d bought total",
+                            #scanCache, BH.autoSnipe.boughtCount)
+                        BH.autoSnipe.statusLbl.TextColor3 = C.accent
+                    end
+                end
+            end
         end
     end)
 
