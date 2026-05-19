@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.84"
-local VERSION_DATE = "Auto Snipe — auto-buy berdasarkan rules + smart streaming"
+local VERSION = "8.87"
+local VERSION_DATE = "LIST HARGA: row compact + [N] count badge market match"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -555,6 +555,9 @@ if isGardenServer then
             end
         end
     end)
+else
+    -- v8.86: di server market, sembunyiin tab GARDEN (cuma muncul di server garden)
+    sbBtns.GARDEN.btn.Visible = false
 end
 
 -- Activate Market default
@@ -1058,13 +1061,13 @@ local rebuildRulesUI  -- forward declare so buildRuleRow can call it
 
 local function buildRuleRow(parent, r, idx, big)
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, big and 46 or 38)
+    row.Size = UDim2.new(1, 0, 0, big and 46 or 34)  -- v8.87: 38→34 (more compact)
     row.BackgroundColor3 = C.input row.BorderSizePixel = 0 row.Parent = parent
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
 
-    local fSize = big and 13 or 11
-    local rowH = big and 32 or 28
-    local rowOff = big and -16 or -14
+    local fSize = big and 13 or 10                    -- v8.87: 11→10 (compact)
+    local rowH = big and 32 or 24                     -- v8.87: 28→24
+    local rowOff = big and -16 or -12
 
     -- Helper for editable cell with icon + label color
     local function makeCell(x, w, icon, iconColor, valColor, val, onChange)
@@ -1078,11 +1081,11 @@ local function buildRuleRow(parent, r, idx, big)
         s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         s.Transparency = 0.6
         local ic = Instance.new("TextLabel")
-        ic.Size = UDim2.new(0, 16, 1, 0) ic.Position = UDim2.new(0, 2, 0, 0)
+        ic.Size = UDim2.new(0, 12, 1, 0) ic.Position = UDim2.new(0, 2, 0, 0)  -- v8.87: 16→12
         ic.BackgroundTransparency = 1 ic.Text = icon
         ic.Font = F ic.TextSize = fSize - 1 ic.Parent = wrap
         local box = Instance.new("TextBox")
-        box.Size = UDim2.new(1, -20, 1, 0) box.Position = UDim2.new(0, 18, 0, 0)
+        box.Size = UDim2.new(1, -16, 1, 0) box.Position = UDim2.new(0, 14, 0, 0)  -- v8.87: -20/18 → -16/14
         box.BackgroundTransparency = 1
         box.Text = val box.TextColor3 = valColor
         box.Font = FB box.TextSize = fSize
@@ -1092,24 +1095,56 @@ local function buildRuleRow(parent, r, idx, big)
         return wrap, box
     end
 
-    -- Type (left, non-editable for now)
+    -- v8.87: count match badge buat LIST HARGA (parent == priceScroll)
+    -- Hitung berapa pet di market yang match rule ini (exclude punya sendiri)
+    local isPricePanel = (parent == priceScroll)
+    local function countMarketMatch()
+        local cache = BH.scanCache or {}
+        local count = 0
+        local ruleType = r.type
+        local ruleMin = r.min or 0
+        local ruleMax = (r.max == math.huge) and math.huge or r.max
+        for _, p in ipairs(cache) do
+            if not p.isMine then
+                local pBase = (BH.getBaseName and p.type) and BH.getBaseName(p.type) or p.type
+                local typeOk = (not ruleType) or (pBase == ruleType) or (p.type == ruleType)
+                if typeOk then
+                    local kg = p.kg or 0
+                    if kg >= ruleMin and (ruleMax == math.huge or kg <= ruleMax) then
+                        count = count + 1
+                    end
+                end
+            end
+        end
+        return count
+    end
+
+    -- Type label (with optional [N] count badge for LIST HARGA)
     local typeLbl = Instance.new("TextLabel")
-    typeLbl.Size = UDim2.new(0, 92, 1, 0) typeLbl.Position = UDim2.new(0, 8, 0, 0)
+    typeLbl.Size = UDim2.new(0, 100, 1, 0) typeLbl.Position = UDim2.new(0, 6, 0, 0)
     typeLbl.BackgroundTransparency = 1
-    typeLbl.Text = r.type or "All"
     typeLbl.TextColor3 = C.text typeLbl.Font = FB typeLbl.TextSize = fSize + 1
     typeLbl.TextXAlignment = Enum.TextXAlignment.Left
-    typeLbl.TextTruncate = Enum.TextTruncate.AtEnd typeLbl.Parent = row
+    typeLbl.TextTruncate = Enum.TextTruncate.AtEnd
+    local typeText = r.type or "All"
+    if isPricePanel then
+        typeLbl.RichText = true
+        local cnt = countMarketMatch()
+        typeLbl.Text = string.format("<font color='#22D3EE'>[%d]</font> %s", cnt, typeText)
+    else
+        typeLbl.Text = typeText
+    end
+    typeLbl.Parent = row
 
-    -- Editable MIN KG
-    makeCell(105, 64, "↓", C.textDim, C.text, tostring(r.min), function(txt)
+    -- Editable MIN KG (v8.87: shrunk 64→42)
+    makeCell(108, 42, "↓", C.textDim, C.text, tostring(r.min), function(txt)
         local n = tonumber(txt)
         if n and n >= 0 then r.min = n end
     end)
 
-    -- Editable MAX KG
+    -- Editable MAX KG (v8.87: shrunk 64→42)
     local maxKgStr = r.max == math.huge and "∞" or tostring(r.max)
-    makeCell(173, 64, "↑", C.textDim, C.text, maxKgStr, function(txt)
+    makeCell(154, 42, "↑", C.textDim, C.text, maxKgStr, function(txt)
         if txt == "" or txt == "∞" or txt == "inf" then
             r.max = math.huge
         else
@@ -1118,15 +1153,15 @@ local function buildRuleRow(parent, r, idx, big)
         end
     end)
 
-    -- Editable PRICE
-    makeCell(241, 86, "💰", C.accent, C.accent, tostring(r.price), function(txt)
+    -- Editable PRICE (v8.87: shrunk 86→66)
+    makeCell(200, 66, "💰", C.accent, C.accent, tostring(r.price), function(txt)
         local n = tonumber(txt)
         if n and n > 0 then r.price = n end
     end)
 
-    -- Editable MAX LIST
+    -- Editable MAX LIST (v8.87: shrunk 70→42)
     local mlStr = (r.maxListings == math.huge) and "∞" or tostring(r.maxListings or "∞")
-    makeCell(331, 70, "📋", C.success, C.success, mlStr, function(txt)
+    makeCell(270, 42, "📋", C.success, C.success, mlStr, function(txt)
         if txt == "" or txt == "∞" or txt == "inf" then
             r.maxListings = math.huge
         else
@@ -1135,13 +1170,13 @@ local function buildRuleRow(parent, r, idx, big)
         end
     end)
 
-    -- Delete button
+    -- Delete button (v8.87: shrunk 30→24)
     local delBtn = Instance.new("TextButton")
-    delBtn.Size = UDim2.new(0, 30, 0, rowH)
-    delBtn.Position = UDim2.new(1, -34, 0.5, rowOff)
+    delBtn.Size = UDim2.new(0, 24, 0, rowH)
+    delBtn.Position = UDim2.new(1, -28, 0.5, rowOff)
     delBtn.BackgroundColor3 = C.danger delBtn.AutoButtonColor = false
     delBtn.Text = "✕" delBtn.TextColor3 = Color3.new(1,1,1)
-    delBtn.Font = FB delBtn.TextSize = 14 delBtn.Parent = row
+    delBtn.Font = FB delBtn.TextSize = 12 delBtn.Parent = row
     Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 4)
     delBtn.MouseButton1Click:Connect(function()
         table.remove(listingRules, idx)
@@ -1190,6 +1225,13 @@ function rebuildRulesUI()
     rulesScroll.CanvasSize = UDim2.new(0, 0, 0, rulesLayout.AbsoluteContentSize.Y + 12)
     if priceScroll and priceLayout then
         priceScroll.CanvasSize = UDim2.new(0, 0, 0, priceLayout.AbsoluteContentSize.Y + 16)
+    end
+end
+
+-- v8.87: callback from scanBoothListings — refresh count badges di LIST HARGA
+BH.refreshPriceCounts = function()
+    if pricePanel and pricePanel.Visible then
+        pcall(rebuildRulesUI)
     end
 end
 
@@ -2636,7 +2678,7 @@ do
     snAutoPad.PaddingRight = UDim.new(0, 12) snAutoPad.PaddingBottom = UDim.new(0, 10)
     snAutoPad.Parent = snAutoPanel
 
-    -- Helper untuk bikin input box
+    -- Helper untuk bikin input box (kg & price tetep TextBox)
     local function makeAutoInput(xs, ws, ph, ts)
         local b = Instance.new("TextBox")
         b.Size = UDim2.new(ws, -3, 0, 26)
@@ -2654,13 +2696,251 @@ do
         return b
     end
 
+    -- v8.85: Dropdown helper (button + popup overlay dengan search)
+    local function makeAutoDropdown(xs, ws, ph)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(ws, -3, 0, 26)
+        btn.Position = UDim2.new(xs, xs == 0 and 0 or 3, 0, 0)
+        btn.BackgroundColor3 = C.input btn.BorderSizePixel = 0
+        btn.Text = ph btn.TextColor3 = C.textDim
+        btn.Font = F btn.TextSize = 11
+        btn.TextXAlignment = Enum.TextXAlignment.Left
+        btn.AutoButtonColor = false
+        btn.Parent = snAutoPanel
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+        local pad = Instance.new("UIPadding")
+        pad.PaddingLeft = UDim.new(0, 8) pad.PaddingRight = UDim.new(0, 18)
+        pad.Parent = btn
+
+        -- Arrow icon
+        local arrow = Instance.new("TextLabel")
+        arrow.Size = UDim2.new(0, 16, 1, 0)
+        arrow.Position = UDim2.new(1, -16, 0, 0)
+        arrow.BackgroundTransparency = 1
+        arrow.Text = "▾" arrow.TextColor3 = C.textDim
+        arrow.Font = F arrow.TextSize = 11
+        arrow.Parent = btn
+
+        local dd = {
+            value = "",
+            placeholder = ph,
+            items = {},
+            btn = btn,
+        }
+
+        function dd:setItems(items)
+            dd.items = items
+        end
+        function dd:setValue(v)
+            dd.value = v or ""
+            if dd.value == "" then
+                btn.Text = dd.placeholder
+                btn.TextColor3 = C.textDim
+            else
+                btn.Text = dd.value
+                btn.TextColor3 = C.text
+            end
+        end
+        function dd:getValue()
+            return dd.value
+        end
+
+        -- Overlay (modal centered, mobile-friendly)
+        local overlay = Instance.new("Frame")
+        overlay.Size = UDim2.new(1, 0, 1, 0)
+        overlay.BackgroundColor3 = Color3.new(0,0,0)
+        overlay.BackgroundTransparency = 0.5
+        overlay.BorderSizePixel = 0
+        overlay.Visible = false
+        overlay.ZIndex = 100
+        overlay.Parent = gui
+
+        local panel = Instance.new("Frame")
+        panel.Size = UDim2.new(0, 280, 0, 320)
+        panel.Position = UDim2.new(0.5, -140, 0.5, -160)
+        panel.BackgroundColor3 = C.bg
+        panel.BorderSizePixel = 0
+        panel.ZIndex = 101
+        panel.Parent = overlay
+        Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 8)
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = C.accent stroke.Thickness = 1.5 stroke.Parent = panel
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -40, 0, 26) title.Position = UDim2.new(0, 12, 0, 6)
+        title.BackgroundTransparency = 1
+        title.Text = "Pilih "..ph title.TextColor3 = C.accent
+        title.Font = FB title.TextSize = 13
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.ZIndex = 102 title.Parent = panel
+
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.Size = UDim2.new(0, 24, 0, 24) closeBtn.Position = UDim2.new(1, -32, 0, 8)
+        closeBtn.BackgroundColor3 = C.danger
+        closeBtn.Text = "✕" closeBtn.TextColor3 = Color3.new(1,1,1)
+        closeBtn.Font = FB closeBtn.TextSize = 11
+        closeBtn.BorderSizePixel = 0
+        closeBtn.ZIndex = 102 closeBtn.Parent = panel
+        Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 4)
+
+        local searchBox = Instance.new("TextBox")
+        searchBox.Size = UDim2.new(1, -24, 0, 28) searchBox.Position = UDim2.new(0, 12, 0, 38)
+        searchBox.BackgroundColor3 = C.input
+        searchBox.Text = "" searchBox.PlaceholderText = "🔍 Search..."
+        searchBox.PlaceholderColor3 = C.textDim
+        searchBox.TextColor3 = C.text
+        searchBox.Font = F searchBox.TextSize = 12
+        searchBox.BorderSizePixel = 0 searchBox.ClearTextOnFocus = false
+        searchBox.ZIndex = 102 searchBox.Parent = panel
+        Instance.new("UICorner", searchBox).CornerRadius = UDim.new(0, 5)
+        local sbPad = Instance.new("UIPadding")
+        sbPad.PaddingLeft = UDim.new(0, 8) sbPad.Parent = searchBox
+
+        local scroll = Instance.new("ScrollingFrame")
+        scroll.Size = UDim2.new(1, -24, 1, -82) scroll.Position = UDim2.new(0, 12, 0, 74)
+        scroll.BackgroundTransparency = 1 scroll.BorderSizePixel = 0
+        scroll.ScrollBarThickness = 4 scroll.ScrollBarImageColor3 = C.accent
+        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        scroll.ZIndex = 102 scroll.Parent = panel
+        local sLayout = Instance.new("UIListLayout")
+        sLayout.Padding = UDim.new(0, 3) sLayout.Parent = scroll
+
+        local function rebuildOptions(filter)
+            for _, c in ipairs(scroll:GetChildren()) do
+                if c:IsA("TextButton") then c:Destroy() end
+            end
+            filter = filter and filter:lower() or ""
+
+            -- Any/clear option
+            local clearBtn = Instance.new("TextButton")
+            clearBtn.Size = UDim2.new(1, -4, 0, 26)
+            clearBtn.BackgroundColor3 = C.card
+            clearBtn.Text = "  (Any — kosongkan filter)"
+            clearBtn.TextColor3 = C.warn
+            clearBtn.Font = FB clearBtn.TextSize = 11
+            clearBtn.TextXAlignment = Enum.TextXAlignment.Left
+            clearBtn.BorderSizePixel = 0
+            clearBtn.ZIndex = 103 clearBtn.Parent = scroll
+            Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 4)
+            clearBtn.MouseButton1Click:Connect(function()
+                dd:setValue("")
+                overlay.Visible = false
+            end)
+
+            for _, item in ipairs(dd.items) do
+                if filter == "" or item:lower():find(filter, 1, true) then
+                    local row = Instance.new("TextButton")
+                    row.Size = UDim2.new(1, -4, 0, 26)
+                    row.BackgroundColor3 = C.card
+                    row.Text = "  "..item
+                    row.TextColor3 = C.text
+                    row.Font = F row.TextSize = 11
+                    row.TextXAlignment = Enum.TextXAlignment.Left
+                    row.BorderSizePixel = 0
+                    row.ZIndex = 103 row.Parent = scroll
+                    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+                    row.MouseButton1Click:Connect(function()
+                        dd:setValue(item)
+                        overlay.Visible = false
+                    end)
+                end
+            end
+            scroll.CanvasSize = UDim2.new(0, 0, 0, sLayout.AbsoluteContentSize.Y + 8)
+        end
+
+        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+            rebuildOptions(searchBox.Text)
+        end)
+        closeBtn.MouseButton1Click:Connect(function() overlay.Visible = false end)
+        -- Tap outside panel = close
+        overlay.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+               or input.UserInputType == Enum.UserInputType.Touch then
+                local mp = input.Position
+                local pPos = panel.AbsolutePosition
+                local pSize = panel.AbsoluteSize
+                if mp.X < pPos.X or mp.X > pPos.X + pSize.X
+                   or mp.Y < pPos.Y or mp.Y > pPos.Y + pSize.Y then
+                    overlay.Visible = false
+                end
+            end
+        end)
+
+        btn.MouseButton1Click:Connect(function()
+            -- Refresh items kalo callback ada
+            if dd.refreshOnOpen then dd.refreshOnOpen() end
+            searchBox.Text = ""
+            rebuildOptions("")
+            overlay.Visible = true
+        end)
+
+        return dd
+    end
+
     -- Row 1 (y=0): inputs — Pet Type 35% | Mutation 20% | Max KG 20% | Max Price 25%
-    BH.autoSnipe.typeInput = makeAutoInput(0, 0.35, "🐾 Pet type")
-    BH.autoSnipe.mutInput = makeAutoInput(0.35, 0.20, "✨ Mut")
+    BH.autoSnipe.typeInput = makeAutoDropdown(0, 0.35, "🐾 Pet type")
+    BH.autoSnipe.mutInput = makeAutoDropdown(0.35, 0.20, "✨ Mut")
     BH.autoSnipe.kgInput = makeAutoInput(0.55, 0.20, "Max KG")
     BH.autoSnipe.priceInput = makeAutoInput(0.75, 0.25, "💰 Max Price")
     BH.autoSnipe.kgInput.TextXAlignment = Enum.TextXAlignment.Center
     BH.autoSnipe.priceInput.TextXAlignment = Enum.TextXAlignment.Center
+
+    -- v8.85: refresh callback — collect pet types dari scanCache + backpack + TBC tiap kali dropdown dibuka
+    BH.autoSnipe.typeInput.refreshOnOpen = function()
+        local seen = {}
+        -- 1. Pet types dari scan cache (market)
+        if scanCache then
+            for _, p in ipairs(scanCache) do
+                if p.type and p.type ~= "" and p.type ~= "?" then
+                    local base = BH.getBaseName and BH.getBaseName(p.type) or p.type
+                    seen[base] = true
+                end
+            end
+        end
+        -- 2. Pet types dari backpack
+        local bp = player:FindFirstChild("Backpack")
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                if t:IsA("Tool") and t:GetAttribute("ItemType") == "Pet" then
+                    local pType = t:GetAttribute("PetType") or t:GetAttribute("f")
+                    if pType then
+                        local base = BH.getBaseName and BH.getBaseName(tostring(pType)) or tostring(pType)
+                        seen[base] = true
+                    end
+                end
+            end
+        end
+        -- 3. Pet types dari TBC items (semua booth)
+        if BH.TBC then
+            for _, pp in ipairs(Players:GetPlayers()) do
+                local data = BH.fetchBoothData and BH.fetchBoothData(pp)
+                if data and data.Items then
+                    for _, item in pairs(data.Items) do
+                        if item.PetType then
+                            local base = BH.getBaseName and BH.getBaseName(tostring(item.PetType)) or tostring(item.PetType)
+                            seen[base] = true
+                        end
+                    end
+                end
+            end
+        end
+        local list = {}
+        for k in pairs(seen) do table.insert(list, k) end
+        table.sort(list)
+        BH.autoSnipe.typeInput:setItems(list)
+    end
+
+    -- Mutation list dari BH.MUTATION_NAMES
+    BH.autoSnipe.mutInput.refreshOnOpen = function()
+        local list = {}
+        if BH.MUTATION_NAMES then
+            for _, m in ipairs(BH.MUTATION_NAMES) do
+                table.insert(list, m)
+            end
+            table.sort(list)
+        end
+        BH.autoSnipe.mutInput:setItems(list)
+    end
 
     -- Row 2 (y=30): + ADD RULE (40%) | START/STOP (60%)
     BH.autoSnipe.addBtn = btnOf(snAutoPanel, 0, 0, 1, 1, "+ ADD RULE", C.accent)
@@ -2759,13 +3039,13 @@ do
             return
         end
         table.insert(BH.autoSnipe.rules, {
-            petType = BH.autoSnipe.typeInput.Text or "",
-            mutation = BH.autoSnipe.mutInput.Text or "",
+            petType = BH.autoSnipe.typeInput:getValue() or "",
+            mutation = BH.autoSnipe.mutInput:getValue() or "",
             maxKg = tonumber(BH.autoSnipe.kgInput.Text) or 0,
             maxPrice = maxPrice,
         })
-        BH.autoSnipe.typeInput.Text = ""
-        BH.autoSnipe.mutInput.Text = ""
+        BH.autoSnipe.typeInput:setValue("")
+        BH.autoSnipe.mutInput:setValue("")
         BH.autoSnipe.kgInput.Text = ""
         BH.autoSnipe.priceInput.Text = ""
         rebuildAutoSnipeRules()
@@ -5334,6 +5614,11 @@ local function scanBoothListings()
         L("======= SCAN END =======")
         scanDiag = string.format("Players:%d Booths:%d Listings:%d Mine:%d",
             totalPlayers, boothsFound, listingsTotal, mineCount)
+        -- v8.87: expose scanCache via BH for buildRuleRow count badges
+        BH.scanCache = scanCache
+        BH.scanCacheTime = tick()
+        -- Notify LIST HARGA tab to refresh counts
+        if BH.refreshPriceCounts then pcall(BH.refreshPriceCounts) end
         return
     end
 
@@ -5526,6 +5811,10 @@ local function scanBoothListings()
 
     scanDiag = string.format("Booths:%d Tools:%d Mine:%d Found:%d",
         boothCount, toolCount, mineCount, #scanCache)
+    -- v8.87: expose scanCache via BH for buildRuleRow count badges
+    BH.scanCache = scanCache
+    BH.scanCacheTime = tick()
+    if BH.refreshPriceCounts then pcall(BH.refreshPriceCounts) end
 end
 
 local function renderSnipe()
@@ -5868,6 +6157,30 @@ do
         if snipePanel and snipePanel.Visible and #scanCache == 0 then
             pcall(scanBoothListings)
             if snManualPanel and snManualPanel.Visible then pcall(renderSnipe) end
+        end
+    end)
+
+    -- v8.87: auto-scan saat LIST HARGA tab dibuka (max sekali per 30s)
+    -- biar count badge "[N] Raccoon" up-to-date
+    if sbBtns["LIST HARGA"] and sbBtns["LIST HARGA"].btn then
+        sbBtns["LIST HARGA"].btn.MouseButton1Click:Connect(function()
+            task.spawn(function()
+                local now = tick()
+                local stale = (not BH.scanCacheTime) or (now - BH.scanCacheTime) > 30
+                if stale then
+                    pcall(scanBoothListings)  -- ngetrigger BH.refreshPriceCounts otomatis
+                else
+                    -- cache fresh, just rebuild buat update counts
+                    pcall(rebuildRulesUI)
+                end
+            end)
+        end)
+    end
+    -- Kalo LIST HARGA udah visible pas script load → scan langsung
+    task.spawn(function()
+        task.wait(1.5)
+        if pricePanel and pricePanel.Visible then
+            pcall(scanBoothListings)
         end
     end)
 
