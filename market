@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.68"
-local VERSION_DATE = "TP-Market fire game button"
+local VERSION = "8.69"
+local VERSION_DATE = "Auto-Gift broader scan + diagnostic"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1623,26 +1623,105 @@ do
         -- v8.65: precise remote from leveling sc — listen GiftPet → fire AcceptPetGift(true, uuid)
         local ge = RS:FindFirstChild("GameEvents")
         if not ge then L("[Auto-Gift] ❌ no GameEvents"); return end
+
+        -- Try multiple known paths/names
         local giftPetRE = ge:FindFirstChild("GiftPet")
         local acceptPetGiftRE = ge:FindFirstChild("AcceptPetGift")
+
+        -- v8.68: kalo gak nemu, scan broader
+        if not giftPetRE then
+            giftPetRE = RS:FindFirstChild("GiftPet", true)
+        end
+        if not acceptPetGiftRE then
+            acceptPetGiftRE = RS:FindFirstChild("AcceptPetGift", true)
+        end
+
+        -- Diagnostic: log semua remote yg related ke gift
         if not (giftPetRE and acceptPetGiftRE) then
-            L("[Auto-Gift] ❌ remote gak nemu (GiftPet/AcceptPetGift)")
+            L("[Auto-Gift] ❌ default path gagal, scan remote yg related:")
+            local found = {}
+            for _, c in ipairs(RS:GetDescendants()) do
+                if (c:IsA("RemoteEvent") or c:IsA("RemoteFunction")) then
+                    local n = c.Name:lower()
+                    if n:find("gift") or n:find("petgiv") or n:find("acceptgift") or n:find("givepet") then
+                        table.insert(found, {name=c.Name, path=c:GetFullName(), class=c.ClassName})
+                    end
+                end
+            end
+            if #found == 0 then
+                L("  (gak ada remote dengan keyword gift)")
+            else
+                for _, r in ipairs(found) do
+                    L("  • "..r.path.." ["..r.class.."]")
+                end
+            end
+            L("  Kasih tau gw nama remote yg ON CLIENT (incoming) sama yg ACCEPT")
             return
         end
+
+        L("[Auto-Gift] remotes OK: "..giftPetRE:GetFullName().." → "..acceptPetGiftRE:GetFullName())
+
         local accCount = 0
-        local conn = giftPetRE.OnClientEvent:Connect(function(petUUID, petName, senderUsername)
-            if not BH.autoGift then return end
-            -- Fire instant + 50ms retry buat handle packet drop
-            pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
-            task.spawn(function()
-                task.wait(0.05)
+
+        -- Method A: OnClientEvent (kalo giftPetRE = RemoteEvent fire client → server)
+        if giftPetRE:IsA("RemoteEvent") then
+            local conn = giftPetRE.OnClientEvent:Connect(function(petUUID, petName, senderUsername)
+                if not BH.autoGift then return end
                 pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
+                task.spawn(function()
+                    task.wait(0.05)
+                    pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
+                end)
+                accCount = accCount + 1
+                L("[Auto-Gift] ✅ #"..accCount.." (OnClientEvent) from "..tostring(senderUsername))
             end)
-            accCount = accCount + 1
-            L("[Auto-Gift] ✅ #"..accCount.." from "..tostring(senderUsername).." ("..tostring(petName)..")")
-        end)
-        table.insert(BH.giftConns, conn)
-        L("[Auto-Gift] hook installed (GiftPet → AcceptPetGift)")
+            table.insert(BH.giftConns, conn)
+        end
+
+        -- Method B: ChildAdded di PlayerGui (kalo game pakai notification GUI)
+        local pg = player:FindFirstChild("PlayerGui")
+        if pg then
+            local conn2 = pg.DescendantAdded:Connect(function(d)
+                if not BH.autoGift then return end
+                local n = d.Name:lower()
+                local txt = ""
+                if d:IsA("TextLabel") or d:IsA("TextButton") then txt = tostring(d.Text or ""):lower() end
+                if n:find("giftpopup") or n:find("giftframe") or n:find("incominggift")
+                   or txt:find("wants to gift") or txt:find("sent you a") or txt:find("gifted you") then
+                    L("[Auto-Gift] notif detected: "..d:GetFullName())
+                    -- Cari Accept button di parent chain
+                    task.wait(0.1)
+                    local cur = d
+                    for _ = 1, 5 do
+                        if not cur then break end
+                        for _, child in ipairs(cur:GetDescendants()) do
+                            if (child:IsA("TextButton") or child:IsA("ImageButton")) then
+                                local btnTxt = ""
+                                if child:IsA("TextButton") then btnTxt = tostring(child.Text or ""):lower() end
+                                local fullTxt = btnTxt.." "..child.Name:lower()
+                                if fullTxt:find("accept") or fullTxt:find("yes") or fullTxt:find("confirm") then
+                                    pcall(function()
+                                        if firesignal then firesignal(child.Activated) end
+                                        if getconnections then
+                                            for _, c in ipairs(getconnections(child.Activated)) do
+                                                pcall(function() c:Fire() end)
+                                            end
+                                        end
+                                    end)
+                                    accCount = accCount + 1
+                                    L("[Auto-Gift] ✅ #"..accCount.." (button click) "..child:GetFullName())
+                                    return
+                                end
+                            end
+                        end
+                        cur = cur.Parent
+                    end
+                end
+            end)
+            table.insert(BH.giftConns, conn2)
+        end
+
+        L("[Auto-Gift] hook installed ("..#BH.giftConns.." listeners)")
     end
 
     local function hookTrades()
