@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.63"
-local VERSION_DATE = "FIX snSubBtns scope issue"
+local VERSION = "8.64"
+local VERSION_DATE = "FIX snBuy scope"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -487,7 +487,7 @@ BH.stageMarker = function(num, color, text, y)
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.63 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.64 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -2354,8 +2354,8 @@ snAutoDesc.TextXAlignment = Enum.TextXAlignment.Center
 snAutoDesc.TextWrapped = true snAutoDesc.Parent = snAutoCenter
 
 -- v8.47: ===== BUY SNIPE TAB =====
--- Use table to manage locals (200-limit)
-local snBuy = {}
+-- v8.63: pake BH.snBuy biar accessible di luar do-block
+BH.snBuy = {}
 do
     local snBuyPad = Instance.new("UIPadding")
     snBuyPad.PaddingTop = UDim.new(0, 14) snBuyPad.PaddingLeft = UDim.new(0, 14)
@@ -2365,40 +2365,40 @@ do
     lblOf(snBuyPanel, "💰  BUY", 0, 0, 400, 28, C.accent, 18, FB)
     lblOf(snBuyPanel, "Beli pet dari listing player lain (sort termurah dulu)", 0, 32, 600, 20, C.textDim, 13)
 
-    snBuy.refresh = btnOf(snBuyPanel, 0, 60, 120, 32, "🔄 MUAT ULANG", C.accent)
-    snBuy.refresh.TextSize = 12
-    snBuy.search = Instance.new("TextBox")
-    snBuy.search.Size = UDim2.new(1, -136, 0, 32) snBuy.search.Position = UDim2.new(0, 132, 0, 60)
-    snBuy.search.BackgroundColor3 = C.input snBuy.search.BorderSizePixel = 0
-    snBuy.search.Text = "" snBuy.search.TextColor3 = C.text
-    snBuy.search.PlaceholderText = "🔍 cari pet (Peacock, EV, dll)..."
-    snBuy.search.PlaceholderColor3 = C.textDim
-    snBuy.search.Font = F snBuy.search.TextSize = 14
-    snBuy.search.ClearTextOnFocus = false snBuy.search.Parent = snBuyPanel
-    Instance.new("UICorner", snBuy.search).CornerRadius = UDim.new(0, 6)
+    BH.snBuy.refresh = btnOf(snBuyPanel, 0, 60, 120, 32, "🔄 MUAT ULANG", C.accent)
+    BH.snBuy.refresh.TextSize = 12
+    BH.snBuy.search = Instance.new("TextBox")
+    BH.snBuy.search.Size = UDim2.new(1, -136, 0, 32) BH.snBuy.search.Position = UDim2.new(0, 132, 0, 60)
+    BH.snBuy.search.BackgroundColor3 = C.input BH.snBuy.search.BorderSizePixel = 0
+    BH.snBuy.search.Text = "" BH.snBuy.search.TextColor3 = C.text
+    BH.snBuy.search.PlaceholderText = "🔍 cari pet (Peacock, EV, dll)..."
+    BH.snBuy.search.PlaceholderColor3 = C.textDim
+    BH.snBuy.search.Font = F BH.snBuy.search.TextSize = 14
+    BH.snBuy.search.ClearTextOnFocus = false BH.snBuy.search.Parent = snBuyPanel
+    Instance.new("UICorner", BH.snBuy.search).CornerRadius = UDim.new(0, 6)
     local snBuySearchPad = Instance.new("UIPadding")
-    snBuySearchPad.PaddingLeft = UDim.new(0, 12) snBuySearchPad.Parent = snBuy.search
+    snBuySearchPad.PaddingLeft = UDim.new(0, 12) snBuySearchPad.Parent = BH.snBuy.search
 
-    snBuy.maxPrice = boxOf(snBuyPanel, 0, 100, 140, 32, "")
-    snBuy.maxPrice.PlaceholderText = "Max price (filter)"
-    snBuy.maxPrice.TextSize = 12
-    snBuy.countLbl = Instance.new("TextLabel")
-    snBuy.countLbl.Size = UDim2.new(1, -160, 0, 32) snBuy.countLbl.Position = UDim2.new(0, 156, 0, 100)
-    snBuy.countLbl.BackgroundTransparency = 1
-    snBuy.countLbl.Text = "Loading..."
-    snBuy.countLbl.TextColor3 = C.textDim snBuy.countLbl.Font = FM snBuy.countLbl.TextSize = 12
-    snBuy.countLbl.TextXAlignment = Enum.TextXAlignment.Left snBuy.countLbl.Parent = snBuyPanel
+    BH.snBuy.maxPrice = boxOf(snBuyPanel, 0, 100, 140, 32, "")
+    BH.snBuy.maxPrice.PlaceholderText = "Max price (filter)"
+    BH.snBuy.maxPrice.TextSize = 12
+    BH.snBuy.countLbl = Instance.new("TextLabel")
+    BH.snBuy.countLbl.Size = UDim2.new(1, -160, 0, 32) BH.snBuy.countLbl.Position = UDim2.new(0, 156, 0, 100)
+    BH.snBuy.countLbl.BackgroundTransparency = 1
+    BH.snBuy.countLbl.Text = "Loading..."
+    BH.snBuy.countLbl.TextColor3 = C.textDim BH.snBuy.countLbl.Font = FM BH.snBuy.countLbl.TextSize = 12
+    BH.snBuy.countLbl.TextXAlignment = Enum.TextXAlignment.Left BH.snBuy.countLbl.Parent = snBuyPanel
 
-    snBuy.scroll = Instance.new("ScrollingFrame")
-    snBuy.scroll.Size = UDim2.new(1, 0, 1, -150) snBuy.scroll.Position = UDim2.new(0, 0, 0, 140)
-    snBuy.scroll.BackgroundColor3 = C.card snBuy.scroll.BorderSizePixel = 0
-    snBuy.scroll.ScrollBarThickness = 4 snBuy.scroll.ScrollBarImageColor3 = C.accent
-    snBuy.scroll.CanvasSize = UDim2.new(0, 0, 0, 0) snBuy.scroll.Parent = snBuyPanel
-    Instance.new("UICorner", snBuy.scroll).CornerRadius = UDim.new(0, 8)
-    snBuy.layout = Instance.new("UIListLayout") snBuy.layout.Padding = UDim.new(0, 4) snBuy.layout.Parent = snBuy.scroll
+    BH.snBuy.scroll = Instance.new("ScrollingFrame")
+    BH.snBuy.scroll.Size = UDim2.new(1, 0, 1, -150) BH.snBuy.scroll.Position = UDim2.new(0, 0, 0, 140)
+    BH.snBuy.scroll.BackgroundColor3 = C.card BH.snBuy.scroll.BorderSizePixel = 0
+    BH.snBuy.scroll.ScrollBarThickness = 4 BH.snBuy.scroll.ScrollBarImageColor3 = C.accent
+    BH.snBuy.scroll.CanvasSize = UDim2.new(0, 0, 0, 0) BH.snBuy.scroll.Parent = snBuyPanel
+    Instance.new("UICorner", BH.snBuy.scroll).CornerRadius = UDim.new(0, 8)
+    BH.snBuy.layout = Instance.new("UIListLayout") BH.snBuy.layout.Padding = UDim.new(0, 4) BH.snBuy.layout.Parent = BH.snBuy.scroll
     local snBuyScrollPad = Instance.new("UIPadding")
     snBuyScrollPad.PaddingTop = UDim.new(0, 4) snBuyScrollPad.PaddingLeft = UDim.new(0, 4) snBuyScrollPad.PaddingRight = UDim.new(0, 4)
-    snBuyScrollPad.Parent = snBuy.scroll
+    snBuyScrollPad.Parent = BH.snBuy.scroll
 end
 
 
@@ -4732,12 +4732,12 @@ end
 
 -- v8.47: BUY tab render
 local function renderBuy()
-    for _, c in ipairs(snBuy.scroll:GetChildren()) do
+    for _, c in ipairs(BH.snBuy.scroll:GetChildren()) do
         if c:IsA("Frame") then c:Destroy() end
     end
 
-    local sf = string.lower(snBuy.search.Text or "")
-    local maxPrice = tonumber(snBuy.maxPrice.Text) or math.huge
+    local sf = string.lower(BH.snBuy.search.Text or "")
+    local maxPrice = tonumber(BH.snBuy.maxPrice.Text) or math.huge
 
     -- Filter + sort by price ascending (termurah dulu)
     local sorted = {}
@@ -4753,17 +4753,17 @@ local function renderBuy()
     end
     table.sort(sorted, function(a, b) return (a.price or 0) < (b.price or 0) end)
 
-    snBuy.countLbl.Text = #sorted > 0
+    BH.snBuy.countLbl.Text = #sorted > 0
         and ("Total: "..#sorted.." (termurah dulu)")
         or "0 listing match filter"
-    snBuy.countLbl.TextColor3 = #sorted > 0 and C.success or C.danger
+    BH.snBuy.countLbl.TextColor3 = #sorted > 0 and C.success or C.danger
 
     for i, p in ipairs(sorted) do
         if i > 50 then break end  -- limit display to 50
         local row = Instance.new("Frame")
         row.Size = UDim2.new(1, -8, 0, 36)
         row.BackgroundColor3 = C.input
-        row.BorderSizePixel = 0 row.Parent = snBuy.scroll
+        row.BorderSizePixel = 0 row.Parent = BH.snBuy.scroll
         Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
 
         -- Pet info (left)
@@ -4852,7 +4852,7 @@ local function renderBuy()
         end)
     end
 
-    snBuy.scroll.CanvasSize = UDim2.new(0, 0, 0, snBuy.layout.AbsoluteContentSize.Y + 8)
+    BH.snBuy.scroll.CanvasSize = UDim2.new(0, 0, 0, BH.snBuy.layout.AbsoluteContentSize.Y + 8)
 end
 
 do
@@ -4911,16 +4911,16 @@ do
 
     -- v8.47: BUY TAB
     BH.stageMarker(354, Color3.fromRGB(100, 220, 0), "[3E4] before snBuy connects", 315)
-    snBuy.refresh.MouseButton1Click:Connect(function()
-        snBuy.countLbl.Text = "Scanning..."
+    BH.snBuy.refresh.MouseButton1Click:Connect(function()
+        BH.snBuy.countLbl.Text = "Scanning..."
         task.spawn(function()
             scanBoothListings()
             renderBuy()
         end)
     end)
-    BH.stageMarker(355, Color3.fromRGB(150, 220, 0), "[3E5] after snBuy.refresh", 315)
-    snBuy.search:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
-    snBuy.maxPrice:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
+    BH.stageMarker(355, Color3.fromRGB(150, 220, 0), "[3E5] after BH.snBuy.refresh", 315)
+    BH.snBuy.search:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
+    BH.snBuy.maxPrice:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
     BH.stageMarker(356, Color3.fromRGB(200, 220, 0), "[3E6] after snBuy listeners", 315)
 
     BH.snSubBtns.Buy.btn.MouseButton1Click:Connect(function()
