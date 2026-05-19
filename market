@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "Garden Tab: detect server + dedicated UI"
+local VERSION_DATE = "Garden panel: BH.gardenPanel ref + green diag banner"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -467,6 +467,7 @@ local marketPanel = makePanel("MARKET")
 local pricePanel = makePanel("LIST HARGA")
 local snipePanel = makePanel("SNIPE")
 local gardenPanel = makePanel("GARDEN")
+BH.gardenPanel = gardenPanel  -- store for cross-scope access
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -4898,29 +4899,27 @@ L("  - Inventory capacity")
 
 -- v8.49: GARDEN PANEL UI build (server-detect)
 BH.buildGardenPanel = function()
-    if not gardenPanel then
-        L("[Garden] ❌ gardenPanel is nil")
+    local gp = BH.gardenPanel
+    if not gp then
+        L("[Garden] ❌ BH.gardenPanel is nil")
         return
     end
     L("[Garden] building panel...")
 
-    -- Beri background warna biar gak hitam total
-    gardenPanel.BackgroundColor3 = C.bg
-    gardenPanel.BackgroundTransparency = 0
-
-    -- Visible diagnostic banner (akan diganti dengan tombol setelah build)
-    local diag = Instance.new("TextLabel")
-    diag.Name = "DiagBanner"
-    diag.Size = UDim2.new(1, -20, 0, 14) diag.Position = UDim2.new(0, 10, 1, -18)
-    diag.BackgroundTransparency = 1 diag.Text = "✅ build OK"
-    diag.TextColor3 = C.success diag.Font = Enum.Font.Code diag.TextSize = 9
-    diag.TextXAlignment = Enum.TextXAlignment.Left
-    diag.Parent = gardenPanel
+    -- IMMEDIATELY add visible status banner di top — confirms function ran
+    local topDiag = Instance.new("TextLabel")
+    topDiag.Size = UDim2.new(1, 0, 0, 18) topDiag.Position = UDim2.new(0, 0, 0, 0)
+    topDiag.BackgroundColor3 = Color3.fromRGB(0, 100, 0)  -- green = build started
+    topDiag.BorderSizePixel = 0
+    topDiag.Text = "🌱 GARDEN HELPER (build ok)"
+    topDiag.TextColor3 = Color3.new(1, 1, 1)
+    topDiag.Font = FB topDiag.TextSize = 11
+    topDiag.Parent = gp
 
     local btnPad = 4
     local btnRow = Instance.new("Frame")
-    btnRow.Size = UDim2.new(1, -28, 0, 30) btnRow.Position = UDim2.new(0, 14, 0, 14)
-    btnRow.BackgroundTransparency = 1 btnRow.Parent = gardenPanel
+    btnRow.Size = UDim2.new(1, -28, 0, 30) btnRow.Position = UDim2.new(0, 14, 0, 24)
+    btnRow.BackgroundTransparency = 1 btnRow.Parent = gp
 
     local gGiftBtn = Instance.new("TextButton")
     gGiftBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
@@ -4989,9 +4988,9 @@ BH.buildGardenPanel = function()
     end)
 
     local statsCard = Instance.new("Frame")
-    statsCard.Size = UDim2.new(1, -28, 0, 50) statsCard.Position = UDim2.new(0, 14, 0, 52)
+    statsCard.Size = UDim2.new(1, -28, 0, 50) statsCard.Position = UDim2.new(0, 14, 0, 62)
     statsCard.BackgroundColor3 = C.card statsCard.BorderSizePixel = 0
-    statsCard.Parent = gardenPanel
+    statsCard.Parent = gp
     Instance.new("UICorner", statsCard).CornerRadius = UDim.new(0, 8)
     local gStatsLbl = Instance.new("TextLabel")
     gStatsLbl.Size = UDim2.new(1, -20, 1, -8) gStatsLbl.Position = UDim2.new(0, 12, 0, 4)
@@ -5003,12 +5002,12 @@ BH.buildGardenPanel = function()
     gStatsLbl.TextWrapped = true gStatsLbl.Parent = statsCard
 
     local gListScroll = Instance.new("ScrollingFrame")
-    gListScroll.Size = UDim2.new(1, -28, 1, -116) gListScroll.Position = UDim2.new(0, 14, 0, 110)
+    gListScroll.Size = UDim2.new(1, -28, 1, -126) gListScroll.Position = UDim2.new(0, 14, 0, 120)
     gListScroll.BackgroundColor3 = C.input gListScroll.BorderSizePixel = 0
     gListScroll.ScrollBarThickness = 4 gListScroll.ScrollBarImageColor3 = C.accent
     gListScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
     gListScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    gListScroll.Parent = gardenPanel
+    gListScroll.Parent = gp
     Instance.new("UICorner", gListScroll).CornerRadius = UDim.new(0, 6)
     do
         local lay = Instance.new("UIListLayout")
@@ -5099,7 +5098,7 @@ task.spawn(function()
     if not ok then
         L("[Garden] ❌ build error: "..tostring(err))
         -- Fallback: tampilin error di panel
-        if gardenPanel then
+        if BH.gardenPanel then
             local errLbl = Instance.new("TextLabel")
             errLbl.Size = UDim2.new(1, -20, 0, 60)
             errLbl.Position = UDim2.new(0, 10, 0, 10)
@@ -5110,7 +5109,7 @@ task.spawn(function()
             errLbl.TextWrapped = true
             errLbl.Font = Enum.Font.Code
             errLbl.TextSize = 11
-            errLbl.Parent = gardenPanel
+            errLbl.Parent = BH.gardenPanel
         end
     end
 end)
