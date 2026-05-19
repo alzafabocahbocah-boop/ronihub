@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.57"
-local VERSION_DATE = "FIX BH.BH double prefix"
+local VERSION = "8.58"
+local VERSION_DATE = "[3A-3F] narrow halt 3236-4936"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -485,7 +485,7 @@ BH.stageMarker = function(num, color, text, y)
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.57 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.58 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -3708,6 +3708,7 @@ BH.onStartClick = function()
     end)
 end
 startBtn.MouseButton1Click:Connect(BH.onStartClick)
+BH.stageMarker(31, Color3.fromRGB(120, 0, 200), "[3A] onStartClick done", 200)
 
 -- ===== REJOIN =====
 rejoinBtn.MouseButton1Click:Connect(function()
@@ -3835,6 +3836,7 @@ local function hopToBestServer()
 end
 
 hopNowBtn.MouseButton1Click:Connect(function() task.spawn(hopToBestServer) end)
+BH.stageMarker(32, Color3.fromRGB(80, 0, 200), "[3B] after hopNowBtn", 215)
 
 -- Scan players button
 hopScanBtn.MouseButton1Click:Connect(function()
@@ -4065,6 +4067,7 @@ local function tryClaim()
     L("Claimed!")
 end
 claimBtn.MouseButton1Click:Connect(function() task.spawn(tryClaim) end)
+BH.stageMarker(33, Color3.fromRGB(60, 0, 200), "[3C] after claimBtn", 230)
 
 -- ===== AUTO-CLAIM BACKGROUND LOOP (v8.43) =====
 -- v8.49: pakai TBC sebagai PRIMARY detection (authoritative, fast)
@@ -4178,6 +4181,7 @@ task.spawn(function()
 end)
 
 -- ===== AUTO-MIGRATE =====
+BH.stageMarker(34, Color3.fromRGB(40, 0, 200), "[3D] before autoMigBtn", 245)
 autoMigBtn.MouseButton1Click:Connect(function()
     autoMigState = not autoMigState
     autoMigBtn.Text = autoMigState and "🤖 Auto: ON" or "🤖 Auto: OFF"
@@ -4915,7 +4919,9 @@ do
 end
 
 end  -- end setupSnipeScanner function
+BH.stageMarker(35, Color3.fromRGB(20, 100, 220), "[3E] before setupSnipeScanner()", 260)
 setupSnipeScanner()
+BH.stageMarker(36, Color3.fromRGB(0, 120, 240), "[3F] after setupSnipeScanner()", 275)
 
 -- ===== INIT =====
 L("════════════════════════════════════")
