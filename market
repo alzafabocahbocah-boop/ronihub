@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "SNIPE Manual: hide refresh/TP, bigger scroll"
+local VERSION_DATE = "Garden Tab: detect server + dedicated UI"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -453,6 +453,7 @@ end
 makeSbBtn("MARKET")
 makeSbBtn("LIST HARGA")
 makeSbBtn("SNIPE")
+makeSbBtn("GARDEN")
 
 -- ===== PANELS =====
 local function makePanel(name)
@@ -465,6 +466,18 @@ end
 local marketPanel = makePanel("MARKET")
 local pricePanel = makePanel("LIST HARGA")
 local snipePanel = makePanel("SNIPE")
+local gardenPanel = makePanel("GARDEN")
+
+-- v8.49: detect garden server (no TradeWorld = garden)
+local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
+if isGardenServer then
+    -- Hide MARKET/LIST HARGA/SNIPE tabs, show GARDEN by default
+    sbBtns.MARKET.btn.Visible = false
+    sbBtns["LIST HARGA"].btn.Visible = false
+    sbBtns.SNIPE.btn.Visible = false
+    marketPanel.Visible = false
+    gardenPanel.Visible = true
+end
 
 -- Activate Market default
 task.spawn(function()
@@ -1650,6 +1663,9 @@ do
             end
         end
     end
+
+    BH.hookGiftsFn = hookGifts
+    BH.hookTradesFn = hookTrades
 
     giftBtn.MouseButton1Click:Connect(function()
         BH.autoGift = not BH.autoGift
@@ -4866,6 +4882,185 @@ L("Cek tab LIST HARGA buat liat:")
 L("  - Total pet di backpack")
 L("  - Fav count")
 L("  - Inventory capacity")
+
+-- v8.49: GARDEN PANEL UI build (server-detect)
+BH.buildGardenPanel = function()
+    local btnPad = 4
+    local btnRow = Instance.new("Frame")
+    btnRow.Size = UDim2.new(1, -28, 0, 30) btnRow.Position = UDim2.new(0, 14, 0, 14)
+    btnRow.BackgroundTransparency = 1 btnRow.Parent = gardenPanel
+
+    local gGiftBtn = Instance.new("TextButton")
+    gGiftBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
+    gGiftBtn.Position = UDim2.new(0, 0, 0, 0)
+    gGiftBtn.BackgroundColor3 = C.danger
+    gGiftBtn.Text = "🎁 Gift: OFF" gGiftBtn.TextColor3 = Color3.new(1, 1, 1)
+    gGiftBtn.Font = FB gGiftBtn.TextSize = 11
+    gGiftBtn.BorderSizePixel = 0 gGiftBtn.Parent = btnRow
+    Instance.new("UICorner", gGiftBtn).CornerRadius = UDim.new(0, 6)
+
+    local gTradeBtn = Instance.new("TextButton")
+    gTradeBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
+    gTradeBtn.Position = UDim2.new(0.335, btnPad/2, 0, 0)
+    gTradeBtn.BackgroundColor3 = C.danger
+    gTradeBtn.Text = "🤝 Trade: OFF" gTradeBtn.TextColor3 = Color3.new(1, 1, 1)
+    gTradeBtn.Font = FB gTradeBtn.TextSize = 11
+    gTradeBtn.BorderSizePixel = 0 gTradeBtn.Parent = btnRow
+    Instance.new("UICorner", gTradeBtn).CornerRadius = UDim.new(0, 6)
+
+    local gTravelBtn = Instance.new("TextButton")
+    gTravelBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
+    gTravelBtn.Position = UDim2.new(0.67, btnPad, 0, 0)
+    gTravelBtn.BackgroundColor3 = C.success
+    gTravelBtn.Text = "🌱 TP Market" gTravelBtn.TextColor3 = Color3.new(1, 1, 1)
+    gTravelBtn.Font = FB gTravelBtn.TextSize = 11
+    gTravelBtn.BorderSizePixel = 0 gTravelBtn.Parent = btnRow
+    Instance.new("UICorner", gTravelBtn).CornerRadius = UDim.new(0, 6)
+
+    gGiftBtn.MouseButton1Click:Connect(function()
+        BH.autoGift = not BH.autoGift
+        gGiftBtn.Text = BH.autoGift and "🎁 Gift: ON" or "🎁 Gift: OFF"
+        gGiftBtn.BackgroundColor3 = BH.autoGift and C.success or C.danger
+        if BH.hookGiftsFn then BH.hookGiftsFn() end
+    end)
+    gTradeBtn.MouseButton1Click:Connect(function()
+        BH.autoTrade = not BH.autoTrade
+        gTradeBtn.Text = BH.autoTrade and "🤝 Trade: ON" or "🤝 Trade: OFF"
+        gTradeBtn.BackgroundColor3 = BH.autoTrade and C.success or C.danger
+        if BH.hookTradesFn then BH.hookTradesFn() end
+    end)
+    gTravelBtn.MouseButton1Click:Connect(function()
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local tradeCam = Workspace:FindFirstChild("TradeworldCamPart")
+            or Workspace:FindFirstChild("LoadingCamPart")
+        if tradeCam and tradeCam:IsA("BasePart") then
+            hrp.CFrame = tradeCam.CFrame + Vector3.new(0, 5, 0)
+            L("[Travel] TP ke TradeworldCamPart")
+            return
+        end
+        for _, c in ipairs(RS:GetDescendants()) do
+            if (c:IsA("RemoteEvent") or c:IsA("RemoteFunction")) then
+                local n = c.Name:lower()
+                if n:find("totrad") or n:find("tomarket") or n:find("trademarket") then
+                    pcall(function()
+                        if c:IsA("RemoteFunction") then c:InvokeServer()
+                        else c:FireServer() end
+                    end)
+                    L("[Travel] fired "..c:GetFullName())
+                    return
+                end
+            end
+        end
+        L("[Travel] gak nemu trade cam / remote")
+    end)
+
+    local statsCard = Instance.new("Frame")
+    statsCard.Size = UDim2.new(1, -28, 0, 50) statsCard.Position = UDim2.new(0, 14, 0, 52)
+    statsCard.BackgroundColor3 = C.card statsCard.BorderSizePixel = 0
+    statsCard.Parent = gardenPanel
+    Instance.new("UICorner", statsCard).CornerRadius = UDim.new(0, 8)
+    local gStatsLbl = Instance.new("TextLabel")
+    gStatsLbl.Size = UDim2.new(1, -20, 1, -8) gStatsLbl.Position = UDim2.new(0, 12, 0, 4)
+    gStatsLbl.BackgroundTransparency = 1
+    gStatsLbl.Text = "🎒 Loading backpack..."
+    gStatsLbl.TextColor3 = C.text gStatsLbl.Font = FM gStatsLbl.TextSize = 11
+    gStatsLbl.TextXAlignment = Enum.TextXAlignment.Left
+    gStatsLbl.TextYAlignment = Enum.TextYAlignment.Top
+    gStatsLbl.TextWrapped = true gStatsLbl.Parent = statsCard
+
+    local gListScroll = Instance.new("ScrollingFrame")
+    gListScroll.Size = UDim2.new(1, -28, 1, -116) gListScroll.Position = UDim2.new(0, 14, 0, 110)
+    gListScroll.BackgroundColor3 = C.input gListScroll.BorderSizePixel = 0
+    gListScroll.ScrollBarThickness = 4 gListScroll.ScrollBarImageColor3 = C.accent
+    gListScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    gListScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    gListScroll.Parent = gardenPanel
+    Instance.new("UICorner", gListScroll).CornerRadius = UDim.new(0, 6)
+    do
+        local lay = Instance.new("UIListLayout")
+        lay.Padding = UDim.new(0, 2) lay.Parent = gListScroll
+        local pad = Instance.new("UIPadding")
+        pad.PaddingTop = UDim.new(0, 4) pad.PaddingBottom = UDim.new(0, 4)
+        pad.PaddingLeft = UDim.new(0, 6) pad.PaddingRight = UDim.new(0, 6)
+        pad.Parent = gListScroll
+    end
+
+    BH.refreshGardenStats = function()
+        for _, c in ipairs(gListScroll:GetChildren()) do
+            if c:IsA("Frame") then c:Destroy() end
+        end
+        local bp = player:FindFirstChild("Backpack")
+        if not bp then gStatsLbl.Text = "❌ no backpack"; return end
+        local total, favC = 0, 0
+        local tc = {}
+        for _, t in ipairs(bp:GetChildren()) do
+            if isPet(t) then
+                total = total + 1
+                if isFav(t) then favC = favC + 1 end
+                local pt = getPetType(t)
+                local kg = getCurrentKg(t)
+                if not tc[pt] then tc[pt] = {n=0, mn=math.huge, mx=0} end
+                tc[pt].n = tc[pt].n + 1
+                if kg > 0 then
+                    tc[pt].mn = math.min(tc[pt].mn, kg)
+                    tc[pt].mx = math.max(tc[pt].mx, kg)
+                end
+            end
+        end
+        local nTypes = 0 for _ in pairs(tc) do nTypes = nTypes + 1 end
+        gStatsLbl.Text = string.format("🎒 %d pets  |  ⭐ %d fav  |  %d types", total, favC, nTypes)
+        local sorted = {}
+        for pt, info in pairs(tc) do table.insert(sorted, {pt=pt, info=info}) end
+        table.sort(sorted, function(a, b) return a.info.n > b.info.n end)
+        for i, e in ipairs(sorted) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, -8, 0, 22)
+            row.BackgroundColor3 = (i % 2 == 0) and C.bg or C.card
+            row.BorderSizePixel = 0 row.Parent = gListScroll
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+            local nm = Instance.new("TextLabel")
+            nm.Size = UDim2.new(0.55, -4, 1, 0) nm.Position = UDim2.new(0, 8, 0, 0)
+            nm.BackgroundTransparency = 1 nm.Text = e.pt
+            nm.TextColor3 = C.text nm.Font = FM nm.TextSize = 11
+            nm.TextXAlignment = Enum.TextXAlignment.Left
+            nm.TextTruncate = Enum.TextTruncate.AtEnd nm.Parent = row
+            local cn = Instance.new("TextLabel")
+            cn.Size = UDim2.new(0.20, 0, 1, 0) cn.Position = UDim2.new(0.55, 0, 0, 0)
+            cn.BackgroundTransparency = 1 cn.Text = "×"..e.info.n
+            cn.TextColor3 = C.accent cn.Font = FB cn.TextSize = 11
+            cn.TextXAlignment = Enum.TextXAlignment.Center cn.Parent = row
+            local kg = Instance.new("TextLabel")
+            kg.Size = UDim2.new(0.25, 0, 1, 0) kg.Position = UDim2.new(0.75, 0, 0, 0)
+            kg.BackgroundTransparency = 1
+            kg.Text = (e.info.mx > 0) and string.format("%.1f-%.1f", e.info.mn, e.info.mx) or "-"
+            kg.TextColor3 = C.textDim kg.Font = FM kg.TextSize = 10
+            kg.TextXAlignment = Enum.TextXAlignment.Right kg.Parent = row
+        end
+    end
+
+    if BH.autoGift then
+        gGiftBtn.Text = "🎁 Gift: ON" gGiftBtn.BackgroundColor3 = C.success
+    end
+    if BH.autoTrade then
+        gTradeBtn.Text = "🤝 Trade: ON" gTradeBtn.BackgroundColor3 = C.success
+    end
+
+    do
+        local bp = player:FindFirstChild("Backpack")
+        if bp then
+            bp.ChildAdded:Connect(function() task.wait(0.1); pcall(BH.refreshGardenStats) end)
+            bp.ChildRemoved:Connect(function() task.wait(0.1); pcall(BH.refreshGardenStats) end)
+        end
+    end
+
+    task.spawn(function()
+        task.wait(2)
+        pcall(BH.refreshGardenStats)
+    end)
+end
+BH.buildGardenPanel()
 
 populateModalList()
 refreshPriceList()
