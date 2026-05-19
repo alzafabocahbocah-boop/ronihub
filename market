@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.100"
-local VERSION_DATE = "SEMUA mutasi = ×1.10 (samain kayak Everchanted) — konsisten sm inventory v4.2"
+local VERSION = "8.101"
+local VERSION_DATE = "FIX: lewat batas 200 local Luau — wrap section ke function biar GUI muncul lagi"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -5289,6 +5289,7 @@ hopNowBtn.MouseButton1Click:Connect(function() task.spawn(hopToBestServer) end)
 
 -- v8.99: ===== HOP SERVER TAB — PLAYER BLACKLIST =====
 -- Auto-hop ke server lain kalo ada player blacklisted di server ini
+-- v8.101: WRAP dalam function biar punya 200-local quota sendiri (cegah hit main-chunk limit)
 BH.hopBlacklist = BH.hopBlacklist or {
     names = {},     -- list of lowercase usernames
     active = false, -- enable auto-hop
@@ -5299,7 +5300,8 @@ if BH.marketState and BH.marketState.hopBlacklist then
     BH.hopBlacklist.active = BH.marketState.hopBlacklist.active or false
 end
 
-local function saveHopBlacklist()
+BH.setupHopServerTab = function()
+    local function saveHopBlacklist()
     if not BH.marketState then return end
     BH.marketState.hopBlacklist = {
         names = BH.hopBlacklist.names,
@@ -5530,6 +5532,8 @@ task.spawn(function()
         pcall(checkBlacklistedInServer)
     end
 end)
+end  -- end of setupHopServerTab function
+BH.setupHopServerTab()  -- v8.101: invoke once at load
 
 -- Scan players button
 hopScanBtn.MouseButton1Click:Connect(function()
@@ -5766,6 +5770,8 @@ end
 claimBtn.MouseButton1Click:Connect(function() task.spawn(tryClaim) end)
 
 -- ===== AUTO-CLAIM BACKGROUND LOOP (v8.43) =====
+-- v8.101: WRAP dalam function biar locals dapet quota tersendiri
+BH.setupMiscTab = function()
 -- v8.49: pakai TBC sebagai PRIMARY detection (authoritative, fast)
 task.spawn(function()
     while gui.Parent do
@@ -5992,9 +5998,11 @@ skinPickBtn.MouseButton1Click:Connect(function()
     L("Kalo udah kebuka, klik tile yang ada di UI game itu")
     L("Atau jalanin booth_skin_v2.lua secara terpisah")
 end)
+end  -- end setupMiscTab
+BH.setupMiscTab()  -- v8.101: invoke once
 
 -- ===== SNIPE SCANNER =====
-local function setupSnipeScanner()
+BH.setupSnipeScanner = function()
 -- v8.69: parseMutation pake BH.MUTATION_NAMES (lengkap ~90 mutations) via getBaseName
 -- Otomatis handle multi-layer mutation ("Shocked, Galactic Peacock" → "Shocked, Galactic")
 local function parseMutation(name, baseType)
@@ -6877,7 +6885,7 @@ do
 end
 
 end  -- end setupSnipeScanner function
-setupSnipeScanner()
+BH.setupSnipeScanner()
 
 -- ===== INIT =====
 L("════════════════════════════════════")
