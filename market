@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.90"
-local VERSION_DATE = "Auto Snipe: hapus Mutasi field + pet picker inline (no full-screen overlay)"
+local VERSION = "8.93"
+local VERSION_DATE = "Pet picker: exact path RS.Data.PetRegistry.PetList (421 pets)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -109,6 +109,109 @@ do
         "Merry Nursery","MerryNursery",
         "Spirit Sparkle",
     }
+
+    -- v8.91: Comprehensive list of Grow A Garden pet types (sorted alphabetical)
+    -- Used by Auto Snipe picker to show ALL pets, not just yang ada di server
+    BH.PET_NAMES = {
+        "Anchovy","Ankylosaurus","Axolotl",
+        "Bald Eagle","Bandit Raccoon","Bat","Bear Bee","Bee","Black Bunny",
+        "Blood Hedgehog","Blood Kiwi","Blood Owl","Brontosaurus","Brown Mouse",
+        "Bunny","Butterfly",
+        "Capybara","Carnotaurus","Cat","Caterpillar","Cerberus","Cheetah",
+        "Chicken","Chocolate Crow","Chocolate Lab","Compsognathus","Cooked Owl",
+        "Cow","Crab","Cyclops",
+        "Demon","Dilophosaurus","Disco Bee","Dog","Dragonfly","Duck",
+        "Echo Frog","Elephant",
+        "Falcon","Fennec Fox","Firefly","Flamingo","Frog","Frosted Owl",
+        "Giant Ant","Giraffe","Gold Fish","Golden Bee","Golden Lab","Grey Mouse",
+        "Griffin",
+        "Hamster","Hedgehog","Honey Bee","Horse","Hyena",
+        "Iguanodon",
+        "Jaguar","Jellyfish",
+        "Kappa","Kiwi","Koala","Koi",
+        "Lich","Lion","Lobster","Lobster King",
+        "Manatee","Manticore","Megalodon","Microraptor","Mimic Octopus",
+        "Mole","Monkey","Mosasaurus","Moth","Mythic Egg",
+        "Night Owl",
+        "Octopus","Orange Tabby","Ostrich","Otter","Owl",
+        "Pachycephalosaurus","Panda","Parrot","Peacock","Penguin","Petal Bee",
+        "Phoenix","Pig","Plesiosaurus","Polar Bear","Praying Mantis","Pterodactyl",
+        "Queen Bee",
+        "Raccoon","Raptor","Red Dragon","Red Fox","Red Giant Ant","Rhino","Rooster",
+        "Salamander","Scorpion","Sea Otter","Sea Turtle","Seagull","Seal","Shark",
+        "Silver Monkey","Skunk","Sloth","Snail","Sphinx","Spinosaurus","Spotted Deer",
+        "Squirrel","Starfish","Stegosaurus","Sun Bear","Swan",
+        "T-Rex","Tarantula Hawk","Tiger","Toucan","Tortoise","Triceratops","Turtle",
+        "Unicorn",
+        "Vampire Bat","Vulture",
+        "Walrus","Wasp","Whale","Wolf",
+        "Yeti",
+        "Zebra",
+        -- new/event pets
+        "Easter Bunny","Witch Cat","Pumpkin Cat","Skeleton Dog",
+        "Spirit Fox","Festive Fawn","Holiday Owl",
+        "Gilded Choc Peryton","Peryton",
+    }
+
+    -- v8.92: Discover ALL pet types dari game data (game punya ~421 pet)
+    -- Path persis dari revsy.lua: RS.Data.PetRegistry.PetList (421 pets)
+    -- Fallback: RS.Assets.Animations.PetAnimations (204 pets)
+    BH.discoverPetNames = function()
+        local found = {}
+        local RS = game:GetService("ReplicatedStorage")
+
+        -- Primary: RS.Data.PetRegistry.PetList (require'd module, keys = pet names)
+        pcall(function()
+            local petList = RS:FindFirstChild("Data")
+                and RS.Data:FindFirstChild("PetRegistry")
+                and RS.Data.PetRegistry:FindFirstChild("PetList")
+            if petList then
+                local ok, mod = pcall(function() return require(petList) end)
+                if ok and type(mod) == "table" then
+                    for petName, _ in pairs(mod) do
+                        if type(petName) == "string" and #petName > 1 then
+                            found[petName] = true
+                        end
+                    end
+                end
+            end
+        end)
+
+        -- Fallback: RS.Assets.Animations.PetAnimations (children = pet names)
+        pcall(function()
+            local petAnim = RS:FindFirstChild("Assets")
+                and RS.Assets:FindFirstChild("Animations")
+                and RS.Assets.Animations:FindFirstChild("PetAnimations")
+            if petAnim then
+                for _, p in ipairs(petAnim:GetChildren()) do
+                    local n = p.Name
+                    if n and #n > 1 then
+                        found[n] = true
+                    end
+                end
+            end
+        end)
+
+        local list = {}
+        for name in pairs(found) do table.insert(list, name) end
+        local count = #list
+        if count > 0 then
+            L("[PetDiscover] found "..count.." pet types from RS.Data.PetRegistry.PetList")
+        else
+            L("[PetDiscover] gak nemu PetRegistry — pake hardcoded list fallback")
+        end
+        return list
+    end
+
+    -- Run discover saat module load (silently)
+    BH.PET_NAMES_DISCOVERED = {}
+    task.spawn(function()
+        task.wait(2)  -- kasih waktu RS replicate
+        local ok, names = pcall(BH.discoverPetNames)
+        if ok and names and #names > 0 then
+            BH.PET_NAMES_DISCOVERED = names
+        end
+    end)
     BH.MUTATION_PREFIXES = {}
     for _, m in ipairs(BH.MUTATION_NAMES) do
         table.insert(BH.MUTATION_PREFIXES, m..", ")  -- "Galactic, "
@@ -2757,9 +2860,28 @@ do
         petPicker.Visible = false
     end)
 
+    -- v8.92: Search box (essential untuk ~400 pets)
+    local pickerSearch = Instance.new("TextBox")
+    pickerSearch.Size = UDim2.new(1, -16, 0, 24)
+    pickerSearch.Position = UDim2.new(0, 8, 0, 32)
+    pickerSearch.BackgroundColor3 = C.input
+    pickerSearch.Text = ""
+    pickerSearch.PlaceholderText = "🔍 Search pet name..."
+    pickerSearch.PlaceholderColor3 = C.textDim
+    pickerSearch.TextColor3 = C.text
+    pickerSearch.Font = F pickerSearch.TextSize = 11
+    pickerSearch.TextXAlignment = Enum.TextXAlignment.Left
+    pickerSearch.BorderSizePixel = 0
+    pickerSearch.ClearTextOnFocus = false
+    pickerSearch.ZIndex = 51 pickerSearch.Parent = petPicker
+    Instance.new("UICorner", pickerSearch).CornerRadius = UDim.new(0, 4)
+    local searchPad = Instance.new("UIPadding")
+    searchPad.PaddingLeft = UDim.new(0, 8) searchPad.PaddingRight = UDim.new(0, 8)
+    searchPad.Parent = pickerSearch
+
     local pickerScroll = Instance.new("ScrollingFrame")
-    pickerScroll.Size = UDim2.new(1, -8, 1, -36)
-    pickerScroll.Position = UDim2.new(0, 4, 0, 30)
+    pickerScroll.Size = UDim2.new(1, -8, 1, -64)
+    pickerScroll.Position = UDim2.new(0, 4, 0, 60)
     pickerScroll.BackgroundTransparency = 1
     pickerScroll.BorderSizePixel = 0
     pickerScroll.ScrollBarThickness = 4
@@ -2771,12 +2893,26 @@ do
     pickerLayout.Padding = UDim.new(0, 3)
     pickerLayout.Parent = pickerScroll
 
-    local function populatePicker()
+    local function populatePicker(filter)
         for _, c in ipairs(pickerScroll:GetChildren()) do
-            if c:IsA("TextButton") then c:Destroy() end
+            if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
         end
+        filter = filter and filter:lower() or ""
+
         local seen = {}
-        -- Backpack (paling guna — pet yang lo punya)
+        -- v8.92: Primary — pet types yang ke-discover dari game (~400 pets)
+        if BH.PET_NAMES_DISCOVERED then
+            for _, name in ipairs(BH.PET_NAMES_DISCOVERED) do
+                seen[name] = true
+            end
+        end
+        -- Fallback — hardcoded BH.PET_NAMES (~100 pets)
+        if BH.PET_NAMES then
+            for _, name in ipairs(BH.PET_NAMES) do
+                seen[name] = true
+            end
+        end
+        -- Tambahin dari backpack (pet baru / event yang gak ada di list)
         local bp = player and player:FindFirstChild("Backpack")
         if bp then
             for _, t in ipairs(bp:GetChildren()) do
@@ -2789,7 +2925,7 @@ do
                 end
             end
         end
-        -- TBC items (semua booth)
+        -- Tambahin dari TBC items (pet di booth lain)
         if BH.TBC then
             for _, pp in ipairs(Players:GetPlayers()) do
                 local data = BH.fetchBoothData and BH.fetchBoothData(pp)
@@ -2803,9 +2939,15 @@ do
                 end
             end
         end
+
         local list = {}
-        for k in pairs(seen) do table.insert(list, k) end
+        for k in pairs(seen) do
+            if filter == "" or k:lower():find(filter, 1, true) then
+                table.insert(list, k)
+            end
+        end
         table.sort(list)
+
         for _, name in ipairs(list) do
             local row = Instance.new("TextButton")
             row.Size = UDim2.new(1, -8, 0, 26)
@@ -2822,22 +2964,29 @@ do
                 petPicker.Visible = false
             end)
         end
-        -- "Any" option at top? Add a clear option
-        if #list == 0 then
-            local empty = Instance.new("TextLabel")
-            empty.Size = UDim2.new(1, -8, 0, 26)
-            empty.BackgroundTransparency = 1
-            empty.Text = "  (kosong — buka backpack atau scan market dulu)"
-            empty.TextColor3 = C.textDim
-            empty.Font = F empty.TextSize = 11
-            empty.TextXAlignment = Enum.TextXAlignment.Left
-            empty.ZIndex = 52 empty.Parent = pickerScroll
-        end
+
+        -- Show stat: how many found
+        local statLbl = Instance.new("TextLabel")
+        statLbl.Size = UDim2.new(1, -8, 0, 20)
+        statLbl.BackgroundTransparency = 1
+        statLbl.Text = filter == "" and ("Total: "..#list.." pet types") or ("Match: "..#list.." pet")
+        statLbl.TextColor3 = C.textDim
+        statLbl.Font = F statLbl.TextSize = 10
+        statLbl.TextXAlignment = Enum.TextXAlignment.Right
+        statLbl.LayoutOrder = -1  -- prepend
+        statLbl.ZIndex = 52 statLbl.Parent = pickerScroll
+
         pickerScroll.CanvasSize = UDim2.new(0, 0, 0, pickerLayout.AbsoluteContentSize.Y + 8)
     end
 
+    -- Search filter live
+    pickerSearch:GetPropertyChangedSignal("Text"):Connect(function()
+        populatePicker(pickerSearch.Text)
+    end)
+
     petTypeBtn.MouseButton1Click:Connect(function()
-        populatePicker()
+        pickerSearch.Text = ""
+        populatePicker("")
         petPicker.Visible = true
     end)
 
