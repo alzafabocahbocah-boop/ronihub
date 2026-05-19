@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.89"
-local VERSION_DATE = "Revert dropdown ke TextBox (dropdown overlay bikin UI hilang di Roblox)"
+local VERSION = "8.90"
+local VERSION_DATE = "Auto Snipe: hapus Mutasi field + pet picker inline (no full-screen overlay)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2682,14 +2682,164 @@ do
         return b
     end
 
-    -- v8.89: revert ke TextBox biasa (dropdown overlay bikin UI hilang di Roblox mobile)
-    -- Row 1 (y=0): Pet Type 35% | Mutation 20% | Max KG 20% | Max Price 25%
-    BH.autoSnipe.typeInput = makeAutoInput(0, 0.35, "🐾 Pet type")
-    BH.autoSnipe.mutInput = makeAutoInput(0.35, 0.20, "✨ Mut")
-    BH.autoSnipe.kgInput = makeAutoInput(0.55, 0.20, "Max KG")
-    BH.autoSnipe.priceInput = makeAutoInput(0.75, 0.25, "💰 Max Price")
+    -- v8.90: Remove Mutasi field, Pet Type jadi picker button (no overlay, inside Otomatis panel only)
+    -- Row 1 (y=0): Pet Type btn (45%) | Max KG (25%) | Max Price (30%)
+
+    -- Pet Type as button (opens inline picker)
+    local petTypeBtn = Instance.new("TextButton")
+    petTypeBtn.Size = UDim2.new(0.45, -3, 0, 26)
+    petTypeBtn.Position = UDim2.new(0, 0, 0, 0)
+    petTypeBtn.BackgroundColor3 = C.input
+    petTypeBtn.BorderSizePixel = 0
+    petTypeBtn.Text = "🐾 Tap to pick" petTypeBtn.TextColor3 = C.textDim
+    petTypeBtn.Font = F petTypeBtn.TextSize = 11
+    petTypeBtn.TextXAlignment = Enum.TextXAlignment.Left
+    petTypeBtn.AutoButtonColor = false
+    petTypeBtn.Parent = snAutoPanel
+    Instance.new("UICorner", petTypeBtn).CornerRadius = UDim.new(0, 5)
+    local petTypePad = Instance.new("UIPadding")
+    petTypePad.PaddingLeft = UDim.new(0, 8) petTypePad.PaddingRight = UDim.new(0, 8)
+    petTypePad.Parent = petTypeBtn
+
+    BH.autoSnipe.typeInput = petTypeBtn
+    BH.autoSnipe.pickedPetType = ""
+    local function setPetType(val)
+        BH.autoSnipe.pickedPetType = val or ""
+        if val and val ~= "" then
+            petTypeBtn.Text = val
+            petTypeBtn.TextColor3 = C.text
+        else
+            petTypeBtn.Text = "🐾 Tap to pick"
+            petTypeBtn.TextColor3 = C.textDim
+        end
+    end
+    BH.autoSnipe.setPetType = setPetType
+
+    BH.autoSnipe.kgInput = makeAutoInput(0.45, 0.25, "Max KG")
+    BH.autoSnipe.priceInput = makeAutoInput(0.70, 0.30, "💰 Max Price")
     BH.autoSnipe.kgInput.TextXAlignment = Enum.TextXAlignment.Center
     BH.autoSnipe.priceInput.TextXAlignment = Enum.TextXAlignment.Center
+
+    -- Pet picker (overlay HANYA di dalam snAutoPanel, gak interfere tab lain)
+    local petPicker = Instance.new("Frame")
+    petPicker.Size = UDim2.new(1, 0, 1, -88)
+    petPicker.Position = UDim2.new(0, 0, 0, 84)
+    petPicker.BackgroundColor3 = C.card
+    petPicker.BorderSizePixel = 0
+    petPicker.Visible = false
+    petPicker.ZIndex = 50
+    petPicker.Parent = snAutoPanel
+    Instance.new("UICorner", petPicker).CornerRadius = UDim.new(0, 6)
+    local pickerStroke = Instance.new("UIStroke")
+    pickerStroke.Color = C.accent pickerStroke.Thickness = 1
+    pickerStroke.Parent = petPicker
+
+    local pickerHeader = Instance.new("TextLabel")
+    pickerHeader.Size = UDim2.new(1, -36, 0, 24)
+    pickerHeader.Position = UDim2.new(0, 8, 0, 4)
+    pickerHeader.BackgroundTransparency = 1
+    pickerHeader.Text = "🐾 Pilih Pet Type"
+    pickerHeader.TextColor3 = C.accent
+    pickerHeader.Font = FB pickerHeader.TextSize = 12
+    pickerHeader.TextXAlignment = Enum.TextXAlignment.Left
+    pickerHeader.ZIndex = 51 pickerHeader.Parent = petPicker
+
+    local pickerCloseBtn = Instance.new("TextButton")
+    pickerCloseBtn.Size = UDim2.new(0, 24, 0, 24)
+    pickerCloseBtn.Position = UDim2.new(1, -28, 0, 4)
+    pickerCloseBtn.BackgroundColor3 = C.danger
+    pickerCloseBtn.Text = "✕" pickerCloseBtn.TextColor3 = Color3.new(1,1,1)
+    pickerCloseBtn.Font = FB pickerCloseBtn.TextSize = 11
+    pickerCloseBtn.BorderSizePixel = 0
+    pickerCloseBtn.ZIndex = 51 pickerCloseBtn.Parent = petPicker
+    Instance.new("UICorner", pickerCloseBtn).CornerRadius = UDim.new(0, 4)
+    pickerCloseBtn.MouseButton1Click:Connect(function()
+        petPicker.Visible = false
+    end)
+
+    local pickerScroll = Instance.new("ScrollingFrame")
+    pickerScroll.Size = UDim2.new(1, -8, 1, -36)
+    pickerScroll.Position = UDim2.new(0, 4, 0, 30)
+    pickerScroll.BackgroundTransparency = 1
+    pickerScroll.BorderSizePixel = 0
+    pickerScroll.ScrollBarThickness = 4
+    pickerScroll.ScrollBarImageColor3 = C.accent
+    pickerScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    pickerScroll.ZIndex = 51
+    pickerScroll.Parent = petPicker
+    local pickerLayout = Instance.new("UIListLayout")
+    pickerLayout.Padding = UDim.new(0, 3)
+    pickerLayout.Parent = pickerScroll
+
+    local function populatePicker()
+        for _, c in ipairs(pickerScroll:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
+        end
+        local seen = {}
+        -- Backpack (paling guna — pet yang lo punya)
+        local bp = player and player:FindFirstChild("Backpack")
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                if t:IsA("Tool") and (t:FindFirstChild("PetToolLocal") or t:GetAttribute("PET_UUID")) then
+                    local pType = tostring(t:GetAttribute("f") or "")
+                    if pType ~= "" and pType ~= "?" then
+                        local base = (BH.getBaseName and pType ~= "") and BH.getBaseName(pType) or pType
+                        seen[base] = true
+                    end
+                end
+            end
+        end
+        -- TBC items (semua booth)
+        if BH.TBC then
+            for _, pp in ipairs(Players:GetPlayers()) do
+                local data = BH.fetchBoothData and BH.fetchBoothData(pp)
+                if data and data.Items then
+                    for _, item in pairs(data.Items) do
+                        if item.PetType then
+                            local base = (BH.getBaseName) and BH.getBaseName(tostring(item.PetType)) or tostring(item.PetType)
+                            seen[base] = true
+                        end
+                    end
+                end
+            end
+        end
+        local list = {}
+        for k in pairs(seen) do table.insert(list, k) end
+        table.sort(list)
+        for _, name in ipairs(list) do
+            local row = Instance.new("TextButton")
+            row.Size = UDim2.new(1, -8, 0, 26)
+            row.BackgroundColor3 = C.input
+            row.Text = "  "..name
+            row.TextColor3 = C.text
+            row.Font = F row.TextSize = 11
+            row.TextXAlignment = Enum.TextXAlignment.Left
+            row.BorderSizePixel = 0
+            row.ZIndex = 52 row.Parent = pickerScroll
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+            row.MouseButton1Click:Connect(function()
+                setPetType(name)
+                petPicker.Visible = false
+            end)
+        end
+        -- "Any" option at top? Add a clear option
+        if #list == 0 then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.new(1, -8, 0, 26)
+            empty.BackgroundTransparency = 1
+            empty.Text = "  (kosong — buka backpack atau scan market dulu)"
+            empty.TextColor3 = C.textDim
+            empty.Font = F empty.TextSize = 11
+            empty.TextXAlignment = Enum.TextXAlignment.Left
+            empty.ZIndex = 52 empty.Parent = pickerScroll
+        end
+        pickerScroll.CanvasSize = UDim2.new(0, 0, 0, pickerLayout.AbsoluteContentSize.Y + 8)
+    end
+
+    petTypeBtn.MouseButton1Click:Connect(function()
+        populatePicker()
+        petPicker.Visible = true
+    end)
 
     -- Row 2 (y=30): + ADD RULE (40%) | START/STOP (60%)
     BH.autoSnipe.addBtn = btnOf(snAutoPanel, 0, 0, 1, 1, "+ ADD RULE", C.accent)
@@ -2788,13 +2938,12 @@ do
             return
         end
         table.insert(BH.autoSnipe.rules, {
-            petType = BH.autoSnipe.typeInput.Text or "",
-            mutation = BH.autoSnipe.mutInput.Text or "",
+            petType = BH.autoSnipe.pickedPetType or "",
+            mutation = "",  -- v8.90: removed from UI, always match all mutations
             maxKg = tonumber(BH.autoSnipe.kgInput.Text) or 0,
             maxPrice = maxPrice,
         })
-        BH.autoSnipe.typeInput.Text = ""
-        BH.autoSnipe.mutInput.Text = ""
+        BH.autoSnipe.setPetType("")
         BH.autoSnipe.kgInput.Text = ""
         BH.autoSnipe.priceInput.Text = ""
         rebuildAutoSnipeRules()
