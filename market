@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "UI 600x400 compact + sub-tabs scale-fit"
+local VERSION_DATE = "UI 500x350 + uniform tab sizing (34px h, font 13)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -329,7 +329,7 @@ local F = Enum.Font.Gotham
 
 -- ===== MAIN FRAME =====
 local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 600, 0, 400) main.Position = UDim2.new(0.5, -300, 0.5, -200)
+main.Size = UDim2.new(0, 500, 0, 350) main.Position = UDim2.new(0.5, -250, 0.5, -175)
 main.BackgroundColor3 = C.bg main.BorderSizePixel = 0
 main.Active = true main.Draggable = true main.Parent = gui
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
@@ -391,14 +391,14 @@ sep.Parent = main
 
 -- ===== SIDEBAR =====
 local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 170, 1, -60) sidebar.Position = UDim2.new(0, 12, 0, 56)
+sidebar.Size = UDim2.new(0, 130, 1, -60) sidebar.Position = UDim2.new(0, 10, 0, 52)
 sidebar.BackgroundTransparency = 1 sidebar.Parent = main
 local sbLayout = Instance.new("UIListLayout")
-sbLayout.Padding = UDim.new(0, 6) sbLayout.Parent = sidebar
+sbLayout.Padding = UDim.new(0, 5) sbLayout.Parent = sidebar
 
 -- ===== CONTENT AREA =====
 local contentArea = Instance.new("Frame")
-contentArea.Size = UDim2.new(1, -200, 1, -60) contentArea.Position = UDim2.new(0, 188, 0, 56)
+contentArea.Size = UDim2.new(1, -156, 1, -60) contentArea.Position = UDim2.new(0, 146, 0, 52)
 contentArea.BackgroundTransparency = 1 contentArea.Parent = main
 
 -- ===== SIDEBAR BUTTONS =====
@@ -408,7 +408,7 @@ local activeTab = "MARKET"
 
 local function makeSbBtn(name, comingSoon)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1, 0, 0, 44) b.AutoButtonColor = false
+    b.Size = UDim2.new(1, 0, 0, 34) b.AutoButtonColor = false
     b.BackgroundColor3 = C.card b.BorderSizePixel = 0
     b.Text = "" b.Parent = sidebar
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
@@ -421,7 +421,7 @@ local function makeSbBtn(name, comingSoon)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -16, 1, 0) lbl.Position = UDim2.new(0, 12, 0, 0)
     lbl.BackgroundTransparency = 1 lbl.Text = name
-    lbl.TextColor3 = C.textDim lbl.Font = FB lbl.TextSize = 15
+    lbl.TextColor3 = C.textDim lbl.Font = FB lbl.TextSize = 13
     lbl.TextXAlignment = Enum.TextXAlignment.Left lbl.Parent = b
 
     if comingSoon then
@@ -475,16 +475,16 @@ end)
 
 -- ===== SUB-TABS (Market) =====
 local subTabBar = Instance.new("Frame")
-subTabBar.Size = UDim2.new(1, 0, 0, 40) subTabBar.BackgroundTransparency = 1
+subTabBar.Size = UDim2.new(1, 0, 0, 34) subTabBar.BackgroundTransparency = 1
 subTabBar.Parent = marketPanel
 local subTabLayout = Instance.new("UIListLayout") subTabLayout.FillDirection = Enum.FillDirection.Horizontal
-subTabLayout.Padding = UDim.new(0, 8) subTabLayout.Parent = subTabBar
+subTabLayout.Padding = UDim.new(0, 5) subTabLayout.Parent = subTabBar
 
 local subPanels = {}
 local subBtns = {}
 local function makeSubPanel(name)
     local sp = Instance.new("Frame")
-    sp.Size = UDim2.new(1, 0, 1, -48) sp.Position = UDim2.new(0, 0, 0, 48)
+    sp.Size = UDim2.new(1, 0, 1, -42) sp.Position = UDim2.new(0, 0, 0, 42)
     sp.BackgroundColor3 = C.panel sp.BorderSizePixel = 0
     sp.Visible = false sp.Parent = marketPanel
     Instance.new("UICorner", sp).CornerRadius = UDim.new(0, 10)
