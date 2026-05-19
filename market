@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.79"
-local VERSION_DATE = "Diagnostic: dump raw server response + tool attrs on unknown errors"
+local VERSION = "8.80"
+local VERSION_DATE = "Lenient success detection + TBC verify (fix phantom-listed pets)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -3004,6 +3004,21 @@ local function listPet(uuidBraced, price)
         if rets[2] == true and looksLikeUuid(rets[3]) then return true, rets[3] end
         -- direct uuid return
         if looksLikeUuid(rets[2]) then return true, rets[2] end
+        -- v8.80: (true) only — server accept tapi gak return UUID, tetap dianggap sukses
+        -- Bukti: user lihat pet di booth setelah rejoin meski script log "fail"
+        if rets[2] == true then return true, "ok-no-uuid" end
+        -- v8.80: (true, true) — confirmation truthy without UUID
+        if rets[2] and rets[2] ~= false and type(rets[2]) ~= "string" and not looksLikeUuid(rets[2]) then
+            -- pcall ok + non-error truthy value → likely success
+            -- Tapi cuma kalo gak ada error string di rets[3..5]
+            local hasErr = false
+            for i = 2, 5 do
+                if type(rets[i]) == "string" and not looksLikeUuid(rets[i]) then
+                    hasErr = true; break
+                end
+            end
+            if not hasErr then return true, "ok-truthy:"..tostring(rets[2]):sub(1,20) end
+        end
     end
 
     -- v8.76: kalo error rate-limit, JANGAN retry pake clean UUID — itu cuma nge-spam server
@@ -3023,6 +3038,17 @@ local function listPet(uuidBraced, price)
     if rets[1] then
         if rets[2] == true and looksLikeUuid(rets[3]) then return true, rets[3] end
         if looksLikeUuid(rets[2]) then return true, rets[2] end
+        -- v8.80: lenient detection juga untuk attempt kedua
+        if rets[2] == true then return true, "ok-no-uuid-clean" end
+        if rets[2] and rets[2] ~= false and type(rets[2]) ~= "string" and not looksLikeUuid(rets[2]) then
+            local hasErr = false
+            for i = 2, 5 do
+                if type(rets[i]) == "string" and not looksLikeUuid(rets[i]) then
+                    hasErr = true; break
+                end
+            end
+            if not hasErr then return true, "ok-truthy-clean:"..tostring(rets[2]):sub(1,20) end
+        end
     end
 
     -- v8.30: kalau gak sukses, ambil error message
@@ -4043,6 +4069,37 @@ BH.onStartClick = function()
                                             table.insert(attrs, k.."="..vs)
                                         end
                                         L("      tool attrs: "..table.concat(attrs, ", "))
+                                    end
+                                end
+                                -- v8.80: VERIFY via TBC — listing mungkin actually sukses meski response weird
+                                -- (user observation: pet muncul di booth setelah rejoin meski script log "fail")
+                                invalidateTbcCache()
+                                task.wait(1.5)  -- kasih waktu server replicate
+                                local freshData = BH.fetchBoothData(player)
+                                if freshData and freshData.Items then
+                                    -- Cari pet UUID kita di Items (sebagai itemId atau PET_UUID attribute)
+                                    local foundListed = false
+                                    for _, item in pairs(freshData.Items) do
+                                        if item.PetData then
+                                            -- Match by ID dalam PetData (game-specific, coba beberapa field)
+                                            local itemPetUuid = tostring(item.PetData.UUID or item.PetData.Uuid
+                                                or item.PetData.PetUUID or item.PetData.PetUuid or ""):gsub("[{}]","")
+                                            if itemPetUuid == p.clean then
+                                                foundListed = true; break
+                                            end
+                                        end
+                                    end
+                                    if foundListed then
+                                        L("      → ✅ TBC verify: pet TERNYATA listed! Reclassify as success.")
+                                        listedNow = listedNow + 1
+                                        alreadyListed[p.clean] = true
+                                        rateLimitedCount[p.clean] = nil
+                                        rateLimitedUntil[p.clean] = nil
+                                        if ruleIdx > 0 then
+                                            if not myListed[ruleIdx] then myListed[ruleIdx] = {} end
+                                            myListed[ruleIdx][p.clean] = true
+                                        end
+                                        failStats.generic = failStats.generic - 1  -- undo
                                     end
                                 end
                             else
