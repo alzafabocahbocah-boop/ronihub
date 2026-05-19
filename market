@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.78"
-local VERSION_DATE = "Verbose listing+unlist diagnostics: full err, classify, cycle summary"
+local VERSION = "8.79"
+local VERSION_DATE = "Diagnostic: dump raw server response + tool attrs on unknown errors"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2946,13 +2946,54 @@ local function listPet(uuidBraced, price)
     end
 
     -- v8.30: helper untuk parse error string dari any return val
+    -- v8.79: handle tables / booleans / numbers untuk extract error info
     local function extractErr(rets)
         for i = 2, 5 do
-            if type(rets[i]) == "string" and not looksLikeUuid(rets[i]) then
-                return rets[i]
+            local v = rets[i]
+            if type(v) == "string" and not looksLikeUuid(v) then
+                return v
+            elseif type(v) == "table" then
+                -- Common error table shapes
+                if v.Message then return tostring(v.Message) end
+                if v.message then return tostring(v.message) end
+                if v.error then return tostring(v.error) end
+                if v.err then return tostring(v.err) end
+                if v.reason then return tostring(v.reason) end
+                if v[1] and type(v[1]) == "string" then return tostring(v[1]) end
+            elseif type(v) == "number" then
+                return "errcode:"..tostring(v)
             end
         end
         return nil
+    end
+
+    -- v8.79: dump full rets structure for diagnostics
+    local function dumpRets(rets)
+        local parts = {}
+        for i = 1, 5 do
+            local v = rets[i]
+            local t = type(v)
+            local s
+            if v == nil and i > 2 then break end  -- stop at trailing nils
+            if t == "string" then
+                s = '"'..v:sub(1,40)..(#v > 40 and "..." or "")..'"'
+            elseif t == "table" then
+                local kv = {}
+                local cnt = 0
+                for k, val in pairs(v) do
+                    cnt = cnt + 1
+                    if cnt <= 4 then
+                        table.insert(kv, tostring(k).."="..tostring(val):sub(1,20))
+                    end
+                end
+                if cnt > 4 then table.insert(kv, "...+"..(cnt-4)) end
+                s = "{"..table.concat(kv, ", ").."}"
+            else
+                s = tostring(v)
+            end
+            table.insert(parts, "["..i.."]"..t..":"..s)
+        end
+        return table.concat(parts, " | ")
     end
 
     -- Try with braced UUID first
@@ -2972,6 +3013,9 @@ local function listPet(uuidBraced, price)
         return false, firstErr
     end
 
+    -- v8.79: save first attempt dump untuk diagnostic
+    local firstDump = dumpRets(rets)
+
     -- Try without braces (only for non-rate-limit errors)
     local clean = uuidBraced:gsub("[{}]", "")
     rets = {pcall(function() return createRE:InvokeServer("Pet", clean, price) end)}
@@ -2983,6 +3027,12 @@ local function listPet(uuidBraced, price)
 
     -- v8.30: kalau gak sukses, ambil error message
     local err = extractErr(rets) or "unknown"
+
+    -- v8.79: kalau "unknown" → embed raw dump biar bisa diagnose
+    if err == "unknown" then
+        local secondDump = dumpRets(rets)
+        err = "unknown|braced:"..firstDump.."|clean:"..secondDump
+    end
     return false, err
 end
 
@@ -3970,10 +4020,31 @@ BH.onStartClick = function()
                                     myListed[ruleIdx][p.clean] = true
                                 end
                                 invalidateTbcCache()
-                            elseif errStr == "false" or errStr == "unknown" then
+                            elseif errStr == "false" or errStr == "unknown" or errStr:sub(1, 8) == "unknown|" then
                                 failStats.generic = failStats.generic + 1
-                                -- Server return false tanpa pesan — generic rejection
-                                L("      → ⚠ Generic rejection (no error msg). Coba: cek pet equipped/favorited/listed manual")
+                                -- v8.79: server return false tanpa pesan — dump raw response untuk diagnose
+                                L("      → ⚠ Generic rejection. Kirim log ini ke developer biar bisa add handler.")
+                                -- Cek tool attributes biar tau ada flag aneh
+                                local bp = player:FindFirstChild("Backpack")
+                                if bp then
+                                    local tool = nil
+                                    for _, t in ipairs(bp:GetChildren()) do
+                                        if t:IsA("Tool") then
+                                            local u = t:GetAttribute("PET_UUID")
+                                            if u and tostring(u):gsub("[{}]","") == p.clean then
+                                                tool = t; break
+                                            end
+                                        end
+                                    end
+                                    if tool then
+                                        local attrs = {}
+                                        for k, v in pairs(tool:GetAttributes()) do
+                                            local vs = tostring(v):sub(1, 30)
+                                            table.insert(attrs, k.."="..vs)
+                                        end
+                                        L("      tool attrs: "..table.concat(attrs, ", "))
+                                    end
+                                end
                             else
                                 failStats.unknown = failStats.unknown + 1
                                 L("      → ⚠ Unknown error type — kasih log ini ke developer biar bisa di-handle")
