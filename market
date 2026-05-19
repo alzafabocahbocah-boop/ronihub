@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "UI 640x400 rectangle + smaller fonts"
+local VERSION_DATE = "SNIPE Manual: hide refresh/TP, bigger scroll"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2167,22 +2167,22 @@ snPad.PaddingTop = UDim.new(0, 14) snPad.PaddingLeft = UDim.new(0, 14)
 snPad.PaddingRight = UDim.new(0, 14) snPad.PaddingBottom = UDim.new(0, 14)
 snPad.Parent = snManualPanel
 
-lblOf(snManualPanel, "🎯  SNIPE MANUAL", 0, 0, 400, 28, C.accent, 18, FB)
-lblOf(snManualPanel, "Scan semua pet yang dijual di booth server ini.", 0, 32, 600, 20, C.textDim, 13)
+lblOf(snManualPanel, "🎯  SNIPE MANUAL", 0, 0, 400, 24, C.accent, 14, FB)
+lblOf(snManualPanel, "Scan semua pet — auto-refresh 10s", 0, 24, 600, 16, C.textDim, 10)
 
--- Refresh + TP + counter row
-snRefreshBtn = btnOf(snManualPanel, 0, 60, 120, 32, "🔄 MUAT ULANG", C.accent)
-snRefreshBtn.TextSize = 12
-local snTpBtn = btnOf(snManualPanel, 128, 60, 100, 32, "🗺 TP TRADE", C.success)
-snTpBtn.TextColor3 = Color3.new(1,1,1) snTpBtn.TextSize = 12
+-- v8.49: hide refresh+TP, counter inline
+snRefreshBtn = btnOf(snManualPanel, 0, 0, 1, 1, "🔄 MUAT ULANG", C.accent)
+snRefreshBtn.Visible = false
+local snTpBtn = btnOf(snManualPanel, 0, 0, 1, 1, "🗺 TP TRADE", C.success)
+snTpBtn.Visible = false
 snCountLbl = Instance.new("TextLabel")
-snCountLbl.Size = UDim2.new(1, -240, 0, 32) snCountLbl.Position = UDim2.new(0, 236, 0, 60)
+snCountLbl.Size = UDim2.new(1, 0, 0, 16) snCountLbl.Position = UDim2.new(0, 0, 0, 42)
 snCountLbl.BackgroundTransparency = 1
-snCountLbl.Text = "Klik MUAT ULANG buat scan"
-snCountLbl.TextColor3 = C.textDim snCountLbl.Font = FM snCountLbl.TextSize = 12
+snCountLbl.Text = "Loading scan..."
+snCountLbl.TextColor3 = C.success snCountLbl.Font = FM snCountLbl.TextSize = 10
 snCountLbl.TextXAlignment = Enum.TextXAlignment.Left snCountLbl.Parent = snManualPanel
 
--- TP handler (move character to Trade World camera point)
+-- TP handler (kept for compat — bisa di-call dari handler)
 snTpBtn.MouseButton1Click:Connect(function()
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -2192,7 +2192,6 @@ snTpBtn.MouseButton1Click:Connect(function()
     if tradeCam and tradeCam:IsA("BasePart") then
         hrp.CFrame = tradeCam.CFrame + Vector3.new(0, 5, 0)
     else
-        -- Fallback: TP to first booth
         local TW = Workspace:FindFirstChild("TradeWorld")
         local Booths = TW and TW:FindFirstChild("Booths")
         local firstBooth = Booths and Booths:GetChildren()[1]
@@ -2205,12 +2204,12 @@ end)
 
 -- Search box
 snSearch = Instance.new("TextBox")
-snSearch.Size = UDim2.new(1, 0, 0, 32) snSearch.Position = UDim2.new(0, 0, 0, 100)
+snSearch.Size = UDim2.new(1, 0, 0, 28) snSearch.Position = UDim2.new(0, 0, 0, 62)
 snSearch.BackgroundColor3 = C.input snSearch.BorderSizePixel = 0
 snSearch.Text = "" snSearch.TextColor3 = C.text
 snSearch.PlaceholderText = "🔍 search pet name or type..."
 snSearch.PlaceholderColor3 = C.textDim
-snSearch.Font = F snSearch.TextSize = 14
+snSearch.Font = F snSearch.TextSize = 12
 snSearch.ClearTextOnFocus = false snSearch.Parent = snManualPanel
 Instance.new("UICorner", snSearch).CornerRadius = UDim.new(0, 6)
 local snSearchPad = Instance.new("UIPadding")
@@ -2218,41 +2217,41 @@ snSearchPad.PaddingLeft = UDim.new(0, 12) snSearchPad.Parent = snSearch
 
 -- Filter chips row
 local snFilterFrame = Instance.new("Frame")
-snFilterFrame.Size = UDim2.new(1, 0, 0, 32) snFilterFrame.Position = UDim2.new(0, 0, 0, 140)
+snFilterFrame.Size = UDim2.new(1, 0, 0, 28) snFilterFrame.Position = UDim2.new(0, 0, 0, 96)
 snFilterFrame.BackgroundTransparency = 1 snFilterFrame.Parent = snManualPanel
 local snFilterLayout = Instance.new("UIListLayout") snFilterLayout.FillDirection = Enum.FillDirection.Horizontal
-snFilterLayout.Padding = UDim.new(0, 6) snFilterLayout.Parent = snFilterFrame
+snFilterLayout.Padding = UDim.new(0, 4) snFilterLayout.Parent = snFilterFrame
 
 local function makeFilterBox(parent, placeholder, w)
     local b = Instance.new("TextBox")
-    b.Size = UDim2.new(0, w or 70, 1, 0)
+    b.Size = UDim2.new(0, w or 60, 1, 0)
     b.BackgroundColor3 = C.input b.BorderSizePixel = 0
     b.Text = "" b.TextColor3 = C.text
     b.PlaceholderText = placeholder
     b.PlaceholderColor3 = C.textDim
-    b.Font = F b.TextSize = 12
+    b.Font = F b.TextSize = 11
     b.TextXAlignment = Enum.TextXAlignment.Center
     b.ClearTextOnFocus = false b.Parent = parent
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
     return b
 end
 
-snMinAge = makeFilterBox(snFilterFrame, "Age ≥", 70)
-snMaxAge = makeFilterBox(snFilterFrame, "Age ≤", 70)
-snMinKg = makeFilterBox(snFilterFrame, "KG ≥", 70)
-snMaxKg = makeFilterBox(snFilterFrame, "KG ≤", 70)
-snMinPrice = makeFilterBox(snFilterFrame, "Price ≥", 80)
-snMaxPrice = makeFilterBox(snFilterFrame, "Price ≤", 80)
+snMinAge = makeFilterBox(snFilterFrame, "Age ≥", 60)
+snMaxAge = makeFilterBox(snFilterFrame, "Age ≤", 60)
+snMinKg = makeFilterBox(snFilterFrame, "KG ≥", 60)
+snMaxKg = makeFilterBox(snFilterFrame, "KG ≤", 60)
+snMinPrice = makeFilterBox(snFilterFrame, "Price ≥", 70)
+snMaxPrice = makeFilterBox(snFilterFrame, "Price ≤", 70)
 local snResetBtn = Instance.new("TextButton")
-snResetBtn.Size = UDim2.new(0, 70, 1, 0) snResetBtn.AutoButtonColor = false
+snResetBtn.Size = UDim2.new(0, 60, 1, 0) snResetBtn.AutoButtonColor = false
 snResetBtn.BackgroundColor3 = C.danger
 snResetBtn.Text = "Reset" snResetBtn.TextColor3 = Color3.new(1,1,1)
-snResetBtn.Font = FB snResetBtn.TextSize = 12 snResetBtn.Parent = snFilterFrame
+snResetBtn.Font = FB snResetBtn.TextSize = 11 snResetBtn.Parent = snFilterFrame
 Instance.new("UICorner", snResetBtn).CornerRadius = UDim.new(0, 5)
 
 -- Table header
 local snHeader = Instance.new("Frame")
-snHeader.Size = UDim2.new(1, 0, 0, 24) snHeader.Position = UDim2.new(0, 0, 0, 182)
+snHeader.Size = UDim2.new(1, 0, 0, 22) snHeader.Position = UDim2.new(0, 0, 0, 134)
 snHeader.BackgroundColor3 = C.card snHeader.BorderSizePixel = 0
 snHeader.Parent = snManualPanel
 Instance.new("UICorner", snHeader).CornerRadius = UDim.new(0, 4)
@@ -2260,7 +2259,7 @@ local function snHdr(text, x, w)
     local l = Instance.new("TextLabel")
     l.Size = UDim2.new(w, 0, 1, 0) l.Position = UDim2.new(x, 4, 0, 0)
     l.BackgroundTransparency = 1 l.Text = text
-    l.TextColor3 = C.accent l.Font = FB l.TextSize = 11
+    l.TextColor3 = C.accent l.Font = FB l.TextSize = 10
     l.TextXAlignment = Enum.TextXAlignment.Left l.Parent = snHeader
 end
 snHdr("Pet Type", 0, 0.20)
@@ -2270,9 +2269,9 @@ snHdr("Owner", 0.44, 0.22)
 snHdr("Price", 0.66, 0.14)
 snHdr("Action", 0.80, 0.18)
 
--- Listings table
+-- Listings table (big now!)
 snScroll = Instance.new("ScrollingFrame")
-snScroll.Size = UDim2.new(1, 0, 1, -218) snScroll.Position = UDim2.new(0, 0, 0, 210)
+snScroll.Size = UDim2.new(1, 0, 1, -160) snScroll.Position = UDim2.new(0, 0, 0, 160)
 snScroll.BackgroundColor3 = C.card snScroll.BorderSizePixel = 0
 snScroll.ScrollBarThickness = 4 snScroll.Parent = snManualPanel
 Instance.new("UICorner", snScroll).CornerRadius = UDim.new(0, 8)
