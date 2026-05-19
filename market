@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.99"
-local VERSION_DATE = "Tab HOP SERVER + Player Blacklist (auto-hop kalo player tertentu join)"
+local VERSION = "8.100"
+local VERSION_DATE = "SEMUA mutasi = ×1.10 (samain kayak Everchanted) — konsisten sm inventory v4.2"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -312,9 +312,10 @@ do
         if not petData then return 0 end
         local base = petData.BaseWeight or 0
         local mut = petData.MutationType
+        -- v8.100: SEMUA mutasi = ×1.10 (user request — gak ada yg lebih kuat dari Everchanted)
         local mult = 1.0
-        if mut and BH.MUTATION_MULT[mut] then
-            mult = BH.MUTATION_MULT[mut]
+        if mut and mut ~= "" and mut ~= "None" then
+            mult = 1.10
         end
         return base * mult
     end
