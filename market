@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.77"
-local VERSION_DATE = "Global rate-limit pause + break-on-fail (fix 15-listing stuck)"
+local VERSION = "8.78"
+local VERSION_DATE = "Unlist ALL: rate-limit aware + fresh TBC fetch + detailed error log"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2266,6 +2266,7 @@ do
     end)
 
     -- v8.47: UNLIST ALL button — unlist semua listing di booth-mu
+    -- v8.78: rate-limit aware + fresh TBC fetch + detailed error log
     unlistAllBtn.MouseButton1Click:Connect(function()
         task.spawn(function()
             statusLbl.Text = "🔄 Fetching booth data..."
@@ -2277,10 +2278,19 @@ do
                 return
             end
 
-            local data = BH.getMyBoothData()
+            if not removeRE then
+                statusLbl.Text = "❌ removeRE gak ada"
+                statusLbl.TextColor3 = C.danger
+                L("[Unlist-ALL] ❌ removeRE not found, gak bisa unlist")
+                return
+            end
+
+            -- v8.78: FRESH fetch (jangan pake cache yang mungkin stale)
+            local data = BH.fetchBoothData(player)
             if not data or not data.Listings then
                 statusLbl.Text = "❌ Gak ada data booth"
                 statusLbl.TextColor3 = C.danger
+                L("[Unlist-ALL] ❌ TBC return no Listings")
                 return
             end
 
@@ -2293,14 +2303,29 @@ do
             if #allUuids == 0 then
                 statusLbl.Text = "ℹ Booth-mu kosong"
                 statusLbl.TextColor3 = C.textDim
+                L("[Unlist-ALL] booth kosong (0 listings di TBC)")
                 return
             end
 
+            L("[Unlist-ALL] start: "..#allUuids.." listings")
             statusLbl.Text = "🗑️ Unlist "..#allUuids.." pet..."
             statusLbl.TextColor3 = C.accent
 
+            -- v8.78: rate-limit handling
+            local globalCooldownUntil = 0
             local removed = 0
+            local rateFails = 0
+
             for i, listingUuid in ipairs(allUuids) do
+                -- Check global cooldown sebelum tiap pet
+                if tick() < globalCooldownUntil then
+                    local waitLeft = math.ceil(globalCooldownUntil - tick())
+                    L("[Unlist-ALL] ⏸ rate-limit pause "..waitLeft.."s sebelum unlist ke-"..i)
+                    statusLbl.Text = "⏸ Rate limited — wait "..waitLeft.."s"
+                    statusLbl.TextColor3 = C.danger
+                    task.wait(waitLeft + 1)
+                end
+
                 statusLbl.Text = string.format("🗑️ [%d/%d] unlisting...", i, #allUuids)
 
                 local itemId = data.Listings[listingUuid] and data.Listings[listingUuid].ItemId
@@ -2319,22 +2344,56 @@ do
                 end
 
                 local success = false
+                local lastErr = nil
+                local isRateLimit = false
+
                 for _, a in ipairs(attempts) do
                     local ok, ret = pcall(function() return removeRE:InvokeServer(a.arg) end)
                     if ok and ret == true then
                         success = true
-                        L("[Pantau-ALL] ✅ "..a.label.." → "..tostring(a.arg):sub(1,20))
+                        L("[Unlist-ALL] ["..i.."] ✅ "..a.label.." → "..tostring(a.arg):sub(1,16))
                         break
+                    end
+                    -- v8.78: track last error for diagnostics
+                    if ok then
+                        lastErr = tostring(ret)
+                    else
+                        lastErr = "pcall_fail:"..tostring(ret)
+                    end
+                    -- v8.78: detect rate-limit in error message
+                    local lowErr = (lastErr or ""):lower()
+                    if lowErr:find("please wait") or lowErr:find("cooldown") or lowErr:find("too fast") then
+                        isRateLimit = true
+                        break  -- stop trying other formats, all akan fail
                     end
                     task.wait(0.2)
                 end
 
-                if success then removed = removed + 1 end
+                if success then
+                    removed = removed + 1
+                    rateFails = 0  -- reset on success
+                elseif isRateLimit then
+                    rateFails = rateFails + 1
+                    -- Exponential backoff: 30s → 60s → 90s → 120s
+                    local backoff = math.min(30 + (rateFails - 1) * 30, 120)
+                    globalCooldownUntil = tick() + backoff
+                    L(string.format("[Unlist-ALL] ⏳ [%d] RATE LIMIT (hit #%d) → wait %ds | err: %s",
+                        i, rateFails, backoff, tostring(lastErr):sub(1, 50)))
+                    -- Don't increment i — retry this same pet after cooldown
+                    -- (Lua for doesn't allow easy retry, so we just continue; might miss this pet
+                    --  but next button click + fresh TBC fetch will retry)
+                else
+                    L(string.format("[Unlist-ALL] [%d] ❌ all 4 formats failed | err: %s",
+                        i, tostring(lastErr):sub(1, 60)))
+                end
+
                 task.wait(0.3)
             end
 
-            statusLbl.Text = "✅ Unlisted "..removed.." / "..#allUuids
-            statusLbl.TextColor3 = C.success
+            local color = removed == #allUuids and C.success or (removed > 0 and C.accent or C.danger)
+            statusLbl.Text = string.format("✅ %d / %d unlisted", removed, #allUuids)
+            statusLbl.TextColor3 = color
+            L("[Unlist-ALL] done: "..removed.."/"..#allUuids.." | failed: "..(#allUuids - removed))
             task.wait(1)
             refreshList()
         end)
