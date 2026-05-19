@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.61"
-local VERSION_DATE = "marker pindah ke right side"
+local VERSION = "8.62"
+local VERSION_DATE = "[pcall snSubBtns Manual]"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -487,7 +487,7 @@ BH.stageMarker = function(num, color, text, y)
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.61 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.62 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -4890,15 +4890,22 @@ do
     BH.stageMarker(3531, Color3.fromRGB(80, 220, 100), "[3E3a] after auto-refresh spawn", 305)
 
     -- v8.47: auto-refresh sekali pas pertama buka SNIPE tab
-    snSubBtns.Manual.btn.MouseButton1Click:Connect(function()
-        task.wait(0.1)
-        if #scanCache == 0 then
-            task.spawn(function()
-                scanBoothListings()
-                renderSnipe()
-            end)
-        end
+    local ok, err = pcall(function()
+        snSubBtns.Manual.btn.MouseButton1Click:Connect(function()
+            task.wait(0.1)
+            if #scanCache == 0 then
+                task.spawn(function()
+                    scanBoothListings()
+                    renderSnipe()
+                end)
+            end
+        end)
     end)
+    if not ok then
+        BH.stageMarker(35311, Color3.fromRGB(200, 0, 0), "[3E3a ERR] "..tostring(err):sub(1, 40))
+    else
+        BH.stageMarker(35311, Color3.fromRGB(80, 220, 100), "[3E3a] Manual ok")
+    end
     BH.stageMarker(3532, Color3.fromRGB(120, 220, 100), "[3E3b] after Manual click", 305)
 
     -- v8.47: BUY TAB
