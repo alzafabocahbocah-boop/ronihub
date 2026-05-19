@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "Fix claim spam: TBC priority check + travel to garden"
+local VERSION_DATE = "Smaller UI width (820→540) for mobile"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -329,7 +329,7 @@ local F = Enum.Font.Gotham
 
 -- ===== MAIN FRAME =====
 local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 820, 0, 560) main.Position = UDim2.new(0.5, -410, 0.5, -280)
+main.Size = UDim2.new(0, 540, 0, 560) main.Position = UDim2.new(0.5, -270, 0.5, -280)
 main.BackgroundColor3 = C.bg main.BorderSizePixel = 0
 main.Active = true main.Draggable = true main.Parent = gui
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
@@ -1385,9 +1385,12 @@ end
 -- MIGRATE CARD
 local migCard = makeCard(miscPanel, 86)
 lblOf(migCard, "➡  AUTO MIGRATE", 14, 10, 250, 22, C.accent, 14, FB)
-lblOf(migCard, "Pindah ke booth front row kalo kosong", 14, 32, 400, 18, C.textDim, 11)
-local autoMigState = true
-local autoMigBtn = btnOf(migCard, 14, 54, 140, 26, "🤖 Auto: ON", C.success)
+lblOf(migCard, "Pindah ke booth front row kalo kosong (DEFAULT OFF)", 14, 32, 400, 18, C.textDim, 11)
+-- v8.49: default OFF (user complain auto-pindah booth tanpa diminta) + persist state
+local autoMigState = (BH.marketState and BH.marketState.autoMigrate) == true
+local autoMigBtn = btnOf(migCard, 14, 54, 140, 26,
+    autoMigState and "🤖 Auto: ON" or "🤖 Auto: OFF",
+    autoMigState and C.success or C.danger)
 local migNowBtn = btnOf(migCard, 164, 54, 140, 26, "➡ MIGRATE NOW", C.accent)
 
 -- SKIN CARD
@@ -4069,6 +4072,12 @@ autoMigBtn.MouseButton1Click:Connect(function()
     autoMigState = not autoMigState
     autoMigBtn.Text = autoMigState and "🤖 Auto: ON" or "🤖 Auto: OFF"
     autoMigBtn.BackgroundColor3 = autoMigState and C.success or C.danger
+    -- v8.49: persist preferensi user (state file)
+    if BH.marketState then
+        BH.marketState.autoMigrate = autoMigState
+        BH.saveMarketState(BH.marketState)
+    end
+    L("[Auto-Migrate] "..(autoMigState and "enabled" or "disabled"))
 end)
 
 local function detectRows()
