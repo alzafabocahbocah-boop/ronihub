@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.58"
-local VERSION_DATE = "[3A-3F] narrow halt 3236-4936"
+local VERSION = "8.59"
+local VERSION_DATE = "[3E1-3E6] inside setupSnipeScanner"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -485,7 +485,7 @@ BH.stageMarker = function(num, color, text, y)
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.58 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.59 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -4853,6 +4853,7 @@ local function renderBuy()
 end
 
 do
+    BH.stageMarker(351, Color3.fromRGB(0, 200, 100), "[3E1] do-block start", 285)
     snRefreshBtn.MouseButton1Click:Connect(function()
         snCountLbl.Text = "Scanning..."
         task.spawn(function()
@@ -4860,9 +4861,11 @@ do
             renderSnipe()
         end)
     end)
+    BH.stageMarker(352, Color3.fromRGB(0, 220, 100), "[3E2] after snRefreshBtn", 295)
     for _, b in ipairs({snSearch, snMinAge, snMaxAge, snMinKg, snMaxKg, snMinPrice, snMaxPrice}) do
         b:GetPropertyChangedSignal("Text"):Connect(renderSnipe)
     end
+    BH.stageMarker(353, Color3.fromRGB(50, 220, 100), "[3E3] after filter loop", 305)
 
     -- v8.47: auto-refresh every 10s
     task.spawn(function()
@@ -4895,6 +4898,7 @@ do
     end)
 
     -- v8.47: BUY TAB
+    BH.stageMarker(354, Color3.fromRGB(100, 220, 0), "[3E4] before snBuy connects", 315)
     snBuy.refresh.MouseButton1Click:Connect(function()
         snBuy.countLbl.Text = "Scanning..."
         task.spawn(function()
@@ -4902,8 +4906,10 @@ do
             renderBuy()
         end)
     end)
+    BH.stageMarker(355, Color3.fromRGB(150, 220, 0), "[3E5] after snBuy.refresh", 315)
     snBuy.search:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
     snBuy.maxPrice:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
+    BH.stageMarker(356, Color3.fromRGB(200, 220, 0), "[3E6] after snBuy listeners", 315)
 
     snSubBtns.Buy.btn.MouseButton1Click:Connect(function()
         task.wait(0.1)
