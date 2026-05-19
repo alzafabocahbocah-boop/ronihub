@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "Sub-tabs scale-fit + 540px mobile"
+local VERSION_DATE = "Revert to 820 width (match NODE HUB reference)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -329,7 +329,7 @@ local F = Enum.Font.Gotham
 
 -- ===== MAIN FRAME =====
 local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 540, 0, 560) main.Position = UDim2.new(0.5, -270, 0.5, -280)
+main.Size = UDim2.new(0, 820, 0, 560) main.Position = UDim2.new(0.5, -410, 0.5, -280)
 main.BackgroundColor3 = C.bg main.BorderSizePixel = 0
 main.Active = true main.Draggable = true main.Parent = gui
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
@@ -495,8 +495,7 @@ end
 
 local function makeSubBtn(name)
     local b = Instance.new("TextButton")
-    -- v8.49: scale-based size auto-fit (4 tabs muat di any width)
-    b.Size = UDim2.new(0.245, -6, 1, 0) b.AutoButtonColor = false
+    b.Size = UDim2.new(0, 130, 1, 0) b.AutoButtonColor = false
     b.BackgroundColor3 = C.card b.BorderSizePixel = 0
     b.Text = "" b.Parent = subTabBar
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
@@ -509,7 +508,7 @@ local function makeSubBtn(name)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 1, 0) lbl.BackgroundTransparency = 1
     lbl.Text = name lbl.TextColor3 = C.textDim
-    lbl.Font = FB lbl.TextSize = 13
+    lbl.Font = FB lbl.TextSize = 15
     lbl.TextStrokeTransparency = 1 lbl.Parent = b
 
     subBtns[name] = {btn=b, stroke=stroke, lbl=lbl}
