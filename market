@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.96"
-local VERSION_DATE = "SNIPE tabs: hapus Buy, urutan Manual→Otomatis→History (snipe log)"
+local VERSION = "8.99"
+local VERSION_DATE = "Tab HOP SERVER + Player Blacklist (auto-hop kalo player tertentu join)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -516,7 +516,7 @@ logoLbl.TextXAlignment = Enum.TextXAlignment.Left logoLbl.Parent = titleBar
 local titleLbl = Instance.new("TextLabel")
 titleLbl.Size = UDim2.new(0.7, 0, 1, 0) titleLbl.Position = UDim2.new(0, 50, 0, 0)
 titleLbl.BackgroundTransparency = 1
-titleLbl.Text = "| ZENX HUB | Grow A Garden MARKET | v"..VERSION.." | "..VERSION_DATE
+titleLbl.Text = "ZENX MARKET"
 titleLbl.TextColor3 = C.accent titleLbl.Font = FB titleLbl.TextSize = 13
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left titleLbl.Parent = titleBar
 
@@ -620,6 +620,7 @@ end
 makeSbBtn("MARKET")
 makeSbBtn("LIST HARGA")
 makeSbBtn("SNIPE")
+makeSbBtn("HOP SERVER")
 makeSbBtn("GARDEN")
 
 -- ===== PANELS =====
@@ -633,16 +634,18 @@ end
 local marketPanel = makePanel("MARKET")
 local pricePanel = makePanel("LIST HARGA")
 local snipePanel = makePanel("SNIPE")
+local hopServerPanel = makePanel("HOP SERVER")
 local gardenPanel = makePanel("GARDEN")
 BH.gardenPanel = gardenPanel  -- store for cross-scope access
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
 if isGardenServer then
-    -- Hide MARKET/LIST HARGA/SNIPE tabs, show GARDEN by default
+    -- Hide MARKET/LIST HARGA/SNIPE/HOP SERVER tabs, show GARDEN by default
     sbBtns.MARKET.btn.Visible = false
     sbBtns["LIST HARGA"].btn.Visible = false
     sbBtns.SNIPE.btn.Visible = false
+    sbBtns["HOP SERVER"].btn.Visible = false
     marketPanel.Visible = false
     gardenPanel.Visible = true
     -- override default tab visual ke GARDEN
@@ -5282,6 +5285,250 @@ local function hopToBestServer()
 end
 
 hopNowBtn.MouseButton1Click:Connect(function() task.spawn(hopToBestServer) end)
+
+-- v8.99: ===== HOP SERVER TAB — PLAYER BLACKLIST =====
+-- Auto-hop ke server lain kalo ada player blacklisted di server ini
+BH.hopBlacklist = BH.hopBlacklist or {
+    names = {},     -- list of lowercase usernames
+    active = false, -- enable auto-hop
+}
+-- Restore from state
+if BH.marketState and BH.marketState.hopBlacklist then
+    BH.hopBlacklist.names = BH.marketState.hopBlacklist.names or {}
+    BH.hopBlacklist.active = BH.marketState.hopBlacklist.active or false
+end
+
+local function saveHopBlacklist()
+    if not BH.marketState then return end
+    BH.marketState.hopBlacklist = {
+        names = BH.hopBlacklist.names,
+        active = BH.hopBlacklist.active,
+    }
+    pcall(function() BH.saveMarketState(BH.marketState) end)
+end
+
+do
+    local pad = Instance.new("UIPadding")
+    pad.PaddingTop = UDim.new(0, 12) pad.PaddingLeft = UDim.new(0, 14)
+    pad.PaddingRight = UDim.new(0, 14) pad.PaddingBottom = UDim.new(0, 14)
+    pad.Parent = hopServerPanel
+
+    -- Title
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 26) title.Position = UDim2.new(0, 0, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "🚫 PLAYER BLACKLIST"
+    title.TextColor3 = C.accent title.Font = FB title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = hopServerPanel
+
+    local desc = Instance.new("TextLabel")
+    desc.Size = UDim2.new(1, 0, 0, 18) desc.Position = UDim2.new(0, 0, 0, 28)
+    desc.BackgroundTransparency = 1
+    desc.Text = "Kalo ada player di list ini join → auto hop ke server lain"
+    desc.TextColor3 = C.textDim desc.Font = F desc.TextSize = 11
+    desc.TextXAlignment = Enum.TextXAlignment.Left
+    desc.Parent = hopServerPanel
+
+    -- Input row + ADD button
+    local inputBox = Instance.new("TextBox")
+    inputBox.Size = UDim2.new(0.7, -4, 0, 30) inputBox.Position = UDim2.new(0, 0, 0, 54)
+    inputBox.BackgroundColor3 = C.input inputBox.BorderSizePixel = 0
+    inputBox.Text = "" inputBox.TextColor3 = C.text
+    inputBox.PlaceholderText = "Username yang mau di-blacklist..."
+    inputBox.PlaceholderColor3 = C.textDim
+    inputBox.Font = F inputBox.TextSize = 12
+    inputBox.TextXAlignment = Enum.TextXAlignment.Left
+    inputBox.ClearTextOnFocus = false
+    inputBox.Parent = hopServerPanel
+    Instance.new("UICorner", inputBox).CornerRadius = UDim.new(0, 5)
+    local inputPad = Instance.new("UIPadding")
+    inputPad.PaddingLeft = UDim.new(0, 10) inputPad.Parent = inputBox
+
+    local addBtn = Instance.new("TextButton")
+    addBtn.Size = UDim2.new(0.3, 0, 0, 30) addBtn.Position = UDim2.new(0.7, 4, 0, 54)
+    addBtn.BackgroundColor3 = C.accent addBtn.BorderSizePixel = 0
+    addBtn.Text = "+ ADD" addBtn.TextColor3 = Color3.fromRGB(20,20,20)
+    addBtn.Font = FB addBtn.TextSize = 12
+    addBtn.AutoButtonColor = false addBtn.Parent = hopServerPanel
+    Instance.new("UICorner", addBtn).CornerRadius = UDim.new(0, 5)
+
+    -- Toggle: Auto-hop active
+    local toggleRow = Instance.new("Frame")
+    toggleRow.Size = UDim2.new(1, 0, 0, 32) toggleRow.Position = UDim2.new(0, 0, 0, 92)
+    toggleRow.BackgroundTransparency = 1 toggleRow.Parent = hopServerPanel
+    local toggleLbl = Instance.new("TextLabel")
+    toggleLbl.Size = UDim2.new(1, -56, 1, 0) toggleLbl.BackgroundTransparency = 1
+    toggleLbl.Text = "Auto-hop kalo player blacklisted detected"
+    toggleLbl.TextColor3 = C.text toggleLbl.Font = FM toggleLbl.TextSize = 12
+    toggleLbl.TextXAlignment = Enum.TextXAlignment.Left toggleLbl.Parent = toggleRow
+    local tBg = Instance.new("Frame")
+    tBg.Size = UDim2.new(0, 44, 0, 22) tBg.Position = UDim2.new(1, -44, 0.5, -11)
+    tBg.BackgroundColor3 = BH.hopBlacklist.active and C.accent or C.input
+    tBg.BorderSizePixel = 0 tBg.Parent = toggleRow
+    Instance.new("UICorner", tBg).CornerRadius = UDim.new(1, 0)
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 18, 0, 18)
+    knob.Position = BH.hopBlacklist.active and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+    knob.BackgroundColor3 = Color3.new(1,1,1) knob.BorderSizePixel = 0 knob.Parent = tBg
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(1, 0, 1, 0) toggleBtn.BackgroundTransparency = 1
+    toggleBtn.Text = "" toggleBtn.AutoButtonColor = false toggleBtn.Parent = tBg
+    toggleBtn.MouseButton1Click:Connect(function()
+        BH.hopBlacklist.active = not BH.hopBlacklist.active
+        tBg.BackgroundColor3 = BH.hopBlacklist.active and C.accent or C.input
+        knob.Position = BH.hopBlacklist.active and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+        saveHopBlacklist()
+        L("[Blacklist] auto-hop: "..(BH.hopBlacklist.active and "ON" or "OFF"))
+    end)
+
+    -- Status label
+    local statusLbl = Instance.new("TextLabel")
+    statusLbl.Size = UDim2.new(1, 0, 0, 18) statusLbl.Position = UDim2.new(0, 0, 0, 128)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.Text = ""
+    statusLbl.TextColor3 = C.textDim statusLbl.Font = F statusLbl.TextSize = 10
+    statusLbl.TextXAlignment = Enum.TextXAlignment.Left statusLbl.Parent = hopServerPanel
+
+    -- Blacklist scroll
+    local listScroll = Instance.new("ScrollingFrame")
+    listScroll.Size = UDim2.new(1, 0, 1, -156)
+    listScroll.Position = UDim2.new(0, 0, 0, 152)
+    listScroll.BackgroundColor3 = C.card listScroll.BorderSizePixel = 0
+    listScroll.ScrollBarThickness = 4 listScroll.ScrollBarImageColor3 = C.accent
+    listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    listScroll.Parent = hopServerPanel
+    Instance.new("UICorner", listScroll).CornerRadius = UDim.new(0, 6)
+    local listLayout = Instance.new("UIListLayout") listLayout.Padding = UDim.new(0, 4)
+    listLayout.Parent = listScroll
+    local listPad = Instance.new("UIPadding")
+    listPad.PaddingTop = UDim.new(0, 4) listPad.PaddingLeft = UDim.new(0, 4)
+    listPad.PaddingRight = UDim.new(0, 4) listPad.Parent = listScroll
+
+    local function rebuildBlacklist()
+        for _, c in ipairs(listScroll:GetChildren()) do
+            if c:IsA("Frame") then c:Destroy() end
+        end
+        if #BH.hopBlacklist.names == 0 then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.new(1, -8, 0, 40) empty.BackgroundTransparency = 1
+            empty.Text = "(belum ada player di blacklist)"
+            empty.TextColor3 = C.textDim empty.Font = F empty.TextSize = 11
+            empty.TextXAlignment = Enum.TextXAlignment.Center
+            empty.Parent = listScroll
+            listScroll.CanvasSize = UDim2.new(0, 0, 0, 40)
+            statusLbl.Text = "Blacklist kosong"
+            return
+        end
+        for idx, name in ipairs(BH.hopBlacklist.names) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, -8, 0, 30)
+            row.BackgroundColor3 = C.input row.BorderSizePixel = 0
+            row.Parent = listScroll
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
+
+            local nameLbl = Instance.new("TextLabel")
+            nameLbl.Size = UDim2.new(1, -38, 1, 0) nameLbl.Position = UDim2.new(0, 10, 0, 0)
+            nameLbl.BackgroundTransparency = 1
+            nameLbl.Text = "🚫 "..name
+            nameLbl.TextColor3 = C.text nameLbl.Font = FM nameLbl.TextSize = 12
+            nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+            nameLbl.Parent = row
+
+            local delBtn = Instance.new("TextButton")
+            delBtn.Size = UDim2.new(0, 24, 0, 22)
+            delBtn.Position = UDim2.new(1, -28, 0.5, -11)
+            delBtn.BackgroundColor3 = C.danger
+            delBtn.Text = "✕" delBtn.TextColor3 = Color3.new(1,1,1)
+            delBtn.Font = FB delBtn.TextSize = 11
+            delBtn.BorderSizePixel = 0 delBtn.Parent = row
+            Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 4)
+            delBtn.MouseButton1Click:Connect(function()
+                table.remove(BH.hopBlacklist.names, idx)
+                saveHopBlacklist()
+                rebuildBlacklist()
+            end)
+        end
+        listScroll.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 8)
+        statusLbl.Text = #BH.hopBlacklist.names.." player blacklisted"
+    end
+
+    addBtn.MouseButton1Click:Connect(function()
+        local name = inputBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
+        if name == "" then
+            statusLbl.Text = "❌ ketik username dulu"
+            statusLbl.TextColor3 = C.danger
+            return
+        end
+        -- Cek duplikat (case-insensitive)
+        local lowName = name:lower()
+        for _, existing in ipairs(BH.hopBlacklist.names) do
+            if existing:lower() == lowName then
+                statusLbl.Text = "❌ "..name.." udah ada di blacklist"
+                statusLbl.TextColor3 = C.danger
+                return
+            end
+        end
+        table.insert(BH.hopBlacklist.names, name)
+        saveHopBlacklist()
+        inputBox.Text = ""
+        rebuildBlacklist()
+        statusLbl.Text = "✅ "..name.." added"
+        statusLbl.TextColor3 = C.success
+    end)
+
+    rebuildBlacklist()
+end
+
+-- v8.99: Background watcher — check current players + listen PlayerAdded
+local function checkBlacklistedInServer()
+    if not BH.hopBlacklist.active then return end
+    if #BH.hopBlacklist.names == 0 then return end
+    -- Build lookup set
+    local lookup = {}
+    for _, n in ipairs(BH.hopBlacklist.names) do
+        lookup[n:lower()] = n
+    end
+    for _, pp in ipairs(Players:GetPlayers()) do
+        if pp ~= player then
+            local origName = lookup[pp.Name:lower()] or lookup[(pp.DisplayName or ""):lower()]
+            if origName then
+                L("[Blacklist] 🚫 DETECTED: "..pp.Name.." matches blacklist '"..origName.."' → HOP NOW")
+                task.spawn(hopToBestServer)
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- Initial check (10s after load — biar player udah replicate)
+task.spawn(function()
+    task.wait(10)
+    pcall(checkBlacklistedInServer)
+end)
+
+-- PlayerAdded listener — instant detect saat ada yang join
+Players.PlayerAdded:Connect(function(pp)
+    task.wait(1)  -- wait for full player data
+    if not BH.hopBlacklist.active or #BH.hopBlacklist.names == 0 then return end
+    for _, n in ipairs(BH.hopBlacklist.names) do
+        if pp.Name:lower() == n:lower() or (pp.DisplayName or ""):lower() == n:lower() then
+            L("[Blacklist] 🚫 "..pp.Name.." JOINED — blacklisted, HOP NOW")
+            pcall(hopToBestServer)
+            return
+        end
+    end
+end)
+
+-- Periodic re-check tiap 30s (safety net kalo PlayerAdded miss)
+task.spawn(function()
+    while gui.Parent do
+        task.wait(30)
+        pcall(checkBlacklistedInServer)
+    end
+end)
 
 -- Scan players button
 hopScanBtn.MouseButton1Click:Connect(function()
