@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "Listing tab scrollable + SNIPE sub-tabs scale-fit"
+local VERSION_DATE = "UI 640x400 rectangle + smaller fonts"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -329,7 +329,7 @@ local F = Enum.Font.Gotham
 
 -- ===== MAIN FRAME =====
 local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 500, 0, 350) main.Position = UDim2.new(0.5, -250, 0.5, -175)
+main.Size = UDim2.new(0, 640, 0, 400) main.Position = UDim2.new(0.5, -320, 0.5, -200)
 main.BackgroundColor3 = C.bg main.BorderSizePixel = 0
 main.Active = true main.Draggable = true main.Parent = gui
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
@@ -343,14 +343,14 @@ titleBar.Size = UDim2.new(1, 0, 0, 44) titleBar.BackgroundTransparency = 1 title
 local logoLbl = Instance.new("TextLabel")
 logoLbl.Size = UDim2.new(0, 60, 1, 0) logoLbl.Position = UDim2.new(0, 16, 0, 0)
 logoLbl.BackgroundTransparency = 1 logoLbl.Text = "⚡"
-logoLbl.TextColor3 = C.accent logoLbl.Font = FB logoLbl.TextSize = 24
+logoLbl.TextColor3 = C.accent logoLbl.Font = FB logoLbl.TextSize = 18
 logoLbl.TextXAlignment = Enum.TextXAlignment.Left logoLbl.Parent = titleBar
 
 local titleLbl = Instance.new("TextLabel")
 titleLbl.Size = UDim2.new(0.7, 0, 1, 0) titleLbl.Position = UDim2.new(0, 50, 0, 0)
 titleLbl.BackgroundTransparency = 1
 titleLbl.Text = "| ZENX HUB | Grow A Garden MARKET | v"..VERSION.." | "..VERSION_DATE
-titleLbl.TextColor3 = C.accent titleLbl.Font = FB titleLbl.TextSize = 16
+titleLbl.TextColor3 = C.accent titleLbl.Font = FB titleLbl.TextSize = 13
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left titleLbl.Parent = titleBar
 
 local closeBtn = Instance.new("TextButton")
@@ -421,7 +421,7 @@ local function makeSbBtn(name, comingSoon)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -16, 1, 0) lbl.Position = UDim2.new(0, 12, 0, 0)
     lbl.BackgroundTransparency = 1 lbl.Text = name
-    lbl.TextColor3 = C.textDim lbl.Font = FB lbl.TextSize = 13
+    lbl.TextColor3 = C.textDim lbl.Font = FB lbl.TextSize = 12
     lbl.TextXAlignment = Enum.TextXAlignment.Left lbl.Parent = b
 
     if comingSoon then
@@ -509,7 +509,7 @@ local function makeSubBtn(name)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 1, 0) lbl.BackgroundTransparency = 1
     lbl.Text = name lbl.TextColor3 = C.textDim
-    lbl.Font = FB lbl.TextSize = 13
+    lbl.Font = FB lbl.TextSize = 12
     lbl.TextStrokeTransparency = 1 lbl.Parent = b
 
     subBtns[name] = {btn=b, stroke=stroke, lbl=lbl}
@@ -549,7 +549,7 @@ do
     scroll.BorderSizePixel = 0
     scroll.ScrollBarThickness = 6
     scroll.ScrollBarImageColor3 = C.accent
-    scroll.CanvasSize = UDim2.new(0, 0, 0, 460)  -- enough for all listing content
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 340)
     scroll.Parent = outer
     listingPanel = scroll
 end
@@ -578,7 +578,7 @@ local function lblOf(parent, text, x, y, w, h, color, size, font)
     l.Size = UDim2.new(0, w, 0, h or 22) l.Position = UDim2.new(0, x, 0, y)
     l.BackgroundTransparency = 1 l.Text = text
     l.TextColor3 = color or C.text
-    l.Font = font or FM l.TextSize = size or 13
+    l.Font = font or FM l.TextSize = size or 12
     l.TextXAlignment = Enum.TextXAlignment.Left l.Parent = parent
     return l
 end
@@ -663,61 +663,89 @@ typeDropArrow.BackgroundTransparency = 1 typeDropArrow.Text = "▼"
 typeDropArrow.TextColor3 = C.accent typeDropArrow.Font = FB typeDropArrow.TextSize = 13
 typeDropArrow.Parent = typeDrop
 
--- Inputs row: Min KG | Max KG | Price | Max List | ADD button
-lblOf(listingPanel, "MIN KG", 0, 232, 70, 18, C.textDim, 12, FB)
-local minKgBox = boxOf(listingPanel, 0, 252, 90, 34, "")
-minKgBox.PlaceholderText = "0"
-minKgBox.TextSize = 14
-lblOf(listingPanel, "MAX KG", 100, 232, 70, 18, C.textDim, 12, FB)
-local maxKgBox = boxOf(listingPanel, 100, 252, 90, 34, "")
-maxKgBox.PlaceholderText = "∞"
-maxKgBox.TextSize = 14
-lblOf(listingPanel, "PRICE", 200, 232, 70, 18, C.textDim, 12, FB)
-local priceBox = boxOf(listingPanel, 200, 252, 90, 34, "")
-priceBox.PlaceholderText = "100"
-priceBox.TextSize = 14
-lblOf(listingPanel, "MAX LIST", 300, 232, 80, 18, C.textDim, 12, FB)
-local maxListBox = boxOf(listingPanel, 300, 252, 90, 34, "")
-maxListBox.PlaceholderText = "∞"
-maxListBox.TextSize = 14
-local addRuleBtn = btnOf(listingPanel, 400, 252, 110, 34, "+ ADD", C.accent)
-addRuleBtn.TextSize = 14
+-- v8.49: 1-row compact (5 item scale-fit) — MIN KG | MAX KG | PRICE | MAX LIST | + ADD
+lblOf(listingPanel, "MIN KG", 0, 230, 70, 14, C.textDim, 10, FB)
+local minKgBox = Instance.new("TextBox")
+minKgBox.Size = UDim2.new(0.18, -3, 0, 30) minKgBox.Position = UDim2.new(0, 0, 0, 248)
+minKgBox.BackgroundColor3 = C.input minKgBox.BorderSizePixel = 0
+minKgBox.Text = "" minKgBox.TextColor3 = C.text
+minKgBox.PlaceholderText = "0" minKgBox.PlaceholderColor3 = C.textDim
+minKgBox.Font = F minKgBox.TextSize = 12
+minKgBox.ClearTextOnFocus = false minKgBox.Parent = listingPanel
+Instance.new("UICorner", minKgBox).CornerRadius = UDim.new(0, 5)
 
--- Inputs row 2: Delay | Retry (MAX dipindah jadi per-rule)
-lblOf(listingPanel, "DELAY", 0, 298, 60, 18, C.textDim, 12, FB)
-local delayBox = boxOf(listingPanel, 0, 318, 100, 34, "2")
-delayBox.TextSize = 15
-lblOf(listingPanel, "RETRY", 112, 298, 60, 18, C.textDim, 12, FB)
-local retryBox = boxOf(listingPanel, 112, 318, 100, 34, "2")
-retryBox.TextSize = 15
+lblOf(listingPanel, "MAX KG", 0, 230, 70, 14, C.textDim, 10, FB).Position = UDim2.new(0.19, 0, 0, 230)
+local maxKgBox = Instance.new("TextBox")
+maxKgBox.Size = UDim2.new(0.18, -3, 0, 30) maxKgBox.Position = UDim2.new(0.19, 0, 0, 248)
+maxKgBox.BackgroundColor3 = C.input maxKgBox.BorderSizePixel = 0
+maxKgBox.Text = "" maxKgBox.TextColor3 = C.text
+maxKgBox.PlaceholderText = "∞" maxKgBox.PlaceholderColor3 = C.textDim
+maxKgBox.Font = F maxKgBox.TextSize = 12
+maxKgBox.ClearTextOnFocus = false maxKgBox.Parent = listingPanel
+Instance.new("UICorner", maxKgBox).CornerRadius = UDim.new(0, 5)
 
--- START toggle button (bottom-left, no separate STOP)
+lblOf(listingPanel, "PRICE", 0, 230, 70, 14, C.textDim, 10, FB).Position = UDim2.new(0.38, 0, 0, 230)
+local priceBox = Instance.new("TextBox")
+priceBox.Size = UDim2.new(0.18, -3, 0, 30) priceBox.Position = UDim2.new(0.38, 0, 0, 248)
+priceBox.BackgroundColor3 = C.input priceBox.BorderSizePixel = 0
+priceBox.Text = "" priceBox.TextColor3 = C.text
+priceBox.PlaceholderText = "100" priceBox.PlaceholderColor3 = C.textDim
+priceBox.Font = F priceBox.TextSize = 12
+priceBox.ClearTextOnFocus = false priceBox.Parent = listingPanel
+Instance.new("UICorner", priceBox).CornerRadius = UDim.new(0, 5)
+
+lblOf(listingPanel, "MAX LIST", 0, 230, 70, 14, C.textDim, 10, FB).Position = UDim2.new(0.57, 0, 0, 230)
+local maxListBox = Instance.new("TextBox")
+maxListBox.Size = UDim2.new(0.18, -3, 0, 30) maxListBox.Position = UDim2.new(0.57, 0, 0, 248)
+maxListBox.BackgroundColor3 = C.input maxListBox.BorderSizePixel = 0
+maxListBox.Text = "" maxListBox.TextColor3 = C.text
+maxListBox.PlaceholderText = "∞" maxListBox.PlaceholderColor3 = C.textDim
+maxListBox.Font = F maxListBox.TextSize = 12
+maxListBox.ClearTextOnFocus = false maxListBox.Parent = listingPanel
+Instance.new("UICorner", maxListBox).CornerRadius = UDim.new(0, 5)
+
+local addRuleBtn = Instance.new("TextButton")
+addRuleBtn.Size = UDim2.new(0.24, -3, 0, 30) addRuleBtn.Position = UDim2.new(0.76, 0, 0, 248)
+addRuleBtn.BackgroundColor3 = C.accent addRuleBtn.AutoButtonColor = true
+addRuleBtn.Text = "+ ADD" addRuleBtn.TextColor3 = Color3.new(0, 0, 0)
+addRuleBtn.Font = FB addRuleBtn.TextSize = 12
+addRuleBtn.BorderSizePixel = 0 addRuleBtn.Parent = listingPanel
+Instance.new("UICorner", addRuleBtn).CornerRadius = UDim.new(0, 6)
+
+-- v8.49: DELAY/RETRY hidden (default 2 & 2, akses via getters)
+local delayBox = Instance.new("TextBox")
+delayBox.Visible = false delayBox.Text = "2" delayBox.Parent = listingPanel
+local retryBox = Instance.new("TextBox")
+retryBox.Visible = false retryBox.Text = "2" retryBox.Parent = listingPanel
+
+-- START full width
 local startBtn = Instance.new("TextButton")
-startBtn.Size = UDim2.new(0, 200, 0, 42) startBtn.Position = UDim2.new(0, 0, 0, 370)
+startBtn.Size = UDim2.new(1, 0, 0, 36) startBtn.Position = UDim2.new(0, 0, 0, 290)
 startBtn.BackgroundColor3 = C.card startBtn.AutoButtonColor = false
 startBtn.Text = "⚡ START" startBtn.TextColor3 = C.textDim
-startBtn.Font = FB startBtn.TextSize = 16 startBtn.Parent = listingPanel
+startBtn.Font = FB startBtn.TextSize = 15 startBtn.Parent = listingPanel
 Instance.new("UICorner", startBtn).CornerRadius = UDim.new(0, 8)
-local startStroke = Instance.new("UIStroke", startBtn)
-startStroke.Color = C.accent startStroke.Thickness = 1.5
-startStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-startStroke.Transparency = 0.4
+do
+    local s = Instance.new("UIStroke", startBtn)
+    s.Color = C.accent s.Thickness = 1.5
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border s.Transparency = 0.4
+end
 
--- UNLIST ALL button next to START
+-- UNLIST ALL button (hidden, kept for compat)
 local unlistAllListingBtn = Instance.new("TextButton")
-unlistAllListingBtn.Size = UDim2.new(0, 180, 0, 42)
-unlistAllListingBtn.Position = UDim2.new(0, 210, 0, 370)
+unlistAllListingBtn.Size = UDim2.new(0, 1, 0, 1)
+unlistAllListingBtn.Position = UDim2.new(0, 0, 0, 0)
 unlistAllListingBtn.BackgroundColor3 = C.card unlistAllListingBtn.AutoButtonColor = false
 unlistAllListingBtn.Text = "📋 UNLIST ALL" unlistAllListingBtn.TextColor3 = C.danger
 unlistAllListingBtn.Font = FB unlistAllListingBtn.TextSize = 14
--- v8.48: hide btn from Listing tab (sekarang di Pantau tab aja)
 unlistAllListingBtn.Visible = false
 unlistAllListingBtn.Parent = listingPanel
 Instance.new("UICorner", unlistAllListingBtn).CornerRadius = UDim.new(0, 8)
-local unlistAllStroke = Instance.new("UIStroke", unlistAllListingBtn)
-unlistAllStroke.Color = C.danger unlistAllStroke.Thickness = 1.5
-unlistAllStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-unlistAllStroke.Transparency = 0.4
+do
+    local s = Instance.new("UIStroke", unlistAllListingBtn)
+    s.Color = C.danger s.Thickness = 1.5
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border s.Transparency = 0.4
+end
 
 -- Dummy stopBtn variable so handler bindings below don't crash (we wire StartBtn to do both)
 local stopBtn = startBtn
@@ -2106,7 +2134,7 @@ local function makeSnSubBtn(name)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 1, 0) lbl.BackgroundTransparency = 1
     lbl.Text = name lbl.TextColor3 = C.textDim
-    lbl.Font = FB lbl.TextSize = 13 lbl.Parent = b
+    lbl.Font = FB lbl.TextSize = 12 lbl.Parent = b
     snSubBtns[name] = {btn=b, stroke=stroke, lbl=lbl}
     b.MouseButton1Click:Connect(function()
         for n, d in pairs(snSubBtns) do
