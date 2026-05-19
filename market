@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.101"
-local VERSION_DATE = "FIX: lewat batas 200 local Luau — wrap section ke function biar GUI muncul lagi"
+local VERSION = "8.102"
+local VERSION_DATE = "Anti-AFK: proactive — fake input setiap 5 menit (gak nunggu idle 20mnt)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -17,20 +17,41 @@ _G.ZenxV8 = _G.ZenxV8 or {}
 local function L(s) table.insert(_G.ZenxV8, s) print("[ZV8]", s) end
 
 -- ===== v8.46: Anti-AFK (cegah kick karena idle 20 menit) =====
+-- v8.102: PROAKTIF — fake input setiap 5 menit (bukan cuma reactive ke event Idled)
 local antiAfkEnabled = true  -- v8.70: di-override dari state file setelah load
 do
     local ok, VirtualUser = pcall(function() return game:GetService("VirtualUser") end)
     if ok and VirtualUser then
+        -- Reactive: tangkep player.Idled event
         player.Idled:Connect(function()
             if antiAfkEnabled then
                 pcall(function()
                     VirtualUser:CaptureController()
                     VirtualUser:ClickButton2(Vector2.new(), workspace.CurrentCamera)
                 end)
-                L("[anti-afk] idle ticked → faked click")
+                L("[anti-afk] Idled event → faked click")
             end
         end)
-        L("[anti-afk] hook installed")
+        L("[anti-afk] reactive hook installed")
+
+        -- v8.102: PROAKTIF — periodic fake input every 5 min (sebelum kena Idled)
+        task.spawn(function()
+            while task.wait(300) do  -- 5 menit
+                if antiAfkEnabled then
+                    pcall(function()
+                        VirtualUser:CaptureController()
+                        -- Click di pojok layar (out-of-the-way)
+                        VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera)
+                        task.wait(0.1)
+                        VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera)
+                    end)
+                    L("[anti-afk] proactive tick (5min) → faked input")
+                end
+            end
+        end)
+        L("[anti-afk] proactive loop installed (5min interval)")
+    else
+        L("[anti-afk] VirtualUser unavailable — skipping")
     end
 end
 
