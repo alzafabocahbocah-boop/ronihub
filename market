@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.50"
-local VERSION_DATE = "[SYNC TEST RED] garden debug"
+local VERSION = "8.51"
+local VERSION_DATE = "[SYNC CALL] garden direct"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -475,7 +475,7 @@ do
     t.Name = "SyncTest"
     t.Size = UDim2.new(1, -20, 0, 30) t.Position = UDim2.new(0, 10, 0, 10)
     t.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-    t.BorderSizePixel = 0 t.Text = "[v8.50 SYNC TEST] gardenPanel render OK"
+    t.BorderSizePixel = 0 t.Text = "[v8.51 SYNC TEST] gardenPanel render OK"
     t.TextColor3 = Color3.new(1, 1, 1) t.Font = Enum.Font.SourceSansBold
     t.TextSize = 14 t.Parent = gardenPanel
 end
@@ -5102,28 +5102,8 @@ BH.buildGardenPanel = function()
         pcall(BH.refreshGardenStats)
     end)
 end
--- v8.49: resilient build (lewat task.spawn, biar gak halt script kalo error)
-task.spawn(function()
-    task.wait(0.1)
-    local ok, err = pcall(BH.buildGardenPanel)
-    if not ok then
-        L("[Garden] ❌ build error: "..tostring(err))
-        -- Fallback: tampilin error di panel
-        if BH.gardenPanel then
-            local errLbl = Instance.new("TextLabel")
-            errLbl.Size = UDim2.new(1, -20, 0, 60)
-            errLbl.Position = UDim2.new(0, 10, 0, 10)
-            errLbl.BackgroundColor3 = Color3.fromRGB(60, 20, 20)
-            errLbl.BorderSizePixel = 0
-            errLbl.Text = "❌ Build error:\n"..tostring(err)
-            errLbl.TextColor3 = Color3.new(1, 1, 1)
-            errLbl.TextWrapped = true
-            errLbl.Font = Enum.Font.Code
-            errLbl.TextSize = 11
-            errLbl.Parent = BH.gardenPanel
-        end
-    end
-end)
+-- v8.50: SYNC call (task.spawn kayak gak run di executor)
+BH.buildGardenPanel()
 
 populateModalList()
 refreshPriceList()
