@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "Smaller UI width (820→540) for mobile"
+local VERSION_DATE = "Sub-tabs scale-fit + 540px mobile"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -495,7 +495,8 @@ end
 
 local function makeSubBtn(name)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0, 130, 1, 0) b.AutoButtonColor = false
+    -- v8.49: scale-based size auto-fit (4 tabs muat di any width)
+    b.Size = UDim2.new(0.245, -6, 1, 0) b.AutoButtonColor = false
     b.BackgroundColor3 = C.card b.BorderSizePixel = 0
     b.Text = "" b.Parent = subTabBar
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
@@ -508,7 +509,7 @@ local function makeSubBtn(name)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 1, 0) lbl.BackgroundTransparency = 1
     lbl.Text = name lbl.TextColor3 = C.textDim
-    lbl.Font = FB lbl.TextSize = 15
+    lbl.Font = FB lbl.TextSize = 13
     lbl.TextStrokeTransparency = 1 lbl.Parent = b
 
     subBtns[name] = {btn=b, stroke=stroke, lbl=lbl}
