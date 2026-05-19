@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.62"
-local VERSION_DATE = "[pcall snSubBtns Manual]"
+local VERSION = "8.63"
+local VERSION_DATE = "FIX snSubBtns scope issue"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -487,7 +487,7 @@ BH.stageMarker = function(num, color, text, y)
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.62 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.63 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -2147,6 +2147,9 @@ end
 -- Forward declarations (these are used by snipe scanner later)
 local snRefreshBtn, snCountLbl, snSearch, snScroll, snScrollLayout
 local snMinAge, snMaxAge, snMinKg, snMaxKg, snMinPrice, snMaxPrice
+-- v8.62: simpan di BH biar accessible di luar do-block tanpa nambah local
+BH.snSubBtns = {}
+BH.snSubPanels = {}
 
 do
 -- Snipe sub-tab bar
@@ -2156,8 +2159,6 @@ snSubTabBar.BackgroundTransparency = 1 snSubTabBar.Parent = snipePanel
 local snSubLayout = Instance.new("UIListLayout") snSubLayout.FillDirection = Enum.FillDirection.Horizontal
 snSubLayout.Padding = UDim.new(0, 8) snSubLayout.Parent = snSubTabBar
 
-local snSubBtns = {}
-local snSubPanels = {}
 local function makeSnSubPanel(name)
     local sp = Instance.new("Frame")
     sp.Size = UDim2.new(1, -24, 1, -64) sp.Position = UDim2.new(0, 12, 0, 60)
@@ -2166,7 +2167,7 @@ local function makeSnSubPanel(name)
     Instance.new("UICorner", sp).CornerRadius = UDim.new(0, 10)
     local stroke = Instance.new("UIStroke", sp) stroke.Color = C.accent stroke.Thickness = 1
     stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border stroke.Transparency = 0.7
-    snSubPanels[name] = sp
+    BH.snSubPanels[name] = sp
     return sp
 end
 local function makeSnSubBtn(name)
@@ -2183,9 +2184,9 @@ local function makeSnSubBtn(name)
     lbl.Size = UDim2.new(1, 0, 1, 0) lbl.BackgroundTransparency = 1
     lbl.Text = name lbl.TextColor3 = C.textDim
     lbl.Font = FB lbl.TextSize = 12 lbl.Parent = b
-    snSubBtns[name] = {btn=b, stroke=stroke, lbl=lbl}
+    BH.snSubBtns[name] = {btn=b, stroke=stroke, lbl=lbl}
     b.MouseButton1Click:Connect(function()
-        for n, d in pairs(snSubBtns) do
+        for n, d in pairs(BH.snSubBtns) do
             if n == name then
                 d.stroke.Thickness = 1.5
                 d.lbl.TextColor3 = C.accent
@@ -2194,7 +2195,7 @@ local function makeSnSubBtn(name)
                 d.lbl.TextColor3 = C.textDim
             end
         end
-        for n, sp in pairs(snSubPanels) do sp.Visible = (n == name) end
+        for n, sp in pairs(BH.snSubPanels) do sp.Visible = (n == name) end
     end)
     return b
 end
@@ -2206,8 +2207,8 @@ local snManualPanel = makeSnSubPanel("Manual")
 local snBuyPanel = makeSnSubPanel("Buy")
 local snAutoPanel = makeSnSubPanel("Otomatis")
 snManualPanel.Visible = true
-snSubBtns.Manual.stroke.Thickness = 1.5
-snSubBtns.Manual.lbl.TextColor3 = C.accent
+BH.snSubBtns.Manual.stroke.Thickness = 1.5
+BH.snSubBtns.Manual.lbl.TextColor3 = C.accent
 
 -- ===== MANUAL SNIPE TAB =====
 local snPad = Instance.new("UIPadding")
@@ -4891,7 +4892,7 @@ do
 
     -- v8.47: auto-refresh sekali pas pertama buka SNIPE tab
     local ok, err = pcall(function()
-        snSubBtns.Manual.btn.MouseButton1Click:Connect(function()
+        BH.snSubBtns.Manual.btn.MouseButton1Click:Connect(function()
             task.wait(0.1)
             if #scanCache == 0 then
                 task.spawn(function()
@@ -4922,7 +4923,7 @@ do
     snBuy.maxPrice:GetPropertyChangedSignal("Text"):Connect(function() renderBuy() end)
     BH.stageMarker(356, Color3.fromRGB(200, 220, 0), "[3E6] after snBuy listeners", 315)
 
-    snSubBtns.Buy.btn.MouseButton1Click:Connect(function()
+    BH.snSubBtns.Buy.btn.MouseButton1Click:Connect(function()
         task.wait(0.1)
         if #scanCache == 0 then
             task.spawn(function()
