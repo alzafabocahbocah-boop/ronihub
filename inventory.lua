@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v4.1 (mutated pet age detection via server attributes)"
+local SCRIPT_VERSION = "v4.4 (FIX: pet name conflict with mutation — Mimic Octopus)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -288,7 +288,26 @@ for _, m in ipairs(MUTATION_NAMES) do
     table.insert(MUTATION_PREFIXES, m.." ")   -- space (before base name)
 end
 
+-- v4.2: detect mutasi by name prefix (declared early — dipake banyak helper)
+local function hasMutation(item)
+    if not item then return false end
+    local name = item.Name or ""
+    for _, prefix in ipairs(MUTATION_PREFIXES) do
+        if name:sub(1, #prefix) == prefix then return true end
+    end
+    return false
+end
+
+-- v4.4: hardcoded set of pet names where FIRST WORD conflicts with mutation name
+-- Without this, "Mimic Octopus" pet → getBaseName strips "Mimic " → "Octopus" (WRONG)
+local CONFLICTING_PET_NAMES = {
+    ["Mimic Octopus"] = true,
+    -- add more kalo nemu (e.g. "Lion Fish", "Tiger Shark")
+}
+
 local function getBaseName(name)
+    -- v4.4: kalo nama input persis pet di list konflik, return as-is (don't over-strip)
+    if CONFLICTING_PET_NAMES[name] then return name end
     local result = name
     local changed = true
     -- Strip multi-layer mutations (e.g. "Shocked, Moonlit, Galactic Mimic Octopus" → "Mimic Octopus")
@@ -296,8 +315,12 @@ local function getBaseName(name)
         changed = false
         for _, prefix in ipairs(MUTATION_PREFIXES) do
             if result:sub(1, #prefix) == prefix then
-                result = result:sub(#prefix + 1)
+                local stripped = result:sub(#prefix + 1)
+                if stripped == "" then break end
+                result = stripped
                 changed = true
+                -- v4.4: stop strip kalo hasil udah jadi pet name asli yang valid
+                if CONFLICTING_PET_NAMES[result] then return result end
                 break
             end
         end
@@ -314,8 +337,15 @@ local function buildMaxKGCache()
             local name = getPetName(item)
             local age = getAge(item)  -- pakai getAge raw, BUKAN estimated
             local kg = getKG(item)
+            -- v4.2: cache "normalized base" — divide by 1.10 kalo mutated (rule all-mut=Everchanted)
+            local mult = (function()
+                for _, prefix in ipairs(MUTATION_PREFIXES) do
+                    if item.Name:sub(1, #prefix) == prefix then return 1.10 end
+                end
+                return 1.0
+            end)()
             if name and age and kg and age >= 1 then
-                local maxKG = kg * 11 / (age + 10)
+                local maxKG = kg * 11 / ((age + 10) * mult)
                 -- Index by full name + base name
                 local existing = maxKGCache[name]
                 if not existing or maxKG > existing then maxKGCache[name] = maxKG end
@@ -336,52 +366,42 @@ local function getMaxKGForPet(name)
     return nil
 end
 
--- v4.1: getEstimatedAge — pakai server baseKG buat hitung age mutated pet
+-- v4.2: getEstimatedAge — pakai cache + 1.10 rule (skip server attribute)
 local function getEstimatedAge(item)
     local age = getAge(item) if age then return age end
     local kg = getKG(item) if not kg then return nil end
+    local mult = hasMutation(item) and 1.10 or 1.0
 
-    -- v4.1: dari server baseKG (reliable for mutated)
-    local baseKG = nil
-    for _,attrName in ipairs({"BASE_KG","PET_BASE_KG","BaseKG","BaseWeight","PET_BASE_WEIGHT","BASE_WEIGHT","PET_KG_BASE","StartingWeight","STARTING_KG"}) do
-        local ok, v = pcall(function() return item:GetAttribute(attrName) end)
-        if ok and v and type(v) == "number" and v > 0 then baseKG = v break end
-    end
-    if baseKG and baseKG > 0 then
-        return math.max(1, math.min(200, math.floor(kg * 11 / baseKG - 10 + 0.5)))
-    end
-
-    -- Fallback: cache
+    -- v4.2: dari cache "normalized base"
+    -- cache: maxKG = kg × 11 / ((age+10) × mult)
+    -- inverse: age = (kg × 11) / (maxKG × mult) - 10
     local maxKG = getMaxKGForPet(getPetName(item))
     if maxKG and maxKG > 0 then
-        return math.max(1, math.min(200, math.floor(kg * 11 / maxKG - 10 + 0.5)))
+        return math.max(1, math.min(200, math.floor(kg * 11 / (maxKG * mult) - 10 + 0.5)))
     end
     return nil
 end
 
--- v4.1: hitung baseKG. Prioritas: SERVER ATTRIBUTE (paling reliable buat mutated) > age formula > cache
+-- v4.2: hitung baseKG dengan rule "SEMUA MUTASI = ×1.10" (samain kayak Everchanted)
+-- Formula: base = kg × 11 / ((age + 10) × mult), mult=1.10 kalo mutated, 1.0 kalo enggak
+-- IGNORE server attribute karena dia store value aktual (yang bisa beda multiplier per mutasi)
 local function getPetBaseKG(item)
-    -- v4.1: PRIORITAS 1 — probe server attributes (sync sm sc leveling)
-    -- Ini yang bikin mutated pet bisa di-detect karena attribute set sm server
-    for _,attrName in ipairs({"BASE_KG","PET_BASE_KG","BaseKG","BaseWeight","PET_BASE_WEIGHT","BASE_WEIGHT","PET_KG_BASE","StartingWeight","STARTING_KG"}) do
-        local ok, v = pcall(function() return item:GetAttribute(attrName) end)
-        if ok and v and type(v) == "number" and v > 0 then return v end
-    end
-
-    -- Priority 2: hitung dari age + kg formula
     local kg = getKG(item)
     if not kg then return nil end
+    local mult = hasMutation(item) and 1.10 or 1.0
     local age = getAge(item)
+
+    -- Priority 1: dari age + kg formula (paling akurat & konsisten dengan rule user)
     if age and age >= 1 then
-        return kg * 11 / (age + 10)
+        return kg * 11 / ((age + 10) * mult)
     end
 
-    -- Priority 3: cache (dari pet sejenis yg punya age)
+    -- Priority 2: cache (cache udah simpan "normalized base" — gak perlu divide lagi)
     local cached = getMaxKGForPet(getPetName(item))
     if cached then return cached end
 
-    -- Fallback terakhir: assume pet baru hatched, baseKG = currentKG
-    if kg < 20 then return kg end
+    -- Priority 3: assume pet baru hatched (kg = base × mult)
+    if kg < 20 then return kg / mult end
     return nil  -- skip categorization
 end
 
@@ -455,7 +475,9 @@ end)
 
 local main = mk("Frame",{
     Size=UDim2.new(0, GUI_W, 0, GUI_H),
-    Position=UDim2.new(0, 70, 0.5, -GUI_H/2),
+    -- v4.2: anchor di bottom-left (Y=1, AnchorPoint Y=1), 20px dari edge bawah
+    AnchorPoint=Vector2.new(0, 1),
+    Position=UDim2.new(0, 70, 1, -20),
     BackgroundColor3=C.BG, BorderSizePixel=0, Active=true, Draggable=true,
     Visible=true,  -- v3.10: start visible (gui lebar langsung muncul)
     Parent=sg
