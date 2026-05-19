@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.54"
-local VERSION_DATE = "[GRANULAR MARKERS] pinpoint halt 2"
+local VERSION = "8.55"
+local VERSION_DATE = "[2D 2E] check connects"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -485,7 +485,7 @@ BH.stageMarker = function(num, color, text, y)
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.54 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.55 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -2712,9 +2712,11 @@ local function populateModalList()
 
     modalList.CanvasSize = UDim2.new(0, 0, 0, modalListLayout.AbsoluteContentSize.Y + 8)
 end
+BH.stageMarker(24, Color3.fromRGB(180, 50, 200), "[STAGE 2D] before connects", 110)
 
 modalSearch:GetPropertyChangedSignal("Text"):Connect(populateModalList)
 typeDrop.MouseButton1Click:Connect(populateModalList)
+BH.stageMarker(25, Color3.fromRGB(180, 0, 200), "[STAGE 2E] after connects", 135)
 
 -- ===== PET INVENTORY BROWSER =====
 local perTypePrices = {}  -- keep for compat with startBtn
@@ -2850,7 +2852,7 @@ local function setStartRunning()
     end)
 end
 setStartIdle()
-BH.stageMarker(23, Color3.fromRGB(255, 100, 0), "[STAGE 2C] after setStartIdle", 110)
+BH.stageMarker(23, Color3.fromRGB(255, 100, 0), "[STAGE 2C] after setStartIdle", 160)
 
 local function setStats(text, color)
     statsLbl.Text = text
@@ -3235,7 +3237,7 @@ do
 end
 
 -- STAGE 3 marker
-BH.stageMarker(3, Color3.fromRGB(150, 100, 200), "[STAGE 3] before onStartClick", 135)
+BH.stageMarker(3, Color3.fromRGB(150, 100, 200), "[STAGE 3] before onStartClick", 185)
 
 BH.onStartClick = function()
     -- If already running → request stop
@@ -4934,7 +4936,7 @@ L("  - Fav count")
 L("  - Inventory capacity")
 
 -- STAGE 4 marker
-BH.stageMarker(4, Color3.fromRGB(0, 150, 200), "[STAGE 4] before func def", 160)
+BH.stageMarker(4, Color3.fromRGB(0, 150, 200), "[STAGE 4] before func def", 210)
 
 -- v8.49: GARDEN PANEL UI build (server-detect)
 BH.buildGardenPanel = function()
@@ -5131,13 +5133,13 @@ BH.buildGardenPanel = function()
     end)
 end
 -- STAGE 5 marker (after function def)
-BH.stageMarker(5, Color3.fromRGB(200, 0, 200), "[STAGE 5] func type="..type(BH.buildGardenPanel), 185)
+BH.stageMarker(5, Color3.fromRGB(200, 0, 200), "[STAGE 5] func type="..type(BH.buildGardenPanel), 235)
 
 -- v8.50: SYNC call
 BH.buildGardenPanel()
 
 -- STAGE 6 marker (after sync call)
-BH.stageMarker(6, Color3.fromRGB(0, 200, 0), "[STAGE 6] call returned", 210)
+BH.stageMarker(6, Color3.fromRGB(0, 200, 0), "[STAGE 6] call returned", 260)
 
 populateModalList()
 refreshPriceList()
