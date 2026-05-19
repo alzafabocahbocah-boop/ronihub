@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.49"
-local VERSION_DATE = "UI 500x350 + uniform tab sizing (34px h, font 13)"
+local VERSION_DATE = "Listing tab scrollable + SNIPE sub-tabs scale-fit"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -538,6 +538,21 @@ local listingPanel = makeSubPanel("Listing")
 local rejoinPanel = makeSubPanel("Rejoin")
 local miscPanel = makeSubPanel("Misc")
 local pantauPanel = makeSubPanel("Pantau")
+
+-- v8.49: listingPanel scrollable (biar content gak ke-cut di small frame)
+do
+    local outer = listingPanel
+    outer.Visible = true  -- listing default tab, set outer visible
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, 0, 1, 0)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 6
+    scroll.ScrollBarImageColor3 = C.accent
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 460)  -- enough for all listing content
+    scroll.Parent = outer
+    listingPanel = scroll
+end
 
 -- v8.48: miscPanel scrollable biar content gak ke-cut
 do
@@ -2080,7 +2095,8 @@ local function makeSnSubPanel(name)
 end
 local function makeSnSubBtn(name)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0, 150, 1, 0) b.AutoButtonColor = false
+    -- v8.49: scale-fit (3 tab: Manual/Buy/Otomatis)
+    b.Size = UDim2.new(0.33, -4, 1, 0) b.AutoButtonColor = false
     b.BackgroundColor3 = C.card b.BorderSizePixel = 0
     b.Text = "" b.Parent = snSubTabBar
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
@@ -2090,7 +2106,7 @@ local function makeSnSubBtn(name)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 1, 0) lbl.BackgroundTransparency = 1
     lbl.Text = name lbl.TextColor3 = C.textDim
-    lbl.Font = FB lbl.TextSize = 14 lbl.Parent = b
+    lbl.Font = FB lbl.TextSize = 13 lbl.Parent = b
     snSubBtns[name] = {btn=b, stroke=stroke, lbl=lbl}
     b.MouseButton1Click:Connect(function()
         for n, d in pairs(snSubBtns) do
