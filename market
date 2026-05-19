@@ -3,7 +3,7 @@
 -- Market sub-tabs: Listing | Rejoin | Misc
 
 local VERSION = "8.78"
-local VERSION_DATE = "Unlist ALL: rate-limit aware + fresh TBC fetch + detailed error log"
+local VERSION_DATE = "Verbose listing+unlist diagnostics: full err, classify, cycle summary"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -3821,6 +3821,9 @@ BH.onStartClick = function()
 
             local listedNow = 0
             local listAttempts = 0  -- v8.47: pace lister biar gak spam
+            -- v8.78: failure tracking per cycle untuk diagnostic summary
+            local failStats = {rateLimit=0, favorited=0, equipped=0, invalid=0, boothFull=0,
+                              price=0, alreadyListed=0, generic=0, unknown=0}
             -- v8.77: kalo global rate-limit aktif, exit early
             if tick() < globalRateLimitUntil then
                 local waitLeft = math.ceil(globalRateLimitUntil - tick())
@@ -3910,38 +3913,93 @@ BH.onStartClick = function()
                             end
                             -- v8.47: delay udah dipindah ke front (sebelum listPet), gak perlu di sini
                         else
-                            -- false = bisa karena udah listed, booth full, atau penolakan lain
+                            -- v8.78: VERBOSE error log — full error + classify + show pet context
                             local errStr = tostring(idOrErr or "false")
                             local errLow = errStr:lower()
-                            L("   ❌ "..errStr:sub(1,60))
+                            -- Full error (up to 150 char biar gak terlalu panjang, tapi cukup buat diagnose)
+                            local errShow = #errStr > 150 and (errStr:sub(1,150).."...") or errStr
+                            local petInfo = string.format("%s base=%.2fkg cur=%.2fkg uuid=%s",
+                                p.type, p.wt or 0, p.currentKg or 0, p.clean:sub(1,12))
+                            L("   ❌ FAIL ["..petInfo.."]")
+                            L("      err: "..errShow)
+
                             if errLow:find("please wait") or errLow:find("cooldown") or errLow:find("too fast") then
+                                failStats.rateLimit = failStats.rateLimit + 1
                                 -- v8.76: per-pet cooldown — defer pet ini biar gak ke-retry sebelum server cooldown selesai
                                 local failCount = (rateLimitedCount[p.clean] or 0) + 1
                                 rateLimitedCount[p.clean] = failCount
                                 -- Exponential backoff: 35s → 60s → 90s → max 120s
                                 local cooldownSec = math.min(35 + (failCount - 1) * 25, 120)
                                 rateLimitedUntil[p.clean] = tick() + cooldownSec
-                                L("   ⏳ defer "..p.clean:sub(1,8).." for "..cooldownSec.."s (fail #"..failCount..")")
+                                L("      → ⏳ RATE-LIMIT, defer "..cooldownSec.."s (fail #"..failCount..")")
 
                                 -- v8.77: GLOBAL pause — stop semua listing biar server cooldown beneran kelar
                                 -- Exponential global backoff: 45s → 75s → 105s → max 180s
                                 globalRateLimitCount = globalRateLimitCount + 1
                                 local globalSec = math.min(45 + (globalRateLimitCount - 1) * 30, 180)
                                 globalRateLimitUntil = tick() + globalSec
-                                L("   🛑 GLOBAL PAUSE "..globalSec.."s — stop semua attempt (hit #"..globalRateLimitCount..")")
+                                L("      → 🛑 GLOBAL PAUSE "..globalSec.."s (hit #"..globalRateLimitCount..")")
                                 setStats("Rate limited — pause "..globalSec.."s", C.danger)
                                 break  -- exit for loop, jangan attempt pet berikutnya
                             elseif errLow:find("favorit") then
-                                L("   ⏭ skip (favorited)")
-                                -- v8.47: gak perlu extra wait, front-load udah handle
+                                failStats.favorited = failStats.favorited + 1
+                                L("      → ⏭ SKIP (favorited, unfav dulu kalo mau di-list)")
+                                alreadyListed[p.clean] = true  -- v8.78: mark biar gak retry tiap cycle
+                            elseif errLow:find("equip") or errLow:find("equipped") then
+                                failStats.equipped = failStats.equipped + 1
+                                L("      → ⏭ Pet ke-equip, listPet seharusnya udah unequip — coba lagi cycle nanti")
+                            elseif errLow:find("not found") or errLow:find("invalid") or errLow:find("does not exist") then
+                                failStats.invalid = failStats.invalid + 1
+                                L("      → ⏭ Pet/UUID gak valid (stale data?) — refresh & retry")
+                                -- Force re-scan next cycle by invalidating cache
+                                invalidateTbcCache()
+                            elseif errLow:find("booth") and (errLow:find("full") or errLow:find("limit") or errLow:find("max")) then
+                                failStats.boothFull = failStats.boothFull + 1
+                                L("      → ⏹ Booth penuh — set maxListings rule lebih rendah")
+                                break  -- gak ada gunanya lanjut, semua bakal fail
+                            elseif errLow:find("price") or errLow:find("cost") then
+                                failStats.price = failStats.price + 1
+                                L("      → ⏭ Price issue (kerendahan/ketinggian?) — current: "..rule.price)
+                                alreadyListed[p.clean] = true  -- v8.78: mark biar gak spam
+                            elseif errLow:find("already") or errLow:find("duplicate") or errLow:find("exists") then
+                                failStats.alreadyListed = failStats.alreadyListed + 1
+                                L("      → ⏭ Udah listed (state sync issue), mark sebagai listed")
+                                alreadyListed[p.clean] = true
+                                if ruleIdx > 0 then
+                                    if not myListed[ruleIdx] then myListed[ruleIdx] = {} end
+                                    myListed[ruleIdx][p.clean] = true
+                                end
+                                invalidateTbcCache()
+                            elseif errStr == "false" or errStr == "unknown" then
+                                failStats.generic = failStats.generic + 1
+                                -- Server return false tanpa pesan — generic rejection
+                                L("      → ⚠ Generic rejection (no error msg). Coba: cek pet equipped/favorited/listed manual")
                             else
-                                -- "false"/"unknown" — kemungkinan udah listed, skip cepat
-                                -- v8.47: gak perlu extra wait, front-load udah handle
+                                failStats.unknown = failStats.unknown + 1
+                                L("      → ⚠ Unknown error type — kasih log ini ke developer biar bisa di-handle")
                             end
                         end
                     end
                     end  -- v8.76: end cooldown skip else
                 end
+            end
+            -- v8.78: end-of-cycle failure summary (kalo ada yang fail)
+            local totalFails = 0
+            for _, n in pairs(failStats) do totalFails = totalFails + n end
+            if totalFails > 0 then
+                local parts = {}
+                if failStats.rateLimit > 0 then table.insert(parts, failStats.rateLimit.." rate-limit") end
+                if failStats.favorited > 0 then table.insert(parts, failStats.favorited.." favorited") end
+                if failStats.equipped > 0 then table.insert(parts, failStats.equipped.." equipped") end
+                if failStats.invalid > 0 then table.insert(parts, failStats.invalid.." invalid-uuid") end
+                if failStats.boothFull > 0 then table.insert(parts, failStats.boothFull.." booth-full") end
+                if failStats.price > 0 then table.insert(parts, failStats.price.." price-issue") end
+                if failStats.alreadyListed > 0 then table.insert(parts, failStats.alreadyListed.." already-listed") end
+                if failStats.generic > 0 then table.insert(parts, failStats.generic.." generic-false") end
+                if failStats.unknown > 0 then table.insert(parts, failStats.unknown.." unknown") end
+                L("│ 📊 Cycle summary: ✅ "..listedNow.." listed | ❌ "..totalFails.." failed → "..table.concat(parts, ", "))
+            elseif listedNow > 0 then
+                L("│ 📊 Cycle summary: ✅ "..listedNow.." listed (no failures)")
             end
             return listedNow
         end
