@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.65"
-local VERSION_DATE = "Garden clean design + cleanup debug"
+local VERSION = "8.68"
+local VERSION_DATE = "TP-Market fire game button"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1620,60 +1620,118 @@ do
         for _, conn in ipairs(BH.giftConns) do conn:Disconnect() end
         BH.giftConns = {}
         if not BH.autoGift then return end
-        for _, info in ipairs(BH.giftRemotes) do
-            if info.remote:IsA("RemoteEvent") then
-                local nameL = info.name:lower()
-                if nameL:find("offer") or nameL:find("receive") or nameL:find("incoming") or nameL:find("request") then
-                    local conn = info.remote.OnClientEvent:Connect(function(...)
-                        local args = {...}
-                        for _, other in ipairs(BH.giftRemotes) do
-                            if other.name:lower():find("accept") then
-                                pcall(function()
-                                    if other.isFn then
-                                        other.remote:InvokeServer(table.unpack(args))
-                                    else
-                                        other.remote:FireServer(table.unpack(args))
-                                    end
-                                end)
-                                L("[Auto-Gift] ✅ accepted via "..other.name)
-                                break
-                            end
-                        end
-                    end)
-                    table.insert(BH.giftConns, conn)
-                end
-            end
+        -- v8.65: precise remote from leveling sc — listen GiftPet → fire AcceptPetGift(true, uuid)
+        local ge = RS:FindFirstChild("GameEvents")
+        if not ge then L("[Auto-Gift] ❌ no GameEvents"); return end
+        local giftPetRE = ge:FindFirstChild("GiftPet")
+        local acceptPetGiftRE = ge:FindFirstChild("AcceptPetGift")
+        if not (giftPetRE and acceptPetGiftRE) then
+            L("[Auto-Gift] ❌ remote gak nemu (GiftPet/AcceptPetGift)")
+            return
         end
+        local accCount = 0
+        local conn = giftPetRE.OnClientEvent:Connect(function(petUUID, petName, senderUsername)
+            if not BH.autoGift then return end
+            -- Fire instant + 50ms retry buat handle packet drop
+            pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
+            task.spawn(function()
+                task.wait(0.05)
+                pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
+            end)
+            accCount = accCount + 1
+            L("[Auto-Gift] ✅ #"..accCount.." from "..tostring(senderUsername).." ("..tostring(petName)..")")
+        end)
+        table.insert(BH.giftConns, conn)
+        L("[Auto-Gift] hook installed (GiftPet → AcceptPetGift)")
     end
 
     local function hookTrades()
         for _, conn in ipairs(BH.tradeConns) do conn:Disconnect() end
         BH.tradeConns = {}
         if not BH.autoTrade then return end
-        for _, info in ipairs(BH.tradeRemotes) do
-            if info.remote:IsA("RemoteEvent") then
-                local nameL = info.name:lower()
-                if nameL:find("request") or nameL:find("offer") or nameL:find("incoming") then
-                    local conn = info.remote.OnClientEvent:Connect(function(...)
+        -- v8.65: precise remote — listen SendRequest → fire RespondRequest(tradeID, true)
+        local ge = RS:FindFirstChild("GameEvents")
+        local te = ge and ge:FindFirstChild("TradeEvents")
+        if not te then L("[Auto-Trade] ❌ no TradeEvents"); return end
+        local sendReqRE = te:FindFirstChild("SendRequest")
+        local respondReqRE = te:FindFirstChild("RespondRequest")
+        local acceptRE = te:FindFirstChild("Accept")
+        local confirmRE = te:FindFirstChild("Confirm")
+        if not (sendReqRE and respondReqRE) then
+            L("[Auto-Trade] ❌ remote gak nemu (SendRequest/RespondRequest)")
+            return
+        end
+        local lastTradeID = nil
+        local accCount = 0
+        local spamRunning = false
+
+        -- Spammer: tekan tombol Accept GUI + brute force fire confirm/accept remote
+        local function findAcceptBtn()
+            local pg = player:FindFirstChild("PlayerGui")
+            local tui = pg and pg:FindFirstChild("TradingUI")
+            local lt = tui and tui:FindFirstChild("LiveTrade")
+            if not lt or not lt.Visible then return nil end
+            local opts = lt:FindFirstChild("Options")
+            return opts and opts:FindFirstChild("Accept")
+        end
+        local function spamConfirm()
+            local btn = findAcceptBtn()
+            if not btn then return false end
+            if firesignal then pcall(function() firesignal(btn.Activated) end) end
+            if getconnections then
+                pcall(function()
+                    for _, c in ipairs(getconnections(btn.Activated)) do
+                        pcall(function() c:Fire() end)
+                    end
+                end)
+            end
+            if lastTradeID then
+                if confirmRE then pcall(function() confirmRE:FireServer(lastTradeID) end) end
+                if acceptRE then pcall(function() acceptRE:FireServer(lastTradeID) end) end
+            end
+            return true
+        end
+        local function startSpammer()
+            if spamRunning then return end
+            spamRunning = true
+            task.spawn(function()
+                while BH.autoTrade and spamRunning do
+                    if not spamConfirm() then break end
+                    task.wait(3)
+                end
+                spamRunning = false
+            end)
+        end
+
+        -- Hook all TradeEvents (except history/inventory)
+        for _, r in ipairs(te:GetChildren()) do
+            if r:IsA("RemoteEvent") then
+                local lname = r.Name:lower()
+                if not (lname:find("history") or lname:find("inventory")) then
+                    local conn = r.OnClientEvent:Connect(function(...)
+                        if not BH.autoTrade then return end
                         local args = {...}
-                        for _, other in ipairs(BH.tradeRemotes) do
-                            if other.name:lower():find("accept") then
-                                pcall(function()
-                                    if other.isFn then
-                                        other.remote:InvokeServer(table.unpack(args))
-                                    else
-                                        other.remote:FireServer(table.unpack(args))
-                                    end
-                                end)
-                                L("[Auto-Trade] ✅ accepted via "..other.name)
-                                break
-                            end
+                        if type(args[1]) == "string" and #args[1] > 20 and args[1]:find("-") then
+                            lastTradeID = args[1]
                         end
+                        if lname:find("cancel") or lname:find("reject") or lname:find("decline") then
+                            spamRunning = false
+                            return
+                        end
+                        if r == sendReqRE and respondReqRE and lastTradeID then
+                            pcall(function() respondReqRE:FireServer(lastTradeID, true) end)
+                            accCount = accCount + 1
+                            L("[Auto-Trade] ✅ accept #"..accCount.." tradeID="..lastTradeID:sub(1,8))
+                            task.delay(2, startSpammer)
+                            return
+                        end
+                        if r.Name == "UpdateTradeState" then startSpammer() end
                     end)
                     table.insert(BH.tradeConns, conn)
                 end
             end
         end
+        L("[Auto-Trade] hook installed ("..#BH.tradeConns.." listeners, RespondRequest+spam)")
     end
 
     BH.hookGiftsFn = hookGifts
@@ -4966,30 +5024,103 @@ BH.buildGardenPanel = function()
         if BH.hookTradesFn then BH.hookTradesFn() end
     end)
     gTravelBtn.MouseButton1Click:Connect(function()
+        L("[TP-Market] mencari 'Travel to Farmer Market' button...")
+        local fired = false
+        local pg = player:FindFirstChild("PlayerGui")
+
+        -- Method 1: scan PlayerGui buat button "Travel to Farmer Market" / "Trade" tab
+        if pg then
+            for _, d in ipairs(pg:GetDescendants()) do
+                if (d:IsA("TextButton") or d:IsA("ImageButton")) and not fired then
+                    local txt = ""
+                    if d:IsA("TextButton") then txt = tostring(d.Text or "") end
+                    local fullText = (txt.." "..d.Name):lower()
+                    if fullText:find("travel.*market") or fullText:find("farmer.*market")
+                       or fullText:find("travel.*trade") or fullText:find("travel.*farmer")
+                       or fullText:find("totrademarket") or fullText:find("tofarmermarket") then
+                        L("[TP-Market] found button: "..d:GetFullName().." text='"..txt.."'")
+                        -- Make sure parent chain is visible
+                        local cur = d.Parent
+                        while cur and cur ~= pg do
+                            if cur:IsA("Frame") or cur:IsA("ScrollingFrame") then
+                                if not cur.Visible then cur.Visible = true end
+                            end
+                            cur = cur.Parent
+                        end
+                        -- Fire button: Activated signal + click event
+                        pcall(function()
+                            if firesignal then firesignal(d.Activated) end
+                            if getconnections then
+                                for _, c in ipairs(getconnections(d.MouseButton1Click)) do
+                                    pcall(function() c:Fire() end)
+                                end
+                                for _, c in ipairs(getconnections(d.Activated)) do
+                                    pcall(function() c:Fire() end)
+                                end
+                            end
+                        end)
+                        L("[TP-Market] ✅ fired button")
+                        fired = true
+                        break
+                    end
+                end
+            end
+        end
+        if fired then return end
+
+        -- Method 2: TP character ke portal part di workspace
         local char = player.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-        local tradeCam = Workspace:FindFirstChild("TradeworldCamPart")
-            or Workspace:FindFirstChild("LoadingCamPart")
-        if tradeCam and tradeCam:IsA("BasePart") then
-            hrp.CFrame = tradeCam.CFrame + Vector3.new(0, 5, 0)
-            L("[Travel] TP ke TradeworldCamPart")
-            return
+        if hrp then
+            for _, d in ipairs(Workspace:GetDescendants()) do
+                if d:IsA("BasePart") then
+                    local n = d.Name:lower()
+                    if n:find("marketportal") or n:find("tradeportal") or n:find("farmermarket")
+                       or n:find("marketteleport") or n:find("tradeteleport") then
+                        hrp.CFrame = d.CFrame + Vector3.new(0, 5, 0)
+                        L("[TP-Market] ✅ TP char ke portal: "..d:GetFullName())
+                        fired = true
+                        break
+                    end
+                end
+            end
         end
+        if fired then return end
+
+        -- Method 3: Fire remote dengan keyword
         for _, c in ipairs(RS:GetDescendants()) do
-            if (c:IsA("RemoteEvent") or c:IsA("RemoteFunction")) then
+            if (c:IsA("RemoteEvent") or c:IsA("RemoteFunction")) and not fired then
                 local n = c.Name:lower()
-                if n:find("totrad") or n:find("tomarket") or n:find("trademarket") then
+                if n:find("farmermarket") or n:find("tofarmer") or n:find("travelto")
+                   or n:find("trademarket") or n:find("entermarket") or n:find("gotomarket") then
+                    L("[TP-Market] try remote: "..c:GetFullName())
                     pcall(function()
                         if c:IsA("RemoteFunction") then c:InvokeServer()
                         else c:FireServer() end
                     end)
-                    L("[Travel] fired "..c:GetFullName())
-                    return
+                    fired = true
+                    break
                 end
             end
         end
-        L("[Travel] gak nemu trade cam / remote")
+        if fired then L("[TP-Market] ✅ remote fired"); return end
+
+        -- Method 4: Diagnostic — list all relevant buttons
+        L("[TP-Market] ❌ no method work. Diagnostic, kandidat buttons:")
+        if pg then
+            local count = 0
+            for _, d in ipairs(pg:GetDescendants()) do
+                if (d:IsA("TextButton") or d:IsA("ImageButton")) and count < 10 then
+                    local txt = d:IsA("TextButton") and tostring(d.Text or "") or ""
+                    if txt ~= "" and (txt:lower():find("market") or txt:lower():find("trade")
+                       or txt:lower():find("travel") or txt:lower():find("farmer")) then
+                        L("  • "..d:GetFullName().." text='"..txt:sub(1,40).."'")
+                        count = count + 1
+                    end
+                end
+            end
+            if count == 0 then L("  (gak nemu button apapun yg related)") end
+        end
     end)
 
     local statsCard = Instance.new("Frame")
