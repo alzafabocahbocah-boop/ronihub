@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.56"
-local VERSION_DATE = "FIX startStroke nil"
+local VERSION = "8.57"
+local VERSION_DATE = "FIX BH.BH double prefix"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -485,7 +485,7 @@ BH.stageMarker = function(num, color, text, y)
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.56 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.57 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -770,9 +770,9 @@ startBtn.BackgroundColor3 = C.card startBtn.AutoButtonColor = false
 startBtn.Text = "⚡ START" startBtn.TextColor3 = C.textDim
 startBtn.Font = FB startBtn.TextSize = 15 startBtn.Parent = listingPanel
 Instance.new("UICorner", startBtn).CornerRadius = UDim.new(0, 8)
-BH.BH.startStroke = Instance.new("UIStroke", startBtn)
-BH.BH.startStroke.Color = C.accent BH.BH.startStroke.Thickness = 1.5
-BH.BH.startStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border BH.BH.startStroke.Transparency = 0.4
+BH.startStroke = Instance.new("UIStroke", startBtn)
+BH.startStroke.Color = C.accent BH.startStroke.Thickness = 1.5
+BH.startStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border BH.startStroke.Transparency = 0.4
 
 -- UNLIST ALL button (hidden, kept for compat)
 local unlistAllListingBtn = Instance.new("TextButton")
