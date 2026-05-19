@@ -4903,6 +4903,20 @@ BH.buildGardenPanel = function()
         return
     end
     L("[Garden] building panel...")
+
+    -- Beri background warna biar gak hitam total
+    gardenPanel.BackgroundColor3 = C.bg
+    gardenPanel.BackgroundTransparency = 0
+
+    -- Visible diagnostic banner (akan diganti dengan tombol setelah build)
+    local diag = Instance.new("TextLabel")
+    diag.Name = "DiagBanner"
+    diag.Size = UDim2.new(1, -20, 0, 14) diag.Position = UDim2.new(0, 10, 1, -18)
+    diag.BackgroundTransparency = 1 diag.Text = "✅ build OK"
+    diag.TextColor3 = C.success diag.Font = Enum.Font.Code diag.TextSize = 9
+    diag.TextXAlignment = Enum.TextXAlignment.Left
+    diag.Parent = gardenPanel
+
     local btnPad = 4
     local btnRow = Instance.new("Frame")
     btnRow.Size = UDim2.new(1, -28, 0, 30) btnRow.Position = UDim2.new(0, 14, 0, 14)
@@ -5078,7 +5092,28 @@ BH.buildGardenPanel = function()
         pcall(BH.refreshGardenStats)
     end)
 end
-BH.buildGardenPanel()
+-- v8.49: resilient build (lewat task.spawn, biar gak halt script kalo error)
+task.spawn(function()
+    task.wait(0.1)
+    local ok, err = pcall(BH.buildGardenPanel)
+    if not ok then
+        L("[Garden] ❌ build error: "..tostring(err))
+        -- Fallback: tampilin error di panel
+        if gardenPanel then
+            local errLbl = Instance.new("TextLabel")
+            errLbl.Size = UDim2.new(1, -20, 0, 60)
+            errLbl.Position = UDim2.new(0, 10, 0, 10)
+            errLbl.BackgroundColor3 = Color3.fromRGB(60, 20, 20)
+            errLbl.BorderSizePixel = 0
+            errLbl.Text = "❌ Build error:\n"..tostring(err)
+            errLbl.TextColor3 = Color3.new(1, 1, 1)
+            errLbl.TextWrapped = true
+            errLbl.Font = Enum.Font.Code
+            errLbl.TextSize = 11
+            errLbl.Parent = gardenPanel
+        end
+    end
+end)
 
 populateModalList()
 refreshPriceList()
