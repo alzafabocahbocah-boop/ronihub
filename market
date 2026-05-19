@@ -477,6 +477,19 @@ if isGardenServer then
     sbBtns.SNIPE.btn.Visible = false
     marketPanel.Visible = false
     gardenPanel.Visible = true
+    -- override default tab visual ke GARDEN
+    task.spawn(function()
+        task.wait(0.1)
+        for n, d in pairs(sbBtns) do
+            if n == "GARDEN" then
+                d.stroke.Thickness = 1.5
+                d.lbl.TextColor3 = C.accent
+            else
+                d.stroke.Thickness = 0
+                d.lbl.TextColor3 = C.textDim
+            end
+        end
+    end)
 end
 
 -- Activate Market default
@@ -4885,6 +4898,11 @@ L("  - Inventory capacity")
 
 -- v8.49: GARDEN PANEL UI build (server-detect)
 BH.buildGardenPanel = function()
+    if not gardenPanel then
+        L("[Garden] ❌ gardenPanel is nil")
+        return
+    end
+    L("[Garden] building panel...")
     local btnPad = 4
     local btnRow = Instance.new("Frame")
     btnRow.Size = UDim2.new(1, -28, 0, 30) btnRow.Position = UDim2.new(0, 14, 0, 14)
