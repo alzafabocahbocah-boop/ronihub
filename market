@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.80"
-local VERSION_DATE = "Lenient success detection + TBC verify (fix phantom-listed pets)"
+local VERSION = "8.83"
+local VERSION_DATE = "Force-stream booth tiap cycle → workspace scan accurate (no TBC field guessing)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -3332,6 +3332,23 @@ do
         task.wait(2)
     end
 
+    -- v8.83: Stream HANYA booth-mu (hemat, fast, no global stream needed)
+    -- Multiple rounds untuk reliability. Tujuannya: DynamicInstances ke-load di workspace
+    -- biar kita bisa scan UUID listed pet langsung dari Tool.Name.
+    function BH.streamMyBooth()
+        if not BH.myBoothUuid then return false, "no_booth_uuid" end
+        local myBooth = BH.getMyBoothObj()
+        if not myBooth then return false, "booth_not_in_workspace" end
+        local part = myBooth:FindFirstChildWhichIsA("BasePart", true)
+        if not part then return false, "no_basepart" end
+        -- 3 rounds dengan jeda — kasih server waktu replicate
+        for i = 1, 3 do
+            pcall(function() player:RequestStreamAroundAsync(part.Position) end)
+            task.wait(0.4)
+        end
+        return true, "ok"
+    end
+
     function BH.detectMyBooth(listedCleanUuid)
         if BH.myBoothUuid then return end
         task.wait(1)
@@ -3818,6 +3835,7 @@ BH.onStartClick = function()
             -- Pet TETEP ada di backpack walaupun udah listed (game's behavior)
             local alreadyListed = {}
             local alreadyListedCount = 0
+            local workspaceCount = 0
             if BH.myBoothUuid then
                 local myBooth = BH.getMyBoothObj()
                 if myBooth then
@@ -3828,11 +3846,67 @@ BH.onStartClick = function()
                                 local boothUuid = t.Name:gsub("[{}]","")
                                 alreadyListed[boothUuid] = true
                                 alreadyListedCount = alreadyListedCount + 1
+                                workspaceCount = workspaceCount + 1
                             end
                         end
                     end
                 end
-                L("  Sudah listed di booth-mu: "..alreadyListedCount.." pet")
+            end
+
+            -- v8.81: ALSO build alreadyListed dari TBC (authoritative)
+            -- Workspace scan sering miss karena streaming, TBC always accurate
+            -- Defensive: coba semua kemungkinan field yang mungkin nyimpan pet UUID
+            local tbcAddedCount = 0
+            if BH.TBC then
+                local data = getCachedTbcData()
+                if data and data.Listings then
+                    -- Build map: backpack pet UUID → tool ref biar bisa match by attributes
+                    local petUuidSet = {}
+                    for _, p in ipairs(pets) do petUuidSet[p.clean] = true end
+
+                    for listingKey, listing in pairs(data.Listings) do
+                        if listing.ItemType == "Pet" then
+                            -- Collect semua kemungkinan UUID dari listing+item
+                            local candidates = {}
+                            local function addCand(v)
+                                if v then
+                                    local cv = tostring(v):gsub("[{}]","")
+                                    if cv ~= "" then candidates[cv] = true end
+                                end
+                            end
+                            addCand(listingKey)
+                            addCand(listing.ItemId)
+                            addCand(listing.PetUUID); addCand(listing.PetUuid)
+                            local item = data.Items and listing.ItemId and data.Items[listing.ItemId]
+                            if item then
+                                addCand(item.UUID); addCand(item.Uuid); addCand(item.id); addCand(item.Id); addCand(item.ID)
+                                addCand(item.PetUUID); addCand(item.PetUuid)
+                                if item.PetData then
+                                    local pd = item.PetData
+                                    addCand(pd.UUID); addCand(pd.Uuid); addCand(pd.id); addCand(pd.Id); addCand(pd.ID)
+                                    addCand(pd.PetUUID); addCand(pd.PetUuid); addCand(pd.PetID); addCand(pd.PetId)
+                                end
+                            end
+
+                            -- Kalo salah satu candidate match backpack pet → mark alreadyListed
+                            for cand, _ in pairs(candidates) do
+                                if petUuidSet[cand] and not alreadyListed[cand] then
+                                    alreadyListed[cand] = true
+                                    alreadyListedCount = alreadyListedCount + 1
+                                    tbcAddedCount = tbcAddedCount + 1
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+
+            if BH.myBoothUuid then
+                if tbcAddedCount > 0 then
+                    L("  Sudah listed di booth-mu: "..alreadyListedCount.." pet (workspace:"..workspaceCount..", TBC:+"..tbcAddedCount..")")
+                else
+                    L("  Sudah listed di booth-mu: "..alreadyListedCount.." pet")
+                end
             else
                 L("  Booth belum cached — list dulu 1 buat detect")
             end
@@ -4077,17 +4151,44 @@ BH.onStartClick = function()
                                 task.wait(1.5)  -- kasih waktu server replicate
                                 local freshData = BH.fetchBoothData(player)
                                 if freshData and freshData.Items then
+                                    -- v8.81: dump 1 sample item structure (sekali per cycle) biar bisa diagnose UUID field
+                                    if failStats.generic == 1 then  -- first generic fail in cycle
+                                        for itemId, item in pairs(freshData.Items) do
+                                            local fields = {}
+                                            table.insert(fields, "itemId="..tostring(itemId):sub(1,16))
+                                            for k, v in pairs(item) do
+                                                if type(v) ~= "table" then
+                                                    table.insert(fields, k.."="..tostring(v):sub(1,20))
+                                                end
+                                            end
+                                            if item.PetData and type(item.PetData) == "table" then
+                                                for k, v in pairs(item.PetData) do
+                                                    if type(v) ~= "table" then
+                                                        table.insert(fields, "pd."..k.."="..tostring(v):sub(1,20))
+                                                    end
+                                                end
+                                            end
+                                            L("      TBC item sample: "..table.concat(fields, ", "):sub(1, 300))
+                                            break  -- just 1 sample
+                                        end
+                                    end
+
                                     -- Cari pet UUID kita di Items (sebagai itemId atau PET_UUID attribute)
                                     local foundListed = false
-                                    for _, item in pairs(freshData.Items) do
+                                    for itemKey, item in pairs(freshData.Items) do
+                                        -- Cek itemKey sendiri (kalo TBC pake pet UUID sebagai key)
+                                        if tostring(itemKey):gsub("[{}]","") == p.clean then
+                                            foundListed = true; break
+                                        end
                                         if item.PetData then
-                                            -- Match by ID dalam PetData (game-specific, coba beberapa field)
-                                            local itemPetUuid = tostring(item.PetData.UUID or item.PetData.Uuid
-                                                or item.PetData.PetUUID or item.PetData.PetUuid or ""):gsub("[{}]","")
-                                            if itemPetUuid == p.clean then
-                                                foundListed = true; break
+                                            for _, f in ipairs({"UUID","Uuid","PetUUID","PetUuid","id","Id","ID","PetID","PetId"}) do
+                                                local v = item.PetData[f]
+                                                if v and tostring(v):gsub("[{}]","") == p.clean then
+                                                    foundListed = true; break
+                                                end
                                             end
                                         end
+                                        if foundListed then break end
                                     end
                                     if foundListed then
                                         L("      → ✅ TBC verify: pet TERNYATA listed! Reclassify as success.")
@@ -4100,6 +4201,11 @@ BH.onStartClick = function()
                                             myListed[ruleIdx][p.clean] = true
                                         end
                                         failStats.generic = failStats.generic - 1  -- undo
+                                    else
+                                        -- v8.81: pet really gak ada di TBC tapi server reject — mark alreadyListed
+                                        -- sebagai safety biar gak loop. Restart script kalo ini false positive.
+                                        L("      → 🛑 Pet gak ke-detect di TBC tapi server reject. Mark skip biar gak loop.")
+                                        alreadyListed[p.clean] = true
                                     end
                                 end
                             else
@@ -4141,11 +4247,21 @@ BH.onStartClick = function()
             L("==== CYCLE "..cycleNum.." ====")
 
             -- v8.46+v8.47: stream cuma kalo TBC gak loaded (TBC bypasses streaming entirely)
+            -- v8.83: ALWAYS stream booth-mu di awal cycle — workspace scan ngandelin ini
+            -- Tanpa stream, DynamicInstances kosong di workspace meski booth-mu ada listing
             if not BH.TBC then
                 setStats("Streaming booths...", C.accent)
                 BH.ensureBoothsStreamed()
             else
                 setStats("Cycle "..cycleNum, C.accent)
+                -- TBC available tapi tetep stream booth-mu biar workspace scan accurate
+                pcall(BH.streamMyBooth)
+                -- Fallback: kalo booth-mu masih belum di workspace (mungkin streaming radius issue),
+                -- trigger full stream sekali
+                if BH.myBoothUuid and not BH.getMyBoothObj() then
+                    L("  ⚠ booth-mu belum ke-stream setelah streamMyBooth, full stream...")
+                    BH.ensureBoothsStreamed()
+                end
             end
 
             -- v8.40+v8.41+v8.44: auto-detect booth PASSIVE (no BOOTH btn click, silent)
@@ -4206,24 +4322,72 @@ BH.onStartClick = function()
             L("Cycle "..cycleNum.." done: "..listed.." new listed (total session: "..totalListed..")")
 
             -- v8.47: cek backpack drained — DON'T STOP, cuma wait lebih lama
+            -- v8.82: account alreadyListed pets — kalo semua backpack pet udah listed, gak ada yang bisa di-fill
             local hasNonFullRule = false
             local canFillSomeRule = false
             local bp = player:FindFirstChild("Backpack")
+
+            -- v8.82: build alreadyListed set dari TBC (sama logic kayak di listMatchingPets)
+            local alreadyListedSet = {}
+            if BH.TBC then
+                local data = getCachedTbcData()
+                if data and data.Listings then
+                    for listingKey, listing in pairs(data.Listings) do
+                        if listing.ItemType == "Pet" then
+                            local function _add(v)
+                                if v then
+                                    local cv = tostring(v):gsub("[{}]","")
+                                    if cv ~= "" then alreadyListedSet[cv] = true end
+                                end
+                            end
+                            _add(listingKey); _add(listing.ItemId)
+                            local item = data.Items and listing.ItemId and data.Items[listing.ItemId]
+                            if item then
+                                _add(item.UUID); _add(item.Uuid); _add(item.id); _add(item.Id); _add(item.ID)
+                                _add(item.PetUUID); _add(item.PetUuid)
+                                if item.PetData then
+                                    local pd = item.PetData
+                                    _add(pd.UUID); _add(pd.Uuid); _add(pd.id); _add(pd.Id); _add(pd.ID)
+                                    _add(pd.PetUUID); _add(pd.PetUuid); _add(pd.PetID); _add(pd.PetId)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            -- Fallback workspace booth scan
+            if BH.myBoothUuid then
+                local myBooth = BH.getMyBoothObj()
+                if myBooth then
+                    local di = myBooth:FindFirstChild("DynamicInstances")
+                    if di then
+                        for _, t in ipairs(di:GetChildren()) do
+                            if t:IsA("Tool") then
+                                alreadyListedSet[t.Name:gsub("[{}]","")] = true
+                            end
+                        end
+                    end
+                end
+            end
+
             for ri, r in ipairs(listingRules) do
                 local ml = r.maxListings or math.huge
                 if countActive(ri) < ml then
                     hasNonFullRule = true
-                    -- Cek backpack ada pet match rule ini?
+                    -- Cek backpack ada pet match rule ini DAN belum listed?
                     if bp then
                         for _, t in ipairs(bp:GetChildren()) do
                             if isPet(t) and not isFav(t) then
-                                local pType = getPetType(t)
-                                local currentKg = getCurrentKg(t)
-                                local baseKg = getBaseKg(t) or currentKg
-                                if (not r.type or r.type == pType)
-                                   and baseKg >= r.min and baseKg <= r.max then
-                                    canFillSomeRule = true
-                                    break
+                                local petUuid = tostring(t:GetAttribute("PET_UUID") or t.Name):gsub("^{",""):gsub("}$","")
+                                if not alreadyListedSet[petUuid] then
+                                    local pType = getPetType(t)
+                                    local currentKg = getCurrentKg(t)
+                                    local baseKg = getBaseKg(t) or currentKg
+                                    if (not r.type or r.type == pType)
+                                       and baseKg >= r.min and baseKg <= r.max then
+                                        canFillSomeRule = true
+                                        break
+                                    end
                                 end
                             end
                         end
