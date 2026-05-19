@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.76"
-local VERSION_DATE = "Rate-limit fix: per-pet cooldown + skip retry on please-wait error"
+local VERSION = "8.77"
+local VERSION_DATE = "Global rate-limit pause + break-on-fail (fix 15-listing stuck)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -3561,6 +3561,10 @@ BH.onStartClick = function()
         -- pet yang kena "please wait" di-defer 35 detik biar server cooldown selesai dulu
         local rateLimitedUntil = {}  -- clean_uuid -> tick when can retry
         local rateLimitedCount = {}   -- clean_uuid -> consecutive failures (untuk exponential backoff)
+        -- v8.77: GLOBAL rate-limit — pause SEMUA listing kalo server udah mulai rate-limit
+        -- Tujuannya: hentiin attempt ke pet lain biar server-side cooldown bisa kelar
+        local globalRateLimitUntil = 0
+        local globalRateLimitCount = 0
 
         -- v8.47: TBC data cache (refresh setelah list atau 1s TTL)
         local tbcDataCache = nil
@@ -3758,6 +3762,13 @@ BH.onStartClick = function()
 
             local listedNow = 0
             local listAttempts = 0  -- v8.47: pace lister biar gak spam
+            -- v8.77: kalo global rate-limit aktif, exit early
+            if tick() < globalRateLimitUntil then
+                local waitLeft = math.ceil(globalRateLimitUntil - tick())
+                L("   ⏸ Global rate-limit aktif — skip cycle ini, wait "..waitLeft.."s")
+                setStats("Server rate-limited — pause "..waitLeft.."s", C.danger)
+                return 0
+            end
             for _, p in ipairs(pets) do
                 if stopReq then break end
 
@@ -3809,6 +3820,8 @@ BH.onStartClick = function()
                             -- v8.76: clear rate-limit history kalo pet ini akhirnya berhasil
                             rateLimitedCount[p.clean] = nil
                             rateLimitedUntil[p.clean] = nil
+                            -- v8.77: reset global counter — server udah accept lagi, kasi kondisi fresh
+                            globalRateLimitCount = 0
                             L("   ✅ listing: "..tostring(idOrErr):sub(1,12))
                             setStats("Listed "..listedNow.." this round", C.accent)
 
@@ -3850,8 +3863,15 @@ BH.onStartClick = function()
                                 local cooldownSec = math.min(35 + (failCount - 1) * 25, 120)
                                 rateLimitedUntil[p.clean] = tick() + cooldownSec
                                 L("   ⏳ defer "..p.clean:sub(1,8).." for "..cooldownSec.."s (fail #"..failCount..")")
-                                setStats("Rate limited — defer "..cooldownSec.."s", C.danger)
-                                task.wait(15)  -- short pause biar next pet juga gak langsung hit limit
+
+                                -- v8.77: GLOBAL pause — stop semua listing biar server cooldown beneran kelar
+                                -- Exponential global backoff: 45s → 75s → 105s → max 180s
+                                globalRateLimitCount = globalRateLimitCount + 1
+                                local globalSec = math.min(45 + (globalRateLimitCount - 1) * 30, 180)
+                                globalRateLimitUntil = tick() + globalSec
+                                L("   🛑 GLOBAL PAUSE "..globalSec.."s — stop semua attempt (hit #"..globalRateLimitCount..")")
+                                setStats("Rate limited — pause "..globalSec.."s", C.danger)
+                                break  -- exit for loop, jangan attempt pet berikutnya
                             elseif errLow:find("favorit") then
                                 L("   ⏭ skip (favorited)")
                                 -- v8.47: gak perlu extra wait, front-load udah handle
