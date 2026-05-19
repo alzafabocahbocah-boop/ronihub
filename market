@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.102"
-local VERSION_DATE = "Anti-AFK: proactive — fake input setiap 5 menit (gak nunggu idle 20mnt)"
+local VERSION = "8.105"
+local VERSION_DATE = "FIX unlist: lenient success detection + raw response dump + alt-name fallback"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -226,11 +226,14 @@ do
 
     -- Run discover saat module load (silently)
     BH.PET_NAMES_DISCOVERED = {}
+    BH.PET_NAMES_SET = {}  -- v8.104: set untuk O(1) lookup
     task.spawn(function()
         task.wait(2)  -- kasih waktu RS replicate
         local ok, names = pcall(BH.discoverPetNames)
         if ok and names and #names > 0 then
             BH.PET_NAMES_DISCOVERED = names
+            -- v8.104: build set version
+            for _, n in ipairs(names) do BH.PET_NAMES_SET[n] = true end
         end
     end)
     BH.MUTATION_PREFIXES = {}
@@ -378,6 +381,11 @@ do
 
     function BH.getBaseName(name)
         if not name or name == "" then return name end
+        -- v8.104: kalo nama input PERSIS pet name (e.g. "Mimic Octopus"), return as-is
+        -- Cegah strip-an salah ("Mimic Octopus" → "Octopus") karena "Mimic" ke-overlap mutation list
+        if BH.PET_NAMES_SET and BH.PET_NAMES_SET[name] then
+            return name
+        end
         local result = name
         local changed = true
         -- Strip multi-layer mutations (e.g. "Shocked, Galactic Peacock" → "Peacock")
@@ -385,8 +393,14 @@ do
             changed = false
             for _, prefix in ipairs(BH.MUTATION_PREFIXES) do
                 if result:sub(1, #prefix) == prefix then
-                    result = result:sub(#prefix + 1)
+                    local stripped = result:sub(#prefix + 1)
+                    if stripped == "" then break end
+                    result = stripped
                     changed = true
+                    -- v8.104: kalo hasil strip udah match pet name valid, STOP (don't over-strip)
+                    if BH.PET_NAMES_SET and BH.PET_NAMES_SET[result] then
+                        return result
+                    end
                     break
                 end
             end
@@ -2398,14 +2412,25 @@ do
                 end
 
                 local success = false
+                local lastRaw = nil
                 for _, a in ipairs(attempts) do
-                    local ok, ret = pcall(function() return removeRE:InvokeServer(a.arg) end)
-                    if ok and ret == true then
+                    -- v8.105: capture ALL return values for lenient detection
+                    local ok, r1, r2, r3, r4 = pcall(function() return removeRE:InvokeServer(a.arg) end)
+                    -- Build raw dump for diagnostic
+                    local raw = string.format("ok=%s r1=%s(%s) r2=%s r3=%s r4=%s",
+                        tostring(ok), type(r1), tostring(r1):sub(1,40),
+                        tostring(r2):sub(1,30), tostring(r3):sub(1,20), tostring(r4):sub(1,20))
+                    lastRaw = raw
+                    -- Lenient success: r1 == true, OR (ok AND nothing returned), OR r1 is a non-nil non-false value (string id?)
+                    local isSuccess = (ok and r1 == true)
+                        or (ok and r1 == nil and r2 == nil)  -- server may return nothing on success
+                        or (ok and type(r1) == "string" and not r1:lower():find("error") and not r1:lower():find("fail") and not r1:lower():find("not"))
+                    if isSuccess then
                         success = true
-                        L("[Pantau] ✅ "..a.label.." → "..tostring(a.arg):sub(1,20))
+                        L("[Pantau] ✅ "..a.label.." → "..tostring(a.arg):sub(1,20).." | "..raw)
                         break
                     else
-                        L("[Pantau] ✗ "..a.label..": ret="..tostring(ret):sub(1,30))
+                        L("[Pantau] ✗ "..a.label..": "..raw)
                     end
                     task.wait(0.2)
                 end
@@ -2504,21 +2529,30 @@ do
                 local isRateLimit = false
 
                 for _, a in ipairs(attempts) do
-                    local ok, ret = pcall(function() return removeRE:InvokeServer(a.arg) end)
-                    if ok and ret == true then
+                    -- v8.105: capture all return values + lenient success detection
+                    local ok, r1, r2, r3, r4 = pcall(function() return removeRE:InvokeServer(a.arg) end)
+                    local raw = string.format("ok=%s r1=%s(%s) r2=%s r3=%s",
+                        tostring(ok), type(r1), tostring(r1):sub(1,40),
+                        tostring(r2):sub(1,30), tostring(r3):sub(1,20))
+                    local isSuccess = (ok and r1 == true)
+                        or (ok and r1 == nil and r2 == nil)
+                        or (ok and type(r1) == "string" and not r1:lower():find("error") and not r1:lower():find("fail"))
+                    if isSuccess then
                         success = true
-                        L("[Unlist-ALL] ["..i.."] ✅ "..a.label.." → "..tostring(a.arg):sub(1,16))
+                        L("[Unlist-ALL] ["..i.."] ✅ "..a.label.." → "..tostring(a.arg):sub(1,16).." | "..raw)
                         break
                     end
-                    -- v8.78: track last error for diagnostics
+                    -- track last error for diagnostics
                     if ok then
-                        lastErr = tostring(ret)
+                        lastErr = tostring(r1)
                     else
-                        lastErr = "pcall_fail:"..tostring(ret)
+                        lastErr = "pcall_fail:"..tostring(r1)
                     end
-                    -- v8.78: detect rate-limit in error message
+                    L("[Unlist-ALL] ["..i.."] ✗ "..a.label..": "..raw)
+                    -- detect rate-limit in error message
                     local lowErr = (lastErr or ""):lower()
-                    if lowErr:find("please wait") or lowErr:find("cooldown") or lowErr:find("too fast") then
+                    if lowErr:find("please wait") or lowErr:find("cooldown") or lowErr:find("too fast")
+                       or lowErr:find("rate") then
                         isRateLimit = true
                         break  -- stop trying other formats, all akan fail
                     end
@@ -3457,6 +3491,22 @@ pcall(function()
     if Booths then
         createRE = Booths:FindFirstChild("CreateListing")
         removeRE = Booths:FindFirstChild("RemoveListing")
+        -- v8.105: fallback names (kalo game rename)
+        if not removeRE then
+            for _, alt in ipairs({"UnlistItem", "Unlist", "DeleteListing", "RemoveItem", "Delist"}) do
+                removeRE = Booths:FindFirstChild(alt)
+                if removeRE then
+                    L("[Init] removeRE alt-name found: "..alt)
+                    break
+                end
+            end
+        end
+        if not removeRE then
+            -- Dump all RE names di Booths buat debug
+            local names = {}
+            for _, c in ipairs(Booths:GetChildren()) do table.insert(names, c.Name) end
+            L("[Init] ⚠ RemoveListing NOT FOUND! Booths children: "..table.concat(names, ", "))
+        end
         buyRE = Booths:FindFirstChild("BuyListing")
         claimRE = Booths:FindFirstChild("ClaimBooth")
         removeBoothRE = Booths:FindFirstChild("RemoveBooth")
@@ -3526,7 +3576,9 @@ local function getAge(t)
         if m then return tonumber(m) end
     end
     if name:match("%[Age%s*MAX%]") or name:match("%[MAX%]") then return 100 end
-    return 1
+    -- v8.103: return nil kalo bener-bener gak tau (BUKAN default 1!)
+    -- Yang lama default 1 → confusing dengan pet TRUE age 1
+    return nil
 end
 
 -- Base weight (at age 1) — try attributes, fallback to FORMULA: baseKG = kg * 11 / (age + 10)
@@ -3536,27 +3588,36 @@ local BASE_KG_ATTRS = {
     "StartingWeight","STARTING_KG",
 }
 local function getBaseKg(t)
-    -- Try attribute lookup first
+    -- v8.103: detect mutation by name (semua mutasi = ×1.10)
+    local hasMut = false
+    if t.Name then
+        for _, prefix in ipairs(BH.MUTATION_PREFIXES or {}) do
+            if t.Name:sub(1, #prefix) == prefix then hasMut = true; break end
+        end
+    end
+    local mult = hasMut and 1.10 or 1.0
+
+    -- Try attribute lookup first (server-stored BaseWeight)
     for _, attr in ipairs(BASE_KG_ATTRS) do
         local ok, v = pcall(function() return t:GetAttribute(attr) end)
         if ok and v and type(v) == "number" and v > 0 then
-            return v, attr
+            -- v8.103: attribute is raw base (pre-mutation) → multiply by mut (kg-at-age-1-treated)
+            return v * mult, attr
         end
     end
-    -- Fallback: formula baseKG = kg * 11 / (age + 10)
+    -- Fallback: formula baseKG = kg * 11 / ((age + 10) * mult)
     local kg = getCurrentKg(t)
     local age = getAge(t)
     if kg > 0 then
-        -- v8.47: kalo age unknown (default 1), assume mature (age 100)
-        -- Most stored pets are matured (age 100), formula: base = current / 10
-        if age and age >= 2 then
-            return kg * 11 / (age + 10), "formula"
+        if age and age >= 1 then
+            -- v8.103: TRUE age known — formula dengan mut (semua mut = ×1.10)
+            return kg * 11 / ((age + 10) * mult), "formula"
         else
-            return kg * 11 / 110, "formula-mature"  -- age=100 assumed
+            -- age unknown (getAge returned nil) — assume mature (age 100)
+            return kg * 11 / (110 * mult), "formula-mature-assumed"
         end
     end
     -- v8.37: cache fallback untuk mutated pet (yang gak punya age info)
-    -- v8.38: pass item biar bisa lookup by f attribute juga (untuk booth tools)
     local cached = BH.getCachedBaseKG(t)
     if cached then return cached, "cache" end
     return nil
