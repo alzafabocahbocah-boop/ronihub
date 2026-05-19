@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.69"
-local VERSION_DATE = "Auto-Gift broader scan + diagnostic"
+local VERSION = "8.71"
+local VERSION_DATE = "Persist semua setting Market (toggle + filter)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -17,7 +17,7 @@ _G.ZenxV8 = _G.ZenxV8 or {}
 local function L(s) table.insert(_G.ZenxV8, s) print("[ZV8]", s) end
 
 -- ===== v8.46: Anti-AFK (cegah kick karena idle 20 menit) =====
-local antiAfkEnabled = true
+local antiAfkEnabled = true  -- v8.70: di-override dari state file setelah load
 do
     local ok, VirtualUser = pcall(function() return game:GetService("VirtualUser") end)
     if ok and VirtualUser then
@@ -66,6 +66,10 @@ do
     BH.marketState = BH.loadMarketState()
     BH.myBoothUuid = BH.marketState.myBoothUuid
     if BH.myBoothUuid then L("[State] cached myBoothUuid: "..BH.myBoothUuid:sub(1,16).."...") end
+    -- v8.70: load anti-afk pref dari state (default true kalo gak ada)
+    if BH.marketState.antiAfkEnabled ~= nil then
+        antiAfkEnabled = BH.marketState.antiAfkEnabled
+    end
 end
 
 -- ===== v8.35: MUTATION strip helper (sync sama inventory.lua) =====
@@ -1430,10 +1434,14 @@ end)
 local petCard = makeCard(miscPanel, 86)
 lblOf(petCard, "👜  DISPLAY PET", 14, 10, 250, 22, C.accent, 14, FB)
 lblOf(petCard, "Auto-equip pet biar keliatan di booth", 14, 32, 400, 18, C.textDim, 11)
+-- v8.70: load dari state, default true
 local autoEquipState = true
-local autoEquipBtn = btnOf(petCard, 14, 54, 140, 26, "👜 Equip: ON", C.success)
-local equipMode = "BIGGEST"
-local equipModeBtn = btnOf(petCard, 164, 54, 140, 26, "📦 BIGGEST", C.card, C.text)
+if BH.marketState and BH.marketState.autoEquip ~= nil then autoEquipState = BH.marketState.autoEquip end
+local autoEquipBtn = btnOf(petCard, 14, 54, 140, 26,
+    autoEquipState and "👜 Equip: ON" or "👜 Equip: OFF",
+    autoEquipState and C.success or C.danger)
+local equipMode = (BH.marketState and BH.marketState.equipMode) or "BIGGEST"
+local equipModeBtn = btnOf(petCard, 164, 54, 140, 26, "📦 "..equipMode, C.card, C.text)
 
 -- v8.46: ANTI-AFK CARD (wrapped in do-block to manage local count)
 do
@@ -1447,6 +1455,11 @@ do
         antiAfkEnabled = not antiAfkEnabled
         antiAfkBtn.Text = antiAfkEnabled and "🚫 Anti-AFK: ON" or "🚫 Anti-AFK: OFF"
         antiAfkBtn.BackgroundColor3 = antiAfkEnabled and C.success or C.danger
+        -- v8.70: persist
+        if BH.marketState then
+            BH.marketState.antiAfkEnabled = antiAfkEnabled
+            BH.saveMarketState(BH.marketState)
+        end
         L(antiAfkEnabled and "[anti-afk] ON" or "[anti-afk] OFF")
     end)
 end
@@ -1611,8 +1624,9 @@ do
     scanRemotes(RS, 0)
     statusLbl.Text = string.format("Found: %d gift, %d trade remotes", #BH.giftRemotes, #BH.tradeRemotes)
 
-    BH.autoGift = false
-    BH.autoTrade = false
+    -- v8.69: load from state file biar persist after rejoin
+    BH.autoGift = (BH.marketState and BH.marketState.autoGift) == true
+    BH.autoTrade = (BH.marketState and BH.marketState.autoTrade) == true
     BH.giftConns = {}
     BH.tradeConns = {}
 
@@ -1821,6 +1835,8 @@ do
         giftBtn.Text = BH.autoGift and "🎁 Auto-Gift: ON" or "🎁 Auto-Gift: OFF"
         giftBtn.BackgroundColor3 = BH.autoGift and C.success or C.danger
         hookGifts()
+        -- v8.69: persist state
+        if BH.marketState then BH.marketState.autoGift = BH.autoGift; BH.saveMarketState(BH.marketState) end
         L("[Auto-Gift] "..(BH.autoGift and "enabled, "..#BH.giftConns.." listener" or "disabled"))
     end)
 
@@ -1829,8 +1845,23 @@ do
         tradeBtn.Text = BH.autoTrade and "🤝 Auto-Trade: ON" or "🤝 Auto-Trade: OFF"
         tradeBtn.BackgroundColor3 = BH.autoTrade and C.success or C.danger
         hookTrades()
+        if BH.marketState then BH.marketState.autoTrade = BH.autoTrade; BH.saveMarketState(BH.marketState) end
         L("[Auto-Trade] "..(BH.autoTrade and "enabled, "..#BH.tradeConns.." listener" or "disabled"))
     end)
+
+    -- v8.69: kalo state loaded autoGift=true / autoTrade=true → auto install hook + update UI
+    if BH.autoGift then
+        giftBtn.Text = "🎁 Auto-Gift: ON"
+        giftBtn.BackgroundColor3 = C.success
+        hookGifts()
+        L("[Auto-Gift] auto-enabled from state file")
+    end
+    if BH.autoTrade then
+        tradeBtn.Text = "🤝 Auto-Trade: ON"
+        tradeBtn.BackgroundColor3 = C.success
+        hookTrades()
+        L("[Auto-Trade] auto-enabled from state file")
+    end
 end
 
 -- v8.49: PET TYPES card — breakdown pet di backpack per type
@@ -2372,7 +2403,8 @@ end)
 snSearch = Instance.new("TextBox")
 snSearch.Size = UDim2.new(1, 0, 0, 28) snSearch.Position = UDim2.new(0, 0, 0, 62)
 snSearch.BackgroundColor3 = C.input snSearch.BorderSizePixel = 0
-snSearch.Text = "" snSearch.TextColor3 = C.text
+snSearch.Text = (BH.marketState and BH.marketState.snSearch) or ""
+snSearch.TextColor3 = C.text
 snSearch.PlaceholderText = "🔍 search pet name or type..."
 snSearch.PlaceholderColor3 = C.textDim
 snSearch.Font = F snSearch.TextSize = 12
@@ -2408,6 +2440,15 @@ snMinKg = makeFilterBox(snFilterFrame, "KG ≥", 60)
 snMaxKg = makeFilterBox(snFilterFrame, "KG ≤", 60)
 snMinPrice = makeFilterBox(snFilterFrame, "Price ≥", 70)
 snMaxPrice = makeFilterBox(snFilterFrame, "Price ≤", 70)
+-- v8.70: restore filter values dari state file
+if BH.marketState then
+    snMinAge.Text = BH.marketState.snMinAge or ""
+    snMaxAge.Text = BH.marketState.snMaxAge or ""
+    snMinKg.Text = BH.marketState.snMinKg or ""
+    snMaxKg.Text = BH.marketState.snMaxKg or ""
+    snMinPrice.Text = BH.marketState.snMinPrice or ""
+    snMaxPrice.Text = BH.marketState.snMaxPrice or ""
+end
 local snResetBtn = Instance.new("TextButton")
 snResetBtn.Size = UDim2.new(0, 60, 1, 0) snResetBtn.AutoButtonColor = false
 snResetBtn.BackgroundColor3 = C.danger
@@ -2525,6 +2566,14 @@ snResetBtn.MouseButton1Click:Connect(function()
     snMinAge.Text = "" snMaxAge.Text = ""
     snMinKg.Text = "" snMaxKg.Text = ""
     snMinPrice.Text = "" snMaxPrice.Text = ""
+    -- v8.70: persist reset
+    if BH.marketState then
+        BH.marketState.snSearch = ""
+        BH.marketState.snMinAge = "" BH.marketState.snMaxAge = ""
+        BH.marketState.snMinKg = "" BH.marketState.snMaxKg = ""
+        BH.marketState.snMinPrice = "" BH.marketState.snMaxPrice = ""
+        BH.saveMarketState(BH.marketState)
+    end
 end)
 
 end  -- end do block for snipe UI
@@ -4226,6 +4275,8 @@ autoEquipBtn.MouseButton1Click:Connect(function()
     autoEquipState = not autoEquipState
     autoEquipBtn.Text = autoEquipState and "👜 Equip: ON" or "👜 Equip: OFF"
     autoEquipBtn.BackgroundColor3 = autoEquipState and C.success or C.danger
+    -- v8.70: persist
+    if BH.marketState then BH.marketState.autoEquip = autoEquipState; BH.saveMarketState(BH.marketState) end
 end)
 local MODES = {"BIGGEST", "RAREST", "RANDOM"}
 equipModeBtn.MouseButton1Click:Connect(function()
@@ -4233,6 +4284,8 @@ equipModeBtn.MouseButton1Click:Connect(function()
         if m == equipMode then equipMode = MODES[(i % #MODES) + 1]; break end
     end
     equipModeBtn.Text = "📦 "..equipMode
+    -- v8.70: persist
+    if BH.marketState then BH.marketState.equipMode = equipMode; BH.saveMarketState(BH.marketState) end
 end)
 
 local function getRarityScore(name)
@@ -4970,6 +5023,21 @@ do
     for _, b in ipairs({snSearch, snMinAge, snMaxAge, snMinKg, snMaxKg, snMinPrice, snMaxPrice}) do
         b:GetPropertyChangedSignal("Text"):Connect(renderSnipe)
     end
+    -- v8.70: save filter values on focus lost
+    local function saveFilters()
+        if not BH.marketState then return end
+        BH.marketState.snSearch = snSearch.Text
+        BH.marketState.snMinAge = snMinAge.Text
+        BH.marketState.snMaxAge = snMaxAge.Text
+        BH.marketState.snMinKg = snMinKg.Text
+        BH.marketState.snMaxKg = snMaxKg.Text
+        BH.marketState.snMinPrice = snMinPrice.Text
+        BH.marketState.snMaxPrice = snMaxPrice.Text
+        BH.saveMarketState(BH.marketState)
+    end
+    for _, b in ipairs({snSearch, snMinAge, snMaxAge, snMinKg, snMaxKg, snMinPrice, snMaxPrice}) do
+        b.FocusLost:Connect(saveFilters)
+    end
 
     -- v8.47: auto-refresh every 10s
     task.spawn(function()
@@ -5095,12 +5163,15 @@ BH.buildGardenPanel = function()
         gGiftBtn.Text = "Auto Accept Gift: "..(BH.autoGift and "ON" or "OFF")
         gGiftBtn.TextColor3 = BH.autoGift and C.accent or C.textDim
         if BH.hookGiftsFn then BH.hookGiftsFn() end
+        -- v8.69: persist
+        if BH.marketState then BH.marketState.autoGift = BH.autoGift; BH.saveMarketState(BH.marketState) end
     end)
     gTradeBtn.MouseButton1Click:Connect(function()
         BH.autoTrade = not BH.autoTrade
         gTradeBtn.Text = "Auto Accept Trade: "..(BH.autoTrade and "ON" or "OFF")
         gTradeBtn.TextColor3 = BH.autoTrade and C.accent or C.textDim
         if BH.hookTradesFn then BH.hookTradesFn() end
+        if BH.marketState then BH.marketState.autoTrade = BH.autoTrade; BH.saveMarketState(BH.marketState) end
     end)
     gTravelBtn.MouseButton1Click:Connect(function()
         L("[TP-Market] mencari 'Travel to Farmer Market' button...")
