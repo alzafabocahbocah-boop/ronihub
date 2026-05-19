@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.52"
-local VERSION_DATE = "[STAGE MARKERS] pinpoint halt"
+local VERSION = "8.53"
+local VERSION_DATE = "FIX garden halt: safe remote access"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -485,7 +485,7 @@ BH.stageMarker = function(num, color, text, y)
 end
 
 -- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.52 STAGE 1] panel created", 10)
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.53 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -2417,11 +2417,20 @@ BH.stageMarker(2, Color3.fromRGB(255, 165, 0), "[STAGE 2] snipe UI done", 35)
 -- ============================================================
 -- LOGIC
 -- ============================================================
-local createRE = RS.GameEvents.TradeEvents.Booths.CreateListing
-local removeRE = RS.GameEvents.TradeEvents.Booths.RemoveListing
-local buyRE = RS.GameEvents.TradeEvents.Booths:FindFirstChild("BuyListing")
-local claimRE = RS.GameEvents.TradeEvents.Booths.ClaimBooth
-local removeBoothRE = RS.GameEvents.TradeEvents.Booths:FindFirstChild("RemoveBooth")
+-- v8.52: safe remote access (di garden server TradeEvents gak ada)
+local createRE, removeRE, buyRE, claimRE, removeBoothRE
+pcall(function()
+    local Booths = RS:FindFirstChild("GameEvents")
+        and RS.GameEvents:FindFirstChild("TradeEvents")
+        and RS.GameEvents.TradeEvents:FindFirstChild("Booths")
+    if Booths then
+        createRE = Booths:FindFirstChild("CreateListing")
+        removeRE = Booths:FindFirstChild("RemoveListing")
+        buyRE = Booths:FindFirstChild("BuyListing")
+        claimRE = Booths:FindFirstChild("ClaimBooth")
+        removeBoothRE = Booths:FindFirstChild("RemoveBooth")
+    end
+end)
 local skinRE
 pcall(function() skinRE = RS.GameEvents.TradeBoothSkinService.Equip end)
 
