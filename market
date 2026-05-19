@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.51"
-local VERSION_DATE = "[SYNC CALL] garden direct"
+local VERSION = "8.52"
+local VERSION_DATE = "[STAGE MARKERS] pinpoint halt"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -469,16 +469,23 @@ local snipePanel = makePanel("SNIPE")
 local gardenPanel = makePanel("GARDEN")
 BH.gardenPanel = gardenPanel  -- store for cross-scope access
 
--- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
-do
+-- Helper buat stage marker (avoid local var count)
+BH.stageMarker = function(num, color, text, y)
+    if not gardenPanel then return end
     local t = Instance.new("TextLabel")
-    t.Name = "SyncTest"
-    t.Size = UDim2.new(1, -20, 0, 30) t.Position = UDim2.new(0, 10, 0, 10)
-    t.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-    t.BorderSizePixel = 0 t.Text = "[v8.51 SYNC TEST] gardenPanel render OK"
-    t.TextColor3 = Color3.new(1, 1, 1) t.Font = Enum.Font.SourceSansBold
-    t.TextSize = 14 t.Parent = gardenPanel
+    t.Size = UDim2.new(0, 200, 0, 20)
+    t.Position = UDim2.new(0, 10, 0, y)
+    t.BackgroundColor3 = color
+    t.BorderSizePixel = 0
+    t.Text = text
+    t.TextColor3 = Color3.new(1, 1, 1)
+    t.Font = Enum.Font.SourceSans
+    t.TextSize = 11
+    t.Parent = gardenPanel
 end
+
+-- SYNC TEST LABEL — kalo ini kelihatan, gardenPanel rendering OK
+BH.stageMarker(1, Color3.fromRGB(255, 50, 50), "[v8.52 STAGE 1] panel created", 10)
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
@@ -2404,6 +2411,9 @@ end)
 
 end  -- end do block for snipe UI
 
+-- STAGE 2 marker
+BH.stageMarker(2, Color3.fromRGB(255, 165, 0), "[STAGE 2] snipe UI done", 35)
+
 -- ============================================================
 -- LOGIC
 -- ============================================================
@@ -3211,6 +3221,9 @@ do
         end
     end
 end
+
+-- STAGE 3 marker
+BH.stageMarker(3, Color3.fromRGB(150, 100, 200), "[STAGE 3] before onStartClick", 60)
 
 BH.onStartClick = function()
     -- If already running → request stop
@@ -4908,6 +4921,9 @@ L("  - Total pet di backpack")
 L("  - Fav count")
 L("  - Inventory capacity")
 
+-- STAGE 4 marker
+BH.stageMarker(4, Color3.fromRGB(0, 150, 200), "[STAGE 4] before func def", 85)
+
 -- v8.49: GARDEN PANEL UI build (server-detect)
 BH.buildGardenPanel = function()
     local gp = BH.gardenPanel
@@ -5102,8 +5118,14 @@ BH.buildGardenPanel = function()
         pcall(BH.refreshGardenStats)
     end)
 end
--- v8.50: SYNC call (task.spawn kayak gak run di executor)
+-- STAGE 5 marker (after function def)
+BH.stageMarker(5, Color3.fromRGB(200, 0, 200), "[STAGE 5] func type="..type(BH.buildGardenPanel), 110)
+
+-- v8.50: SYNC call
 BH.buildGardenPanel()
+
+-- STAGE 6 marker (after sync call)
+BH.stageMarker(6, Color3.fromRGB(0, 200, 0), "[STAGE 6] call returned", 135)
 
 populateModalList()
 refreshPriceList()
