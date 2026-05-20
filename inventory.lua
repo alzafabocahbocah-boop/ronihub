@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v4.8 (GUI panjangin ke kanan)"
+local SCRIPT_VERSION = "v4.9 (Gajah pill 🐘 only, no kg/count — top bg merah, bot bg hitam)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -102,24 +102,24 @@ local C = {
     Teal=Color3.fromRGB(40,200,160), TDim=Color3.fromRGB(8,30,24),
     Cyan=Color3.fromRGB(80,200,230), Purple=Color3.fromRGB(180,90,210),
     Pink=Color3.fromRGB(220,100,160), Orange=Color3.fromRGB(230,140,60),
+    Black=Color3.fromRGB(0,0,0),  -- v4.9: buat gajah pill bawah
 }
 
 -- v4.0: Weight categories 2 rows
--- Top: 0-2, 2-3, 3-3.7, 3.8-4 + Gajah Abu 38kg+
--- Bot: 3-4, 4-5, 5-5.9, 5.9-6.4 + Gajah Merah 60kg+
+-- v4.9: gajah pill cuma 🐘, no kg range no count. Top=bg merah, Bot=bg hitam
 local CAT_TOP = {
     {name="0-2",     min=0,    max=2,         color=C.Green},
     {name="2-3",     min=2,    max=3,         color=C.Gold},
     {name="3-3.7",   min=3,    max=3.7,       color=C.Orange},
     {name="3.8-4",   min=3.8,  max=4,         color=C.Red},
-    {name="🐘Abu 38+",min=38,  max=math.huge, color=C.Gray},
+    {name="🐘",      min=38,   max=math.huge, color=C.White, bg=C.Black, no_text=true},
 }
 local CAT_BOT = {
     {name="3-4",     min=3,    max=4,         color=C.Green},
     {name="4-5",     min=4,    max=5,         color=C.Gold},
     {name="5-5.9",   min=5,    max=5.9,       color=C.Orange},
     {name="5.9-6.4", min=5.9,  max=6.4,       color=C.Red},
-    {name="🐘Merah 60+",min=60,max=math.huge, color=C.Red},
+    {name="🐘",      min=60,   max=math.huge, color=C.White, bg=C.Red, no_text=true},
 }
 -- Backward compat alias (CATEGORIES used elsewhere)
 local CATEGORIES = CAT_TOP
@@ -540,14 +540,19 @@ mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new
 local catRow2 = mk("Frame",{Size=UDim2.new(1,0,0,42), BackgroundTransparency=1, LayoutOrder=3, Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,3), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow2})
 
--- Pill width: 5 pills + 4 gaps × 3px = 12, di GUI 420 dengan padding ~16 = ~78 per pill
-local PILL_W = 78
+-- v4.9: PILL_W default 88, gajah pill (no_text) cuma 36 biar pill lain (5.9-6.4) lega
+local PILL_W = 88
+local PILL_W_GAJAH = 36
 
 local catTopLabels = {}
 for i, cat in ipairs(CAT_TOP) do
-    local pill = mk("Frame",{Size=UDim2.new(0, PILL_W, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow1})
+    local w = cat.no_text and PILL_W_GAJAH or PILL_W
+    -- v4.9: pake cat.bg kalo ada (buat gajah merah)
+    local pill = mk("Frame",{Size=UDim2.new(0, w, 1, 0), BackgroundColor3=cat.bg or C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow1})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, cat.name..": 0", 16, C.Gray, Enum.TextXAlignment.Center)
+    -- v4.9: no_text → hanya nama (mis "🐘"), tanpa ": 0"
+    local initText = cat.no_text and cat.name or (cat.name..": 0")
+    local pl = lbl(pill, initText, 16, cat.no_text and (cat.color or C.White) or C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
     pl.Font = Enum.Font.GothamBold
     catTopLabels[i] = pl
@@ -555,9 +560,11 @@ end
 
 local catBotLabels = {}
 for i, cat in ipairs(CAT_BOT) do
-    local pill = mk("Frame",{Size=UDim2.new(0, PILL_W, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow2})
+    local w = cat.no_text and PILL_W_GAJAH or PILL_W
+    local pill = mk("Frame",{Size=UDim2.new(0, w, 1, 0), BackgroundColor3=cat.bg or C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow2})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, cat.name..": 0", 16, C.Gray, Enum.TextXAlignment.Center)
+    local initText = cat.no_text and cat.name or (cat.name..": 0")
+    local pl = lbl(pill, initText, 16, cat.no_text and (cat.color or C.White) or C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
     pl.Font = Enum.Font.GothamBold
     catBotLabels[i] = pl
@@ -827,15 +834,26 @@ local function _doBuildInvShow()
     for i, lblWidget in ipairs(catTopLabels) do
         local cat = CAT_TOP[i]
         local count = catTopCounts[i]
-        lblWidget.Text = cat.name..": "..count
-        lblWidget.TextColor3 = count > 0 and cat.color or C.Gray
+        -- v4.9: no_text → tetep nama doang (mis "🐘")
+        if cat.no_text then
+            lblWidget.Text = cat.name
+            lblWidget.TextColor3 = cat.color or C.White
+        else
+            lblWidget.Text = cat.name..": "..count
+            lblWidget.TextColor3 = count > 0 and cat.color or C.Gray
+        end
     end
     -- v4.0: render BOTTOM row pills
     for i, lblWidget in ipairs(catBotLabels) do
         local cat = CAT_BOT[i]
         local count = catBotCounts[i]
-        lblWidget.Text = cat.name..": "..count
-        lblWidget.TextColor3 = count > 0 and cat.color or C.Gray
+        if cat.no_text then
+            lblWidget.Text = cat.name
+            lblWidget.TextColor3 = cat.color or C.White
+        else
+            lblWidget.Text = cat.name..": "..count
+            lblWidget.TextColor3 = count > 0 and cat.color or C.Gray
+        end
     end
 
     detailTotal.Text = "Total: "..#petsList.." pet ("..kgCount.." dgn KG)"
