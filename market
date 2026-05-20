@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.112"
-local VERSION_DATE = "Age-1-normalized: rule X-Y = pet age-1 equivalent kg X-Y"
+local VERSION = "8.113"
+local VERSION_DATE = "Cabut diag block dari market (bikin runtime err). Pake pet_debug.lua standalone"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1695,56 +1695,6 @@ autoClaimBtn.MouseButton1Click:Connect(function()
     autoClaimBtn.BackgroundColor3 = autoClaimState and C.success or C.danger
     L(autoClaimState and "[Auto-Claim] enabled (check 15s)" or "[Auto-Claim] disabled")
 end)
-
--- v8.111: DIAGNOSE PETS — dump full attribute info biar user bisa lihat persis pet structure
--- Wrapped in IIFE biar locals gak makan main-scope 200-limit
-(function()
-local diagCard = makeCard(miscPanel, 86)
-lblOf(diagCard, "🔬  DIAGNOSE PETS", 14, 10, 250, 22, C.accent, 14, FB)
-lblOf(diagCard, "Dump semua attribute pet di backpack ke dev console", 14, 32, 400, 18, C.textDim, 11)
-local diagBtn = btnOf(diagCard, 14, 54, 200, 26, "🔬 DUMP ALL PETS", C.accent)
-diagBtn.MouseButton1Click:Connect(function()
-    task.spawn(function()
-        L("════════════════════════════════════")
-        L("  🔬 PET DIAGNOSTIC DUMP")
-        L("════════════════════════════════════")
-        local bp = player and player:FindFirstChild("Backpack")
-        if not bp then L("[Diag] no backpack"); return end
-        local count = 0
-        for _, t in ipairs(bp:GetChildren()) do
-            if isPet(t) then
-                count = count + 1
-                L("")
-                L("── Pet #"..count..": "..t.Name)
-                L("   PetType (f attr) = "..tostring(getPetType(t)))
-                L("   Tool.Name         = "..t.Name)
-                local age = getAge(t)
-                L("   getAge()          = "..tostring(age))
-                local kg = getCurrentKg(t)
-                L("   getCurrentKg()    = "..tostring(kg))
-                local base, src = getBaseKg(t)
-                L("   getBaseKg()       = "..tostring(base).." (src="..tostring(src)..")")
-                local ok, attrs = pcall(function() return t:GetAttributes() end)
-                if ok and attrs then
-                    L("   ── Attributes ──")
-                    for k, v in pairs(attrs) do
-                        L("     "..k.." = "..tostring(v).." ("..type(v)..")")
-                    end
-                end
-                local childNames = {}
-                for _, c in ipairs(t:GetChildren()) do
-                    table.insert(childNames, c.Name.." ["..c.ClassName.."]")
-                end
-                L("   Children: "..table.concat(childNames, ", "))
-            end
-        end
-        L("")
-        L("════════════════════════════════════")
-        L("  Total: "..count.." pet")
-        L("════════════════════════════════════")
-    end)
-end)
-end)()
 
 
 -- DISPLAY PET CARD
