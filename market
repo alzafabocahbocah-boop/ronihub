@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.111"
-local VERSION_DATE = "Add 🔬 DUMP ALL PETS button (Misc) buat diagnose pet attribute"
+local VERSION = "8.112"
+local VERSION_DATE = "Age-1-normalized: rule X-Y = pet age-1 equivalent kg X-Y"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -3754,23 +3754,17 @@ local BASE_KG_ATTRS = {
     "StartingWeight","STARTING_KG",
 }
 local function getBaseKg(t)
-    -- v8.109: PRIORITY 1 — server BaseWeight attribute (paling authoritative)
-    -- Game store base weight asli, jadi pake itu langsung
-    for _, attr in ipairs(BASE_KG_ATTRS) do
-        local ok, v = pcall(function() return t:GetAttribute(attr) end)
-        if ok and v and type(v) == "number" and v > 0 then
-            return v, attr
-        end
-    end
-    -- v8.110: formula yg BENER: kg × 10 / (age + 10) (game pake (10+age)/10 scaling)
+    -- v8.112: skip server attr (game gak expose BaseWeight) — langsung formula
+    -- Formula: kg × 11 / (age+10) = "kg kalo pet ini di age 1"
+    -- Jadi rule "Ice Golem 6-6.4" match Ice Golem 6kg age 1 ATAU 60kg age 100 (same pet)
     local kg = getCurrentKg(t)
     local age = getAge(t)
+    if kg > 0 and age then
+        return kg * 11 / (age + 10), "age1-norm"
+    end
     if kg > 0 then
-        if age and age >= 0 then
-            return kg * 10 / (age + 10), "formula"
-        else
-            return kg * 10 / 110, "formula-mature-assumed"  -- assume age 100
-        end
+        -- age unknown, assume sudah mature (age 100)
+        return kg * 11 / 110, "age1-norm-assume100"
     end
     local cached = BH.getCachedBaseKG(t)
     if cached then return cached, "cache" end
@@ -4964,30 +4958,28 @@ BH.onStartClick = function()
                     else
                     -- Find matching rule with available slot (v8.35: pakai baseType)
                     local rule, ruleIdx = nil, nil
-                    local debugDecisions = {}  -- v8.111: track per-rule reasons (mutated only)
+                    local debugDecisions = nil  -- v8.111: nil until mutated pet seen
                     if #listingRules == 0 then
                         rule = {price = perTypePrices[p.baseType] or perTypePrices[p.type] or 100, maxListings = math.huge}
                         ruleIdx = 0
                     else
                         for ri, r in ipairs(listingRules) do
-                            local typeOk = (not r.type) or r.type == p.baseType
-                            local kgOk = p.wt >= r.min and p.wt <= r.max
                             local ml = r.maxListings or math.huge
-                            local slotOk = countActive(ri) < ml
-                            if typeOk and kgOk and slotOk then
+                            local active = countActive(ri)
+                            if ((not r.type) or r.type == p.baseType) and p.wt >= r.min and p.wt <= r.max and active < ml then
                                 rule, ruleIdx = r, ri
                                 break
                             elseif p.isMut then
+                                debugDecisions = debugDecisions or {}
                                 local why = ""
-                                if not typeOk then why = why.."type≠('"..tostring(r.type).."'vs'"..p.baseType.."') " end
-                                if not kgOk then why = why.."kg-out("..string.format("%.2f",p.wt).."∉"..r.min.."-"..(r.max==math.huge and "∞" or r.max)..") " end
-                                if not slotOk then why = why.."slot-full("..countActive(ri).."/"..ml..") " end
+                                if r.type and r.type ~= p.baseType then why = why.."type≠('"..tostring(r.type).."'vs'"..p.baseType.."') " end
+                                if not (p.wt >= r.min and p.wt <= r.max) then why = why.."kg-out("..string.format("%.2f",p.wt).."∉"..r.min.."-"..(r.max==math.huge and "∞" or r.max)..") " end
+                                if active >= ml then why = why.."slot-full("..active.."/"..ml..") " end
                                 table.insert(debugDecisions, "r"..ri.." '"..(r.type or "All").."' "..r.min.."-"..(r.max==math.huge and "∞" or r.max)..": "..why)
                             end
                         end
                     end
-                    -- v8.111: log alasan mutated pet di-skip
-                    if not rule and p.isMut and #debugDecisions > 0 then
+                    if not rule and p.isMut and debugDecisions then
                         L("  ⚠ skip MUT '"..(p.petName or "?").."' wt="..string.format("%.2f",p.wt)..":")
                         for _, d in ipairs(debugDecisions) do L("       "..d) end
                     end
