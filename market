@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.107"
-local VERSION_DATE = "Anti-AFK multi-method (VirtualUser + VIM + Camera + Jump), interval 2min"
+local VERSION = "8.108"
+local VERSION_DATE = "FIX listing: buang mutation divisor — pet 6kg display = base 6kg (apapun mutasinya)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -3709,36 +3709,29 @@ local BASE_KG_ATTRS = {
     "StartingWeight","STARTING_KG",
 }
 local function getBaseKg(t)
-    -- v8.103: detect mutation by name (semua mutasi = ×1.10)
-    local hasMut = false
-    if t.Name then
-        for _, prefix in ipairs(BH.MUTATION_PREFIXES or {}) do
-            if t.Name:sub(1, #prefix) == prefix then hasMut = true; break end
-        end
-    end
-    local mult = hasMut and 1.10 or 1.0
+    -- v8.108: SIMPLIFY — gak pake mutation divisor lagi. Pet 6kg = base 6kg (apapun mutasinya).
+    -- Logika: rule user di-set berdasarkan kg yg dilihat di pet, mutation udah kebake di kg
+    -- Cuma normalize by age (kg displayed → kg at age 1)
 
-    -- Try attribute lookup first (server-stored BaseWeight)
+    -- Try attribute lookup first (server-stored BaseWeight, dah include mutation)
     for _, attr in ipairs(BASE_KG_ATTRS) do
         local ok, v = pcall(function() return t:GetAttribute(attr) end)
         if ok and v and type(v) == "number" and v > 0 then
-            -- v8.103: attribute is raw base (pre-mutation) → multiply by mut (kg-at-age-1-treated)
-            return v * mult, attr
+            return v, attr
         end
     end
-    -- Fallback: formula baseKG = kg * 11 / ((age + 10) * mult)
+    -- Formula: kg × 11 / (age + 10) untuk normalize ke age 1
     local kg = getCurrentKg(t)
     local age = getAge(t)
     if kg > 0 then
         if age and age >= 1 then
-            -- v8.103: TRUE age known — formula dengan mut (semua mut = ×1.10)
-            return kg * 11 / ((age + 10) * mult), "formula"
+            return kg * 11 / (age + 10), "formula"
         else
-            -- age unknown (getAge returned nil) — assume mature (age 100)
-            return kg * 11 / (110 * mult), "formula-mature-assumed"
+            -- age unknown → assume mature (age 100)
+            return kg * 11 / 110, "formula-mature-assumed"
         end
     end
-    -- v8.37: cache fallback untuk mutated pet (yang gak punya age info)
+    -- Cache fallback
     local cached = BH.getCachedBaseKG(t)
     if cached then return cached, "cache" end
     return nil
