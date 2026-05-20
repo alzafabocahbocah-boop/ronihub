@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.119"
-local VERSION_DATE = "STRICT APS-only mode: pet tanpa APS data → ke-skip (gak ke-list)"
+local VERSION = "8.121"
+local VERSION_DATE = "APS retry mechanism — require sometimes hang, retry up to 6x dgn 5s timeout each"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -188,6 +188,33 @@ do
         return nil
     end
 
+    -- v8.120: diagnostic — sample lookup buat verify APS bener-bener kasih data
+    function ZAPS.diagnose()
+        if not ZAPS.api then L("[APS-DIAG] api=nil"); return end
+        local bp = player and player:FindFirstChild("Backpack")
+        if not bp then return end
+        local sample, sampleCount = nil, 0
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t:GetAttribute("PET_UUID") then
+                sampleCount = sampleCount + 1
+                if not sample then sample = t end
+                if sampleCount >= 3 then break end
+            end
+        end
+        if not sample then L("[APS-DIAG] no pet in bp"); return end
+        local uuid = sample:GetAttribute("PET_UUID")
+        local braced = tostring(uuid)
+        if braced:sub(1,1) ~= "{" then braced = "{"..braced.."}" end
+        local ok, info = pcall(function() return ZAPS.api:GetPetData(player.Name, braced) end)
+        L("[APS-DIAG] sample '"..sample.Name.."' uuid="..braced:sub(1,20).."...")
+        L("[APS-DIAG] ok="..tostring(ok).." has PetData="..tostring(info and info.PetData and true or false))
+        if ok and info and info.PetData then
+            L("[APS-DIAG] Level="..tostring(info.PetData.Level)..
+              " BaseWeight="..tostring(info.PetData.BaseWeight)..
+              " MutationType="..tostring(info.PetData.MutationType))
+        end
+    end
+
     function ZAPS.getMutation(uuid)
         local info = ZAPS.getPetData(uuid)
         if info and info.PetData and info.PetData.MutationType then
@@ -207,16 +234,37 @@ do
     getgenv().ZenxAPS = ZAPS
 
     -- Spawn init di thread terpisah biar gak block main script
+    -- v8.121: retry mechanism — require sometimes yields/hangs in certain servers
+    -- Try every 5s until module loads (max 6 attempts = 30s total)
     task.spawn(function()
-        pcall(function()
-            local modules = RS:FindFirstChild("Modules")
-            if not modules then return end
-            local petServices = modules:FindFirstChild("PetServices")
-            if not petServices then return end
-            local apsMod = petServices:FindFirstChild("ActivePetsService")
-            if not apsMod then return end
-            ZAPS.api = require(apsMod)
-        end)
+        local attempt = 0
+        while not ZAPS.api and attempt < 6 do
+            attempt = attempt + 1
+            local attemptDone = false
+            task.spawn(function()
+                pcall(function()
+                    local modules = RS:FindFirstChild("Modules")
+                    if not modules then return end
+                    local petServices = modules:FindFirstChild("PetServices")
+                    if not petServices then return end
+                    local apsMod = petServices:FindFirstChild("ActivePetsService")
+                    if not apsMod then return end
+                    ZAPS.api = require(apsMod)
+                end)
+                attemptDone = true
+            end)
+            -- wait up to 5s for this attempt
+            local waited = 0
+            while not attemptDone and waited < 5 do
+                task.wait(0.5)
+                waited = waited + 0.5
+            end
+            if not ZAPS.api and attempt < 6 then
+                L("[APS] attempt "..attempt.." timed-out, retry in 5s...")
+                task.wait(5)
+            end
+        end
+
         pcall(function()
             local data = RS:FindFirstChild("Data")
             if not data then return end
@@ -228,7 +276,13 @@ do
             if mr and mr.EnumToPetMutation then ZAPS.mutMap = mr.EnumToPetMutation end
         end)
         ZAPS.ready = true
-        L("[APS] api="..(ZAPS.api and "OK" or "FAIL").." mutMap="..(ZAPS.mutMap and "OK" or "FAIL"))
+        L("[APS] FINAL: api="..(ZAPS.api and "OK" or "FAIL after retries").." mutMap="..(ZAPS.mutMap and "OK" or "FAIL"))
+        -- v8.120: run diagnostic + trigger UI refresh setelah APS ready
+        task.wait(0.5)
+        pcall(function() ZAPS.diagnose() end)
+        pcall(function()
+            if BH.refreshPriceCounts then BH.refreshPriceCounts() end
+        end)
     end)
 end
 
