@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.106"
-local VERSION_DATE = "Unlist: aggressive RS scan + TBC method fallback + dump all TBC methods buat debug"
+local VERSION = "8.107"
+local VERSION_DATE = "Anti-AFK multi-method (VirtualUser + VIM + Camera + Jump), interval 2min"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -17,42 +17,86 @@ _G.ZenxV8 = _G.ZenxV8 or {}
 local function L(s) table.insert(_G.ZenxV8, s) print("[ZV8]", s) end
 
 -- ===== v8.46: Anti-AFK (cegah kick karena idle 20 menit) =====
--- v8.102: PROAKTIF — fake input setiap 5 menit (bukan cuma reactive ke event Idled)
+-- v8.107: MULTI-METHOD anti-AFK (cobain semua biar mana yg jalan)
 local antiAfkEnabled = true  -- v8.70: di-override dari state file setelah load
 do
-    local ok, VirtualUser = pcall(function() return game:GetService("VirtualUser") end)
-    if ok and VirtualUser then
-        -- Reactive: tangkep player.Idled event
-        player.Idled:Connect(function()
-            if antiAfkEnabled then
-                pcall(function()
-                    VirtualUser:CaptureController()
-                    VirtualUser:ClickButton2(Vector2.new(), workspace.CurrentCamera)
-                end)
-                L("[anti-afk] Idled event → faked click")
-            end
-        end)
-        L("[anti-afk] reactive hook installed")
+    -- Method 1: VirtualUser
+    local _, VirtualUser = pcall(function() return game:GetService("VirtualUser") end)
+    -- Method 2: VirtualInputManager (executor-friendly alternative)
+    local _, VIM = pcall(function() return game:GetService("VirtualInputManager") end)
+    -- Method 3: Camera nudge
+    local lastCamCFrame = nil
 
-        -- v8.102: PROAKTIF — periodic fake input every 5 min (sebelum kena Idled)
-        task.spawn(function()
-            while task.wait(300) do  -- 5 menit
-                if antiAfkEnabled then
-                    pcall(function()
+    -- Reactive: tangkep player.Idled event (cegah kick langsung)
+    if VirtualUser then
+        player.Idled:Connect(function()
+            if not antiAfkEnabled then return end
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new(), workspace.CurrentCamera)
+            end)
+            L("[anti-afk] Idled event → reactive trigger")
+        end)
+        L("[anti-afk] reactive hook (VirtualUser) installed")
+    end
+
+    -- PROAKTIF — periodic loop every 2 min (lebih agresif dari 5 min)
+    task.spawn(function()
+        local tickCount = 0
+        while task.wait(120) do  -- 2 menit
+            if antiAfkEnabled then
+                tickCount = tickCount + 1
+                local methods_tried = {}
+
+                -- Method 1: VirtualUser ClickButton
+                if VirtualUser then
+                    local ok = pcall(function()
                         VirtualUser:CaptureController()
-                        -- Click di pojok layar (out-of-the-way)
                         VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera)
-                        task.wait(0.1)
+                        task.wait(0.05)
                         VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera)
                     end)
-                    L("[anti-afk] proactive tick (5min) → faked input")
+                    table.insert(methods_tried, ok and "VU✓" or "VU✗")
                 end
+
+                -- Method 2: VirtualInputManager mouse move
+                if VIM then
+                    local ok = pcall(function()
+                        VIM:SendMouseMoveEvent(100, 100, game)
+                        task.wait(0.05)
+                        VIM:SendMouseMoveEvent(101, 101, game)
+                    end)
+                    table.insert(methods_tried, ok and "VIM✓" or "VIM✗")
+                end
+
+                -- Method 3: Tiny camera nudge (activity heuristic)
+                local cam = workspace.CurrentCamera
+                if cam then
+                    local ok = pcall(function()
+                        local cf = cam.CFrame
+                        cam.CFrame = cf * CFrame.new(0.001, 0, 0)
+                        task.wait(0.05)
+                        cam.CFrame = cf
+                    end)
+                    table.insert(methods_tried, ok and "CAM✓" or "CAM✗")
+                end
+
+                -- Method 4: Character humanoid jump (subtle — only every 5 ticks = 10min)
+                if tickCount % 5 == 0 then
+                    local char = player.Character
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        local ok = pcall(function() hum.Jump = true end)
+                        table.insert(methods_tried, ok and "JUMP✓" or "JUMP✗")
+                    end
+                end
+
+                L("[anti-afk] tick#"..tickCount.." | "..table.concat(methods_tried, " ")
+                  .." | next 2min")
             end
-        end)
-        L("[anti-afk] proactive loop installed (5min interval)")
-    else
-        L("[anti-afk] VirtualUser unavailable — skipping")
-    end
+        end
+    end)
+    L("[anti-afk] proactive loop installed (2min, multi-method)")
 end
 
 -- ===== v8.28: STATE FILE (BH.myBoothUuid persistence) — semua di BH =====
