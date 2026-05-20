@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v4.5 (Pills KG pet font lebih gede)"
+local SCRIPT_VERSION = "v4.8 (GUI panjangin ke kanan)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -413,7 +413,7 @@ end
 -- ============================================
 -- BUILD GUI
 -- ============================================
-local GUI_W = 420 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_COMPACT  -- v4.0: lebar 420 buat 5 pills per row
+local GUI_W = 320 local GUI_H_COMPACT = 150 local GUI_H_FULL = 300 local GUI_H = GUI_H_COMPACT  -- v4.8: W=320
 
 -- Try parent ke CoreGui supaya tidak bisa di-destroy oleh script game/script lain
 local guiParent = player:WaitForChild("PlayerGui")
