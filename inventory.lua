@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v4.9 (Gajah pill 🐘 only, no kg/count — top bg merah, bot bg hitam)"
+local SCRIPT_VERSION = "v5.0 (Simplify: buang mut divisor, display kg = base kg)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -335,18 +335,11 @@ local function buildMaxKGCache()
     for _, item in pairs(bp:GetChildren()) do
         if isPet(item) then
             local name = getPetName(item)
-            local age = getAge(item)  -- pakai getAge raw, BUKAN estimated
+            local age = getAge(item)
             local kg = getKG(item)
-            -- v4.2: cache "normalized base" — divide by 1.10 kalo mutated (rule all-mut=Everchanted)
-            local mult = (function()
-                for _, prefix in ipairs(MUTATION_PREFIXES) do
-                    if item.Name:sub(1, #prefix) == prefix then return 1.10 end
-                end
-                return 1.0
-            end)()
+            -- v5.0: gak pake mut divisor, kg langsung normalize by age
             if name and age and kg and age >= 1 then
-                local maxKG = kg * 11 / ((age + 10) * mult)
-                -- Index by full name + base name
+                local maxKG = kg * 11 / (age + 10)
                 local existing = maxKGCache[name]
                 if not existing or maxKG > existing then maxKGCache[name] = maxKG end
                 local base = getBaseName(name)
@@ -366,42 +359,36 @@ local function getMaxKGForPet(name)
     return nil
 end
 
--- v4.2: getEstimatedAge — pakai cache + 1.10 rule (skip server attribute)
+-- v5.0: getEstimatedAge — pakai cache + normalize by age (no mut divisor)
 local function getEstimatedAge(item)
     local age = getAge(item) if age then return age end
     local kg = getKG(item) if not kg then return nil end
-    local mult = hasMutation(item) and 1.10 or 1.0
-
-    -- v4.2: dari cache "normalized base"
-    -- cache: maxKG = kg × 11 / ((age+10) × mult)
-    -- inverse: age = (kg × 11) / (maxKG × mult) - 10
+    -- inverse formula: age = (kg × 11) / maxKG - 10
     local maxKG = getMaxKGForPet(getPetName(item))
     if maxKG and maxKG > 0 then
-        return math.max(1, math.min(200, math.floor(kg * 11 / (maxKG * mult) - 10 + 0.5)))
+        return math.max(1, math.min(200, math.floor(kg * 11 / maxKG - 10 + 0.5)))
     end
     return nil
 end
 
--- v4.2: hitung baseKG dengan rule "SEMUA MUTASI = ×1.10" (samain kayak Everchanted)
--- Formula: base = kg × 11 / ((age + 10) × mult), mult=1.10 kalo mutated, 1.0 kalo enggak
--- IGNORE server attribute karena dia store value aktual (yang bisa beda multiplier per mutasi)
+-- v5.0: SIMPLIFY — buang mutation divisor. Pet display 6kg → base 6kg (apapun mutasinya).
+-- Logic: mutation udah kebake di kg display, gak perlu dibagi lagi. Cuma normalize by age.
 local function getPetBaseKG(item)
     local kg = getKG(item)
     if not kg then return nil end
-    local mult = hasMutation(item) and 1.10 or 1.0
     local age = getAge(item)
 
-    -- Priority 1: dari age + kg formula (paling akurat & konsisten dengan rule user)
+    -- Priority 1: dari age + kg formula (paling akurat & konsisten)
     if age and age >= 1 then
-        return kg * 11 / ((age + 10) * mult)
+        return kg * 11 / (age + 10)
     end
 
-    -- Priority 2: cache (cache udah simpan "normalized base" — gak perlu divide lagi)
+    -- Priority 2: cache (dari pet sejenis yang punya age)
     local cached = getMaxKGForPet(getPetName(item))
     if cached then return cached end
 
-    -- Priority 3: assume pet baru hatched (kg = base × mult)
-    if kg < 20 then return kg / mult end
+    -- Priority 3: assume pet baru hatched
+    if kg < 20 then return kg end
     return nil  -- skip categorization
 end
 
