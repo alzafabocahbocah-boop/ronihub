@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.110"
-local VERSION_DATE = "Formula fix: kg = base × (10+age)/10 (game's real formula)"
+local VERSION = "8.111"
+local VERSION_DATE = "Add 🔬 DUMP ALL PETS button (Misc) buat diagnose pet attribute"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1695,6 +1695,57 @@ autoClaimBtn.MouseButton1Click:Connect(function()
     autoClaimBtn.BackgroundColor3 = autoClaimState and C.success or C.danger
     L(autoClaimState and "[Auto-Claim] enabled (check 15s)" or "[Auto-Claim] disabled")
 end)
+
+-- v8.111: DIAGNOSE PETS — dump full attribute info biar user bisa lihat persis pet structure
+-- Wrapped in IIFE biar locals gak makan main-scope 200-limit
+(function()
+local diagCard = makeCard(miscPanel, 86)
+lblOf(diagCard, "🔬  DIAGNOSE PETS", 14, 10, 250, 22, C.accent, 14, FB)
+lblOf(diagCard, "Dump semua attribute pet di backpack ke dev console", 14, 32, 400, 18, C.textDim, 11)
+local diagBtn = btnOf(diagCard, 14, 54, 200, 26, "🔬 DUMP ALL PETS", C.accent)
+diagBtn.MouseButton1Click:Connect(function()
+    task.spawn(function()
+        L("════════════════════════════════════")
+        L("  🔬 PET DIAGNOSTIC DUMP")
+        L("════════════════════════════════════")
+        local bp = player and player:FindFirstChild("Backpack")
+        if not bp then L("[Diag] no backpack"); return end
+        local count = 0
+        for _, t in ipairs(bp:GetChildren()) do
+            if isPet(t) then
+                count = count + 1
+                L("")
+                L("── Pet #"..count..": "..t.Name)
+                L("   PetType (f attr) = "..tostring(getPetType(t)))
+                L("   Tool.Name         = "..t.Name)
+                local age = getAge(t)
+                L("   getAge()          = "..tostring(age))
+                local kg = getCurrentKg(t)
+                L("   getCurrentKg()    = "..tostring(kg))
+                local base, src = getBaseKg(t)
+                L("   getBaseKg()       = "..tostring(base).." (src="..tostring(src)..")")
+                local ok, attrs = pcall(function() return t:GetAttributes() end)
+                if ok and attrs then
+                    L("   ── Attributes ──")
+                    for k, v in pairs(attrs) do
+                        L("     "..k.." = "..tostring(v).." ("..type(v)..")")
+                    end
+                end
+                local childNames = {}
+                for _, c in ipairs(t:GetChildren()) do
+                    table.insert(childNames, c.Name.." ["..c.ClassName.."]")
+                end
+                L("   Children: "..table.concat(childNames, ", "))
+            end
+        end
+        L("")
+        L("════════════════════════════════════")
+        L("  Total: "..count.." pet")
+        L("════════════════════════════════════")
+    end)
+end)
+end)()
+
 
 -- DISPLAY PET CARD
 local petCard = makeCard(miscPanel, 86)
@@ -4718,6 +4769,7 @@ BH.onStartClick = function()
             if cacheCount > 0 then L("  KG cache built: "..cacheCount.." entries") end
 
             local pets = {}
+            local mutatedDebugCount = 0  -- v8.111: log first 5 mutated pets
             for _, t in ipairs(bp:GetChildren()) do
                 if isPet(t) and not isFav(t) then
                     local uuid = tostring(t:GetAttribute("PET_UUID") or t.Name)
@@ -4725,11 +4777,27 @@ BH.onStartClick = function()
                     local pType = getPetType(t)
                     local pBaseType = BH.getBaseName(pType)  -- v8.35: strip mutations
                     local currentKg = getCurrentKg(t)
-                    local baseKg = getBaseKg(t) or currentKg
+                    local baseKg, baseKgSrc = getBaseKg(t)
+                    baseKg = baseKg or currentKg
+                    -- v8.111: detect mutation untuk diagnostic
+                    local petName = t.Name or ""
+                    local isMut = false
+                    for _, prefix in ipairs(BH.MUTATION_PREFIXES or {}) do
+                        if petName:sub(1, #prefix) == prefix then isMut = true; break end
+                    end
+                    if isMut and mutatedDebugCount < 5 then
+                        mutatedDebugCount = mutatedDebugCount + 1
+                        local age = getAge(t)
+                        L("  🔬 MUT#"..mutatedDebugCount..": '"..petName.."'")
+                        L("     pType='"..pType.."' pBaseType='"..pBaseType.."'")
+                        L("     kg="..tostring(currentKg).." age="..tostring(age)..
+                          " baseKg="..tostring(baseKg).." src="..tostring(baseKgSrc or "?"))
+                    end
                     table.insert(pets, {
                         braced="{"..clean.."}", clean=clean,
                         type=pType, baseType=pBaseType,
                         wt=baseKg, currentKg=currentKg,
+                        isMut=isMut, petName=petName,
                     })
                 end
             end
@@ -4896,6 +4964,7 @@ BH.onStartClick = function()
                     else
                     -- Find matching rule with available slot (v8.35: pakai baseType)
                     local rule, ruleIdx = nil, nil
+                    local debugDecisions = {}  -- v8.111: track per-rule reasons (mutated only)
                     if #listingRules == 0 then
                         rule = {price = perTypePrices[p.baseType] or perTypePrices[p.type] or 100, maxListings = math.huge}
                         ruleIdx = 0
@@ -4904,11 +4973,23 @@ BH.onStartClick = function()
                             local typeOk = (not r.type) or r.type == p.baseType
                             local kgOk = p.wt >= r.min and p.wt <= r.max
                             local ml = r.maxListings or math.huge
-                            if typeOk and kgOk and countActive(ri) < ml then
+                            local slotOk = countActive(ri) < ml
+                            if typeOk and kgOk and slotOk then
                                 rule, ruleIdx = r, ri
                                 break
+                            elseif p.isMut then
+                                local why = ""
+                                if not typeOk then why = why.."type≠('"..tostring(r.type).."'vs'"..p.baseType.."') " end
+                                if not kgOk then why = why.."kg-out("..string.format("%.2f",p.wt).."∉"..r.min.."-"..(r.max==math.huge and "∞" or r.max)..") " end
+                                if not slotOk then why = why.."slot-full("..countActive(ri).."/"..ml..") " end
+                                table.insert(debugDecisions, "r"..ri.." '"..(r.type or "All").."' "..r.min.."-"..(r.max==math.huge and "∞" or r.max)..": "..why)
                             end
                         end
+                    end
+                    -- v8.111: log alasan mutated pet di-skip
+                    if not rule and p.isMut and #debugDecisions > 0 then
+                        L("  ⚠ skip MUT '"..(p.petName or "?").."' wt="..string.format("%.2f",p.wt)..":")
+                        for _, d in ipairs(debugDecisions) do L("       "..d) end
                     end
 
                     if rule then
