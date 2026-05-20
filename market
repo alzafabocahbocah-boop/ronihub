@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.122"
-local VERSION_DATE = "APS persistent cache file — load di garden, pake di market (age frozen at market)"
+local VERSION = "8.123"
+local VERSION_DATE = "SIMPLE: match by Display KG. Rule X-Y = pet display X-Y kg. No APS needed"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1613,10 +1613,9 @@ function rebuildRulesUI()
 end
 
 -- v8.87: callback from scanBoothListings — refresh count badges di LIST HARGA
+-- v8.122: ALWAYS refresh regardless of visibility (panel mungkin di-toggle)
 BH.refreshPriceCounts = function()
-    if pricePanel and pricePanel.Visible then
-        pcall(rebuildRulesUI)
-    end
+    pcall(rebuildRulesUI)
 end
 
 addRuleBtn.MouseButton1Click:Connect(function()
@@ -3922,14 +3921,10 @@ local BASE_KG_ATTRS = {
     "StartingWeight","STARTING_KG",
 }
 local function getBaseKg(t)
-    -- v8.119: STRICT APS-ONLY mode (user pick).
-    -- Kalo APS fail/gak ada data untuk pet ini → return nil → pet ke-skip dari listing
-    local okU, uuid = pcall(function() return t:GetAttribute("PET_UUID") end)
-    if okU and uuid and getgenv().ZenxAPS then
-        local bw = getgenv().ZenxAPS.getBaseKg(uuid)
-        if bw and bw > 0 then return bw, "APS" end
-    end
-    return nil  -- gak ada data → pet di-skip dari rule matching
+    -- v8.123: SIMPLE — pake display KG langsung
+    -- Rule "Ice Golem 6-6.4" match pet display 6-6.4 kg, gak peduli mutation/age
+    -- Konsisten, gak butuh APS, always works
+    return getCurrentKg(t), "display"
 end
 
 -- v8.88: count pet di backpack yang match rule (untuk badge [N] di LIST HARGA)
@@ -3940,19 +3935,33 @@ BH.countMyPetsForRule = function(r)
     local ruleMin = r.min or 0
     local ruleMax = (r.max == math.huge) and math.huge or r.max
     local count = 0
+    local debugInfo = {checked=0, typeMatch=0, kgMatch=0, hasBase=0, noBase=0}
     for _, t in ipairs(bp:GetChildren()) do
         if isPet(t) then
+            debugInfo.checked = debugInfo.checked + 1
             local pType = getPetType(t)
             local pBase = (BH.getBaseName and pType ~= "") and BH.getBaseName(pType) or pType
             local typeOk = (not ruleType) or (pBase == ruleType) or (pType == ruleType)
             if typeOk then
-                -- v8.119: strict APS-only. baseKg nil = skip
+                debugInfo.typeMatch = debugInfo.typeMatch + 1
                 local baseKg = getBaseKg(t)
+                if baseKg then debugInfo.hasBase = debugInfo.hasBase + 1
+                else debugInfo.noBase = debugInfo.noBase + 1 end
                 if baseKg and baseKg >= ruleMin and (ruleMax == math.huge or baseKg <= ruleMax) then
+                    debugInfo.kgMatch = debugInfo.kgMatch + 1
                     count = count + 1
                 end
             end
         end
+    end
+    -- v8.122: log diagnostic kalo count==0 tapi ada typeMatch (debug bug)
+    if count == 0 and debugInfo.typeMatch > 0 and ruleType then
+        L("[COUNT-DIAG] r='"..ruleType.."' "..ruleMin.."-"..(ruleMax==math.huge and "∞" or ruleMax)..
+          " | checked="..debugInfo.checked..
+          " typeMatch="..debugInfo.typeMatch..
+          " hasBase="..debugInfo.hasBase..
+          " noBase="..debugInfo.noBase..
+          " kgMatch="..debugInfo.kgMatch)
     end
     return count
 end
