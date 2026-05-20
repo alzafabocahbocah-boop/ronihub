@@ -2,14 +2,14 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.124"
-local VERSION_DATE = "🎯 BREAKTHROUGH: getgc memory container bypass — APS data via memory scan, works di market"
+local VERSION = "8.125"
+local VERSION_DATE = "getgc bypass + age-1 normalization (× 1.1) — rule 6-6.4 match pet display 6.05-6.40"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService") 
+local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer
 local pg = player:WaitForChild("PlayerGui")
 
@@ -4003,11 +4003,13 @@ local BASE_KG_ATTRS = {
     "StartingWeight","STARTING_KG",
 }
 local function getBaseKg(t)
-    -- v8.124: APS via getgc memory container (works di market + garden!)
+    -- v8.125: APS via memContainer + age-1 normalization
+    -- BaseWeight di memory = age 0. Pet baru hatch minimal age 1 (display = base × 1.1).
+    -- Normalize ke age-1 supaya match rule "6-6.4" untuk pet display 6.05-6.40 kg
     local okU, uuid = pcall(function() return t:GetAttribute("PET_UUID") end)
     if okU and uuid and getgenv().ZenxAPS then
         local bw = getgenv().ZenxAPS.getBaseKg(uuid)
-        if bw and bw > 0 then return bw, "APS" end
+        if bw and bw > 0 then return bw * 1.1, "APS-age1" end
     end
     -- Fallback: display kg
     return getCurrentKg(t), "display"
