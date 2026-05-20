@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v5.5 (APS integration: BaseWeight + Level source of truth)"
+local SCRIPT_VERSION = "v5.7 (APS init di task.spawn, gak hang)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -11,19 +11,12 @@ local HttpService = game:GetService("HttpService")
 local RS = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 
--- ===== v5.5: APS (ActivePetsService) — source of truth Age/BaseWeight =====
--- Wrap di do/end + getgenv biar gak hit Luau 200-local limit
+-- ===== v5.7: APS (ActivePetsService) — async init biar gak hang di place beda =====
 do
-    local ZAPS = {api = nil, mutMap = nil}
+    local ZAPS = {api = nil, mutMap = nil, ready = false}
     local cache, cacheTime = {}, {}
     local dsCache, dsCacheTime = nil, 0
     local TTL, DS_TTL = 5, 8
-
-    pcall(function() ZAPS.api = require(RS.Modules.PetServices.ActivePetsService) end)
-    pcall(function()
-        local mr = require(RS.Data.PetRegistry.PetMutationRegistry)
-        if mr and mr.EnumToPetMutation then ZAPS.mutMap = mr.EnumToPetMutation end
-    end)
 
     local function brace(uuid)
         local k = tostring(uuid)
@@ -57,7 +50,31 @@ do
     end
 
     getgenv().ZenxInvAPS = ZAPS
-    print("[ZenxInv] [APS] api="..(ZAPS.api and "OK" or "FAIL"))
+
+    -- Spawn init di thread terpisah biar gak block main script
+    task.spawn(function()
+        pcall(function()
+            local modules = RS:FindFirstChild("Modules")
+            if not modules then return end
+            local petServices = modules:FindFirstChild("PetServices")
+            if not petServices then return end
+            local apsMod = petServices:FindFirstChild("ActivePetsService")
+            if not apsMod then return end
+            ZAPS.api = require(apsMod)
+        end)
+        pcall(function()
+            local data = RS:FindFirstChild("Data")
+            if not data then return end
+            local petReg = data:FindFirstChild("PetRegistry")
+            if not petReg then return end
+            local mutReg = petReg:FindFirstChild("PetMutationRegistry")
+            if not mutReg then return end
+            local mr = require(mutReg)
+            if mr and mr.EnumToPetMutation then ZAPS.mutMap = mr.EnumToPetMutation end
+        end)
+        ZAPS.ready = true
+        print("[ZenxInv] [APS] api="..(ZAPS.api and "OK" or "FAIL"))
+    end)
 end
 
 -- persistence
