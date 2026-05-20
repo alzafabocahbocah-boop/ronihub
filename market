@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.125"
-local VERSION_DATE = "getgc bypass + age-1 normalization (× 1.1) — rule 6-6.4 match pet display 6.05-6.40"
+local VERSION = "8.126"
+local VERSION_DATE = "State save diag + remove 'All Pet Types' + guard ADD button (wajib pilih pet)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -104,7 +104,7 @@ local BH = {}
 do
     BH.STATE_FILE = "ZenxMarket_state.json"
     function BH.saveMarketState(s)
-        if not writefile then return end
+        if not writefile then L("[State] ❌ writefile not available — cannot persist"); return end
         -- v8.47: sanitize math.huge → nil (JSON gak support Infinity)
         local clean = {}
         for k, v in pairs(s) do
@@ -121,12 +121,21 @@ do
                 clean[k] = v
             end
         end
-        pcall(function() writefile(BH.STATE_FILE, HttpService:JSONEncode(clean)) end)
+        local ok, err = pcall(function()
+            writefile(BH.STATE_FILE, HttpService:JSONEncode(clean))
+        end)
+        if not ok then L("[State] ❌ save failed: "..tostring(err)) end
     end
     function BH.loadMarketState()
-        if not (isfile and readfile and isfile(BH.STATE_FILE)) then return {} end
+        if not (isfile and readfile and isfile(BH.STATE_FILE)) then
+            L("[State] no state file (first run)")
+            return {}
+        end
         local ok, data = pcall(function() return HttpService:JSONDecode(readfile(BH.STATE_FILE)) end)
-        return ok and data or {}
+        if not ok then L("[State] ❌ load failed (corrupt file?)"); return {} end
+        local rc = data.listingRules and #data.listingRules or 0
+        L("[State] ✅ loaded — rules="..rc.." myBoothUuid="..(data.myBoothUuid and "set" or "none"))
+        return data or {}
     end
     BH.marketState = BH.loadMarketState()
     BH.myBoothUuid = BH.marketState.myBoothUuid
@@ -1228,7 +1237,7 @@ typeDropStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 typeDropStroke.Transparency = 0.5
 local typeDropLbl = Instance.new("TextLabel")
 typeDropLbl.Size = UDim2.new(1, -50, 1, 0) typeDropLbl.Position = UDim2.new(0, 12, 0, 0)
-typeDropLbl.BackgroundTransparency = 1 typeDropLbl.Text = "All Pet Types"
+typeDropLbl.BackgroundTransparency = 1 typeDropLbl.Text = "Pilih Pet Type..."
 typeDropLbl.TextColor3 = C.text typeDropLbl.Font = FM typeDropLbl.TextSize = 15
 typeDropLbl.TextXAlignment = Enum.TextXAlignment.Left typeDropLbl.Parent = typeDrop
 local typeDropArrow = Instance.new("TextLabel")
@@ -1386,7 +1395,7 @@ lhTypeDropStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 lhTypeDropStroke.Transparency = 0.5
 local lhTypeDropLbl = Instance.new("TextLabel")
 lhTypeDropLbl.Size = UDim2.new(1, -50, 1, 0) lhTypeDropLbl.Position = UDim2.new(0, 12, 0, 0)
-lhTypeDropLbl.BackgroundTransparency = 1 lhTypeDropLbl.Text = "All Pet Types"
+lhTypeDropLbl.BackgroundTransparency = 1 lhTypeDropLbl.Text = "Pilih Pet Type..."
 lhTypeDropLbl.TextColor3 = C.text lhTypeDropLbl.Font = FM lhTypeDropLbl.TextSize = 15
 lhTypeDropLbl.TextXAlignment = Enum.TextXAlignment.Left lhTypeDropLbl.Parent = lhTypeDrop
 local lhTypeDropArrow = Instance.new("TextLabel")
@@ -1701,33 +1710,56 @@ BH.refreshPriceCounts = function()
 end
 
 addRuleBtn.MouseButton1Click:Connect(function()
+    -- v8.125: guard — wajib pilih pet
+    if not selectedType then
+        L("[Rule] ⚠️ Pilih pet type dulu sebelum add rule")
+        typeDropLbl.Text = "⚠️ Pilih pet dulu!"
+        typeDropLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
+        task.delay(2, function()
+            if not selectedType then
+                typeDropLbl.Text = "Pilih Pet Type..."
+                typeDropLbl.TextColor3 = C.text
+            end
+        end)
+        return
+    end
     local minKg = tonumber(minKgBox.Text) or 0
     local maxKg = tonumber(maxKgBox.Text) or math.huge
     local price = tonumber(priceBox.Text) or 100
     local maxList = tonumber(maxListBox.Text) or math.huge
     table.insert(listingRules, {
-        type = selectedType,  -- nil = All
+        type = selectedType,
         min = minKg,
         max = maxKg,
         price = price,
         maxListings = maxList,
     })
     rebuildRulesUI()
-    -- v8.47: persist rules to state file
     BH.marketState.listingRules = listingRules
     BH.saveMarketState(BH.marketState)
-    -- Reset inputs
+    L("[State] saved "..#listingRules.." rule(s)")
     minKgBox.Text = ""
     maxKgBox.Text = ""
     priceBox.Text = ""
     maxListBox.Text = ""
     selectedType = nil
-    typeDropLbl.Text = "All Pet Types"
-    lhTypeDropLbl.Text = "All Pet Types"
+    typeDropLbl.Text = "Pilih Pet Type..."
+    lhTypeDropLbl.Text = "Pilih Pet Type..."
 end)
 
 -- List Harga add rule (same flow)
 lhAddBtn.MouseButton1Click:Connect(function()
+    if not selectedType then
+        lhTypeDropLbl.Text = "⚠️ Pilih pet dulu!"
+        lhTypeDropLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
+        task.delay(2, function()
+            if not selectedType then
+                lhTypeDropLbl.Text = "Pilih Pet Type..."
+                lhTypeDropLbl.TextColor3 = C.text
+            end
+        end)
+        return
+    end
     local minKg = tonumber(lhMinKgBox.Text) or 0
     local maxKg = tonumber(lhMaxKgBox.Text) or math.huge
     local price = tonumber(lhPriceBox.Text) or 100
@@ -1740,16 +1772,16 @@ lhAddBtn.MouseButton1Click:Connect(function()
         maxListings = maxList,
     })
     rebuildRulesUI()
-    -- v8.47: persist
     BH.marketState.listingRules = listingRules
     BH.saveMarketState(BH.marketState)
+    L("[State] saved "..#listingRules.." rule(s)")
     lhMinKgBox.Text = ""
     lhMaxKgBox.Text = ""
     lhPriceBox.Text = ""
     lhMaxListBox.Text = ""
     selectedType = nil
-    typeDropLbl.Text = "All Pet Types"
-    lhTypeDropLbl.Text = "All Pet Types"
+    typeDropLbl.Text = "Pilih Pet Type..."
+    lhTypeDropLbl.Text = "Pilih Pet Type..."
 end)
 
 -- List Harga dropdown opens same modal (modal sets typeDropLbl AND lhTypeDropLbl via modal click handler patch below)
@@ -4302,10 +4334,11 @@ local function populateModalList()
         end)
     end
 
-    -- "All Pet Types" option at top
-    if sf == "" or string.find("all pet types", sf, 1, true) then
-        makeItem("All Pet Types", nil)
-    end
+    -- v8.125: "All Pet Types" option DIHILANGIN (user pick)
+    -- User HARUS milih pet sebelum bisa add rule
+    -- if sf == "" or string.find("all pet types", sf, 1, true) then
+    --     makeItem("All Pet Types", nil)
+    -- end
 
     for _, p in ipairs(types) do
         if sf == "" or string.find(string.lower(p.name), sf, 1, true) then
