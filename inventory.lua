@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v5.2 (formula bener kg×10/(age+10))"
+local SCRIPT_VERSION = "v5.3 (age-1-normalized kg×11/(age+10))"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -337,9 +337,9 @@ local function buildMaxKGCache()
             local name = getPetName(item)
             local age = getAge(item)
             local kg = getKG(item)
-            -- v5.2: formula bener kg × 10 / (age+10)
+            -- v5.3: age-1-normalized kg × 11 / (age+10)
             if name and age and kg and age >= 0 then
-                local maxKG = kg * 10 / (age + 10)
+                local maxKG = kg * 11 / (age + 10)
                 local existing = maxKGCache[name]
                 if not existing or maxKG > existing then maxKGCache[name] = maxKG end
                 local base = getBaseName(name)
@@ -359,41 +359,29 @@ local function getMaxKGForPet(name)
     return nil
 end
 
--- v5.2: getEstimatedAge — inverse formula: age = (kg × 10) / maxKG - 10
+-- v5.3: getEstimatedAge inverse: age = (kg × 11) / maxKG - 10
 local function getEstimatedAge(item)
     local age = getAge(item) if age then return age end
     local kg = getKG(item) if not kg then return nil end
     local maxKG = getMaxKGForPet(getPetName(item))
     if maxKG and maxKG > 0 then
-        return math.max(0, math.min(200, math.floor(kg * 10 / maxKG - 10 + 0.5)))
+        return math.max(0, math.min(200, math.floor(kg * 11 / maxKG - 10 + 0.5)))
     end
     return nil
 end
 
--- v5.1: Priority 1 = server BaseWeight attribute (authoritative)
--- v5.2: formula yg BENER: kg × 10 / (age + 10) (game pake (10+age)/10 scaling)
+-- v5.3: skip server attribute (game gak expose BaseWeight)
+-- Formula: kg × 11 / (age+10) = "kg kalo pet ini di age 1"
+-- Rule "Ice Golem 6-6.4" cover semua Ice Golem yg age-1-equivalent 6-6.4kg
 local function getPetBaseKG(item)
-    -- Priority 1: server attribute (paling akurat — game store base weight asli)
-    for _,attrName in ipairs({"BASE_KG","PET_BASE_KG","BaseKG","BaseWeight","PET_BASE_WEIGHT","BASE_WEIGHT","PET_KG_BASE","StartingWeight","STARTING_KG"}) do
-        local ok, v = pcall(function() return item:GetAttribute(attrName) end)
-        if ok and v and type(v) == "number" and v > 0 then return v end
-    end
-
-    -- Priority 2: formula kalo gak ada attribute (game formula: kg = base × (10+age)/10)
     local kg = getKG(item)
     if not kg then return nil end
     local age = getAge(item)
     if age and age >= 0 then
-        return kg * 10 / (age + 10)
+        return kg * 11 / (age + 10)
     end
-
-    -- Priority 3: cache
-    local cached = getMaxKGForPet(getPetName(item))
-    if cached then return cached end
-
-    -- Priority 4: assume new hatched
-    if kg < 20 then return kg end
-    return nil
+    -- age unknown, assume mature
+    return kg * 11 / 110
 end
 
 local function calcBaseKG(kg, age)
