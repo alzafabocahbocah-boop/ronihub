@@ -413,7 +413,7 @@ end
 -- ============================================
 -- BUILD GUI
 -- ============================================
-local GUI_W = 320 local GUI_H_COMPACT = 150 local GUI_H_FULL = 300 local GUI_H = GUI_H_COMPACT  -- v4.8: W=320
+local GUI_W = 420 local GUI_H_COMPACT = 150 local GUI_H_FULL = 300 local GUI_H = GUI_H_COMPACT  -- v4.8: W=420
 
 -- Try parent ke CoreGui supaya tidak bisa di-destroy oleh script game/script lain
 local guiParent = player:WaitForChild("PlayerGui")
