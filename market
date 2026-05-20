@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.117"
-local VERSION_DATE = "APS init di task.spawn — biar gak hang main script di market place"
+local VERSION = "8.119"
+local VERSION_DATE = "STRICT APS-only mode: pet tanpa APS data → ke-skip (gak ke-list)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -3799,24 +3799,14 @@ local BASE_KG_ATTRS = {
     "StartingWeight","STARTING_KG",
 }
 local function getBaseKg(t)
-    -- v8.115: Priority 1 = APS BaseWeight (source of truth, gak peduli mutation/age)
+    -- v8.119: STRICT APS-ONLY mode (user pick).
+    -- Kalo APS fail/gak ada data untuk pet ini → return nil → pet ke-skip dari listing
     local okU, uuid = pcall(function() return t:GetAttribute("PET_UUID") end)
     if okU and uuid and getgenv().ZenxAPS then
         local bw = getgenv().ZenxAPS.getBaseKg(uuid)
         if bw and bw > 0 then return bw, "APS" end
     end
-    -- Priority 2: fallback formula (kalo APS gak available)
-    local kg = getCurrentKg(t)
-    local age = getAge(t)
-    if kg > 0 and age then
-        return kg * 11 / (age + 10), "formula"
-    end
-    if kg > 0 then
-        return kg * 11 / 110, "formula-assume100"
-    end
-    local cached = BH.getCachedBaseKG(t)
-    if cached then return cached, "cache" end
-    return nil
+    return nil  -- gak ada data → pet di-skip dari rule matching
 end
 
 -- v8.88: count pet di backpack yang match rule (untuk badge [N] di LIST HARGA)
@@ -3833,7 +3823,8 @@ BH.countMyPetsForRule = function(r)
             local pBase = (BH.getBaseName and pType ~= "") and BH.getBaseName(pType) or pType
             local typeOk = (not ruleType) or (pBase == ruleType) or (pType == ruleType)
             if typeOk then
-                local baseKg = getBaseKg(t) or getCurrentKg(t)
+                -- v8.119: strict APS-only. baseKg nil = skip
+                local baseKg = getBaseKg(t)
                 if baseKg and baseKg >= ruleMin and (ruleMax == math.huge or baseKg <= ruleMax) then
                     count = count + 1
                 end
@@ -4265,9 +4256,9 @@ do
             if t:IsA("Tool") then
                 local pType = getPetType(t)
                 local pBaseType = BH.getBaseName(pType)  -- v8.35: strip mutations
-                local baseKg = getBaseKg(t) or getCurrentKg(t)
+                local baseKg = getBaseKg(t)  -- v8.119: strict APS, nil = skip
                 local typeOk = (not rule.type) or rule.type == pBaseType
-                local kgOk = baseKg >= rule.min and baseKg <= rule.max
+                local kgOk = baseKg and baseKg >= rule.min and baseKg <= rule.max
                 if typeOk and kgOk then count = count + 1 end
             end
         end
@@ -4820,7 +4811,7 @@ BH.onStartClick = function()
                     local pBaseType = BH.getBaseName(pType)  -- v8.35: strip mutations
                     local currentKg = getCurrentKg(t)
                     local baseKg, baseKgSrc = getBaseKg(t)
-                    baseKg = baseKg or currentKg
+                    -- v8.119: strict APS-only. baseKg nil = pet ke-skip dari rule matching
                     -- v8.111: detect mutation untuk diagnostic
                     local petName = t.Name or ""
                     local isMut = false
@@ -4931,7 +4922,8 @@ BH.onStartClick = function()
                 local mutCount = 0
                 for _, p in ipairs(pets) do
                     local typeOk = (not r.type) or r.type == p.baseType
-                    local kgOk = p.wt >= r.min and p.wt <= r.max
+                    -- v8.119: skip pet kalo wt nil (APS gak ada data)
+                    local kgOk = p.wt and p.wt >= r.min and p.wt <= r.max
                     if typeOk and kgOk then
                         if alreadyListed[p.clean] then
                             skipCount = skipCount + 1
@@ -5014,21 +5006,23 @@ BH.onStartClick = function()
                         for ri, r in ipairs(listingRules) do
                             local ml = r.maxListings or math.huge
                             local active = countActive(ri)
-                            if ((not r.type) or r.type == p.baseType) and p.wt >= r.min and p.wt <= r.max and active < ml then
+                            -- v8.119: skip pet kalo wt nil (APS gak ada data)
+                            if p.wt and ((not r.type) or r.type == p.baseType) and p.wt >= r.min and p.wt <= r.max and active < ml then
                                 rule, ruleIdx = r, ri
                                 break
                             elseif p.isMut then
                                 debugDecisions = debugDecisions or {}
                                 local why = ""
+                                if not p.wt then why = why.."no-APS-data " end
                                 if r.type and r.type ~= p.baseType then why = why.."type≠('"..tostring(r.type).."'vs'"..p.baseType.."') " end
-                                if not (p.wt >= r.min and p.wt <= r.max) then why = why.."kg-out("..string.format("%.2f",p.wt).."∉"..r.min.."-"..(r.max==math.huge and "∞" or r.max)..") " end
+                                if p.wt and not (p.wt >= r.min and p.wt <= r.max) then why = why.."kg-out("..string.format("%.2f",p.wt).."∉"..r.min.."-"..(r.max==math.huge and "∞" or r.max)..") " end
                                 if active >= ml then why = why.."slot-full("..active.."/"..ml..") " end
                                 table.insert(debugDecisions, "r"..ri.." '"..(r.type or "All").."' "..r.min.."-"..(r.max==math.huge and "∞" or r.max)..": "..why)
                             end
                         end
                     end
                     if not rule and p.isMut and debugDecisions then
-                        L("  ⚠ skip MUT '"..(p.petName or "?").."' wt="..string.format("%.2f",p.wt)..":")
+                        L("  ⚠ skip MUT '"..(p.petName or "?").."' wt="..(p.wt and string.format("%.2f",p.wt) or "nil")..":")
                         for _, d in ipairs(debugDecisions) do L("       "..d) end
                     end
 
