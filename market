@@ -596,7 +596,7 @@ logoLbl.TextXAlignment = Enum.TextXAlignment.Left logoLbl.Parent = titleBar
 local titleLbl = Instance.new("TextLabel")
 titleLbl.Size = UDim2.new(0.7, 0, 1, 0) titleLbl.Position = UDim2.new(0, 50, 0, 0)
 titleLbl.BackgroundTransparency = 1
-titleLbl.Text = "ZENX MARKET"
+titleLbl.Text = "ZENX MARKET v"..VERSION
 titleLbl.TextColor3 = C.accent titleLbl.Font = FB titleLbl.TextSize = 13
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left titleLbl.Parent = titleBar
 
