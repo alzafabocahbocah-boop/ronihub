@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.108"
-local VERSION_DATE = "FIX listing: buang mutation divisor — pet 6kg display = base 6kg (apapun mutasinya)"
+local VERSION = "8.110"
+local VERSION_DATE = "Formula fix: kg = base × (10+age)/10 (game's real formula)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -378,14 +378,8 @@ do
     -- Formula: BaseWeight × mutation_multiplier
     function BH.computeBaseKgFromPetData(petData)
         if not petData then return 0 end
-        local base = petData.BaseWeight or 0
-        local mut = petData.MutationType
-        -- v8.100: SEMUA mutasi = ×1.10 (user request — gak ada yg lebih kuat dari Everchanted)
-        local mult = 1.0
-        if mut and mut ~= "" and mut ~= "None" then
-            mult = 1.10
-        end
-        return base * mult
+        -- v8.109: pake raw BaseWeight langsung (server authoritative), NO mut multiplier
+        return petData.BaseWeight or 0
     end
 
     -- v8.46: Count active listings dari TBC data (akurat, no streaming)
@@ -3709,29 +3703,24 @@ local BASE_KG_ATTRS = {
     "StartingWeight","STARTING_KG",
 }
 local function getBaseKg(t)
-    -- v8.108: SIMPLIFY — gak pake mutation divisor lagi. Pet 6kg = base 6kg (apapun mutasinya).
-    -- Logika: rule user di-set berdasarkan kg yg dilihat di pet, mutation udah kebake di kg
-    -- Cuma normalize by age (kg displayed → kg at age 1)
-
-    -- Try attribute lookup first (server-stored BaseWeight, dah include mutation)
+    -- v8.109: PRIORITY 1 — server BaseWeight attribute (paling authoritative)
+    -- Game store base weight asli, jadi pake itu langsung
     for _, attr in ipairs(BASE_KG_ATTRS) do
         local ok, v = pcall(function() return t:GetAttribute(attr) end)
         if ok and v and type(v) == "number" and v > 0 then
             return v, attr
         end
     end
-    -- Formula: kg × 11 / (age + 10) untuk normalize ke age 1
+    -- v8.110: formula yg BENER: kg × 10 / (age + 10) (game pake (10+age)/10 scaling)
     local kg = getCurrentKg(t)
     local age = getAge(t)
     if kg > 0 then
-        if age and age >= 1 then
-            return kg * 11 / (age + 10), "formula"
+        if age and age >= 0 then
+            return kg * 10 / (age + 10), "formula"
         else
-            -- age unknown → assume mature (age 100)
-            return kg * 11 / 110, "formula-mature-assumed"
+            return kg * 10 / 110, "formula-mature-assumed"  -- assume age 100
         end
     end
-    -- Cache fallback
     local cached = BH.getCachedBaseKG(t)
     if cached then return cached, "cache" end
     return nil
