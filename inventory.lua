@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v5.7 (APS init di task.spawn, gak hang)"
+local SCRIPT_VERSION = "v5.9 (STRICT APS-only, no fallback)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -445,10 +445,8 @@ local function getEstimatedAge(item)
     return nil
 end
 
--- v5.5: APS BaseWeight = source of truth (langsung dari game module)
--- Fallback ke formula kalo APS gak available
+-- v5.9: STRICT APS-only. Pet tanpa APS data → return nil → gak masuk pill
 local function getPetBaseKG(item)
-    -- Priority 1: APS module
     if getgenv().ZenxInvAPS then
         local okU, uuid = pcall(function() return item:GetAttribute("PET_UUID") end)
         if okU and uuid then
@@ -456,14 +454,7 @@ local function getPetBaseKG(item)
             if bw and bw > 0 then return bw end
         end
     end
-    -- Priority 2: formula fallback
-    local kg = getKG(item)
-    if not kg then return nil end
-    local age = getAge(item)
-    if age and age >= 0 then
-        return kg * 11 / (age + 10)
-    end
-    return kg * 11 / 110  -- assume mature
+    return nil
 end
 
 local function calcBaseKG(kg, age)
