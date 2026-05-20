@@ -2,13 +2,63 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v5.3 (age-1-normalized kg×11/(age+10))"
+local SCRIPT_VERSION = "v5.5 (APS integration: BaseWeight + Level source of truth)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
 local TS = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
+local RS = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
+
+-- ===== v5.5: APS (ActivePetsService) — source of truth Age/BaseWeight =====
+-- Wrap di do/end + getgenv biar gak hit Luau 200-local limit
+do
+    local ZAPS = {api = nil, mutMap = nil}
+    local cache, cacheTime = {}, {}
+    local dsCache, dsCacheTime = nil, 0
+    local TTL, DS_TTL = 5, 8
+
+    pcall(function() ZAPS.api = require(RS.Modules.PetServices.ActivePetsService) end)
+    pcall(function()
+        local mr = require(RS.Data.PetRegistry.PetMutationRegistry)
+        if mr and mr.EnumToPetMutation then ZAPS.mutMap = mr.EnumToPetMutation end
+    end)
+
+    local function brace(uuid)
+        local k = tostring(uuid)
+        if k:sub(1,1) ~= "{" then k = "{"..k.."}" end
+        return k
+    end
+
+    function ZAPS.getPetData(uuid)
+        if not ZAPS.api or not uuid then return nil end
+        local key = brace(uuid)
+        local now = tick()
+        if cache[key] and (now - (cacheTime[key] or 0)) < TTL then return cache[key] end
+        local ok, info = pcall(function() return ZAPS.api:GetPetData(player.Name, key) end)
+        if ok and info and info.PetData then
+            cache[key] = info; cacheTime[key] = now
+            return info
+        end
+        return nil
+    end
+
+    function ZAPS.getAge(uuid)
+        local info = ZAPS.getPetData(uuid)
+        if info and info.PetData and info.PetData.Level then return info.PetData.Level end
+        return nil
+    end
+
+    function ZAPS.getBaseKg(uuid)
+        local info = ZAPS.getPetData(uuid)
+        if info and info.PetData and info.PetData.BaseWeight then return info.PetData.BaseWeight end
+        return nil
+    end
+
+    getgenv().ZenxInvAPS = ZAPS
+    print("[ZenxInv] [APS] api="..(ZAPS.api and "OK" or "FAIL"))
+end
 
 -- persistence
 local STATE_FILE = "ZenxInv_state.json"
@@ -207,6 +257,14 @@ local function getKG(item)
     return nil
 end
 local function getAge(item)
+    -- v5.5: Priority 1 = APS Level (source of truth)
+    if getgenv().ZenxInvAPS then
+        local okU, uuid = pcall(function() return item:GetAttribute("PET_UUID") end)
+        if okU and uuid then
+            local age = getgenv().ZenxInvAPS.getAge(uuid)
+            if age then return age end
+        end
+    end
     -- v4.1: probe SEMUA attributes pet (cepet - cuma attribute lookup)
     -- Source 1: scan all attributes, cari yg namanya kayak "age"/"level"
     local ok, attrs = pcall(function() return item:GetAttributes() end)
@@ -370,18 +428,25 @@ local function getEstimatedAge(item)
     return nil
 end
 
--- v5.3: skip server attribute (game gak expose BaseWeight)
--- Formula: kg × 11 / (age+10) = "kg kalo pet ini di age 1"
--- Rule "Ice Golem 6-6.4" cover semua Ice Golem yg age-1-equivalent 6-6.4kg
+-- v5.5: APS BaseWeight = source of truth (langsung dari game module)
+-- Fallback ke formula kalo APS gak available
 local function getPetBaseKG(item)
+    -- Priority 1: APS module
+    if getgenv().ZenxInvAPS then
+        local okU, uuid = pcall(function() return item:GetAttribute("PET_UUID") end)
+        if okU and uuid then
+            local bw = getgenv().ZenxInvAPS.getBaseKg(uuid)
+            if bw and bw > 0 then return bw end
+        end
+    end
+    -- Priority 2: formula fallback
     local kg = getKG(item)
     if not kg then return nil end
     local age = getAge(item)
     if age and age >= 0 then
         return kg * 11 / (age + 10)
     end
-    -- age unknown, assume mature
-    return kg * 11 / 110
+    return kg * 11 / 110  -- assume mature
 end
 
 local function calcBaseKG(kg, age)
