@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.123"
-local VERSION_DATE = "SIMPLE: match by Display KG. Rule X-Y = pet display X-Y kg. No APS needed"
+local VERSION = "8.124"
+local VERSION_DATE = "🎯 BREAKTHROUGH: getgc memory container bypass — APS data via memory scan, works di market"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -199,9 +199,17 @@ do
     end
 
     function ZAPS.getAge(uuid)
+        -- v8.124: Priority 0 = memory container
+        if ZAPS.memContainer then
+            local key = brace(uuid)
+            local entry = ZAPS.memContainer[key]
+            if type(entry) == "table" and entry.PetData and entry.PetData.Level then
+                return entry.PetData.Level
+            end
+        end
         local info = ZAPS.getPetData(uuid)
         if info and info.PetData and info.PetData.Level then return info.PetData.Level end
-        -- v8.122: fallback ke persistent cache
+        -- fallback ke persistent cache
         local key = brace(uuid)
         local pc = persistentCache[key]
         if pc and pc.Level then return pc.Level end
@@ -209,13 +217,53 @@ do
     end
 
     function ZAPS.getBaseKg(uuid)
+        -- v8.124: Priority 0 = memory container (bypass require, works di market!)
+        if ZAPS.memContainer then
+            local key = brace(uuid)
+            local entry = ZAPS.memContainer[key]
+            if type(entry) == "table" and entry.PetData and entry.PetData.BaseWeight then
+                return entry.PetData.BaseWeight
+            end
+        end
         local info = ZAPS.getPetData(uuid)
         if info and info.PetData and info.PetData.BaseWeight then return info.PetData.BaseWeight end
-        -- v8.122: fallback ke persistent cache
+        -- fallback ke persistent cache
         local key = brace(uuid)
         local pc = persistentCache[key]
         if pc and pc.BaseWeight then return pc.BaseWeight end
         return nil
+    end
+
+    -- v8.124: scan getgc untuk find UUID→PetData container (bypass require!)
+    function ZAPS.findMemoryContainer()
+        if not getgc then return nil, 0 end
+        local best, bestCount = nil, 0
+        local ok = pcall(function()
+            for _, obj in pairs(getgc(true)) do
+                if type(obj) == "table" then
+                    -- Quick check: has UUID-like keys?
+                    local uuidLike = 0
+                    for k in pairs(obj) do
+                        if type(k) == "string" and #k >= 32 and k:find("-") then
+                            uuidLike = uuidLike + 1
+                            if uuidLike >= 5 then break end
+                        end
+                    end
+                    if uuidLike >= 5 then
+                        -- Verify: sample entry has PetData
+                        local sample = nil
+                        for _, v in pairs(obj) do sample = v; break end
+                        if type(sample) == "table" and rawget(sample, "PetData") then
+                            -- Count entries
+                            local cnt = 0
+                            for _ in pairs(obj) do cnt = cnt + 1 end
+                            if cnt > bestCount then best = obj; bestCount = cnt end
+                        end
+                    end
+                end
+            end
+        end)
+        return best, bestCount
     end
 
     -- v8.122: populate persistent cache dari APS (call kalo APS work)
@@ -273,6 +321,16 @@ do
     end
 
     function ZAPS.getMutation(uuid)
+        -- v8.124: Priority 0 = memory container
+        if ZAPS.memContainer then
+            local key = brace(uuid)
+            local entry = ZAPS.memContainer[key]
+            if type(entry) == "table" and entry.PetData and entry.PetData.MutationType then
+                local code = entry.PetData.MutationType
+                local name = ZAPS.mutMap and ZAPS.mutMap[code] or tostring(code)
+                return code, name
+            end
+        end
         local info = ZAPS.getPetData(uuid)
         if info and info.PetData and info.PetData.MutationType then
             local code = info.PetData.MutationType
@@ -290,38 +348,42 @@ do
 
     getgenv().ZenxAPS = ZAPS
 
-    -- Spawn init di thread terpisah biar gak block main script
-    -- v8.121: retry mechanism — require sometimes yields/hangs in certain servers
-    -- Try every 5s until module loads (max 6 attempts = 30s total)
+    -- v8.124: GETGC-FIRST INIT — bypass require entirely!
+    -- Game's own scripts udah load APS data ke memory. getgc baca langsung.
     task.spawn(function()
-        local attempt = 0
-        while not ZAPS.api and attempt < 6 do
-            attempt = attempt + 1
-            local attemptDone = false
-            task.spawn(function()
-                pcall(function()
-                    local modules = RS:FindFirstChild("Modules")
-                    if not modules then return end
-                    local petServices = modules:FindFirstChild("PetServices")
-                    if not petServices then return end
-                    local apsMod = petServices:FindFirstChild("ActivePetsService")
-                    if not apsMod then return end
-                    ZAPS.api = require(apsMod)
+        -- Step 1: Scan getgc untuk memory container (FAST + RELIABLE)
+        ZAPS.memContainer, ZAPS.memContainerCount = ZAPS.findMemoryContainer()
+        if ZAPS.memContainer then
+            L("[APS] memContainer FOUND: "..ZAPS.memContainerCount.." entries (bypass require!)")
+        else
+            L("[APS] memContainer NOT FOUND — fallback ke require")
+        end
+
+        -- Step 2: Tetep coba require (buat fallback + mutMap)
+        if not ZAPS.memContainer then
+            local attempt = 0
+            while not ZAPS.api and attempt < 3 do
+                attempt = attempt + 1
+                local attemptDone = false
+                task.spawn(function()
+                    pcall(function()
+                        local modules = RS:FindFirstChild("Modules")
+                        if not modules then return end
+                        local petServices = modules:FindFirstChild("PetServices")
+                        if not petServices then return end
+                        local apsMod = petServices:FindFirstChild("ActivePetsService")
+                        if not apsMod then return end
+                        ZAPS.api = require(apsMod)
+                    end)
+                    attemptDone = true
                 end)
-                attemptDone = true
-            end)
-            -- wait up to 5s for this attempt
-            local waited = 0
-            while not attemptDone and waited < 5 do
-                task.wait(0.5)
-                waited = waited + 0.5
-            end
-            if not ZAPS.api and attempt < 6 then
-                L("[APS] attempt "..attempt.." timed-out, retry in 5s...")
-                task.wait(5)
+                local waited = 0
+                while not attemptDone and waited < 5 do task.wait(0.5); waited = waited + 0.5 end
+                if not ZAPS.api and attempt < 3 then task.wait(3) end
             end
         end
 
+        -- Step 3: Load mutMap (untuk decode MutationType code → name)
         pcall(function()
             local data = RS:FindFirstChild("Data")
             if not data then return end
@@ -332,24 +394,44 @@ do
             local mr = require(mutReg)
             if mr and mr.EnumToPetMutation then ZAPS.mutMap = mr.EnumToPetMutation end
         end)
+
         ZAPS.ready = true
-        L("[APS] FINAL: api="..(ZAPS.api and "OK" or "FAIL after retries").." mutMap="..(ZAPS.mutMap and "OK" or "FAIL"))
-        -- v8.122: populate persistent cache kalo APS work
-        if ZAPS.api then
-            task.wait(1)
-            pcall(function() ZAPS.populateCache() end)
+        L("[APS] FINAL: memContainer="..(ZAPS.memContainer and ZAPS.memContainerCount.." entries" or "FAIL")..
+          " api="..(ZAPS.api and "OK" or "FAIL")..
+          " mutMap="..(ZAPS.mutMap and "OK" or "FAIL"))
+
+        -- Populate persistent cache kalo ada memContainer
+        if ZAPS.memContainer then
+            task.wait(0.5)
+            local cnt = 0
+            for uuid, entry in pairs(ZAPS.memContainer) do
+                if type(entry) == "table" and entry.PetData and entry.PetData.BaseWeight then
+                    persistentCache[uuid] = {
+                        BaseWeight = entry.PetData.BaseWeight,
+                        Level = entry.PetData.Level,
+                        MutationType = entry.PetData.MutationType,
+                        savedAt = os.time(),
+                    }
+                    cnt = cnt + 1
+                end
+            end
+            if cnt > 0 then savePersistentCache(); L("[APS] saved "..cnt.." entries to cache file") end
         end
-        -- v8.120: diagnostic + UI refresh
-        task.wait(0.5)
-        pcall(function() ZAPS.diagnose() end)
+
+        -- UI refresh
+        task.wait(0.3)
         pcall(function()
             if BH.refreshPriceCounts then BH.refreshPriceCounts() end
         end)
-        -- v8.122: periodic cache refresh setiap 5 menit (kalo APS still work)
+
+        -- Periodic memContainer re-scan (catch new pets/keep reference live)
         task.spawn(function()
             while true do
-                task.wait(300)  -- 5 menit
-                if ZAPS.api then pcall(function() ZAPS.populateCache() end) end
+                task.wait(60)  -- 1 menit
+                local new, newCnt = ZAPS.findMemoryContainer()
+                if new and newCnt > 0 then
+                    ZAPS.memContainer = new; ZAPS.memContainerCount = newCnt
+                end
             end
         end)
     end)
@@ -3921,9 +4003,13 @@ local BASE_KG_ATTRS = {
     "StartingWeight","STARTING_KG",
 }
 local function getBaseKg(t)
-    -- v8.123: SIMPLE — pake display KG langsung
-    -- Rule "Ice Golem 6-6.4" match pet display 6-6.4 kg, gak peduli mutation/age
-    -- Konsisten, gak butuh APS, always works
+    -- v8.124: APS via getgc memory container (works di market + garden!)
+    local okU, uuid = pcall(function() return t:GetAttribute("PET_UUID") end)
+    if okU and uuid and getgenv().ZenxAPS then
+        local bw = getgenv().ZenxAPS.getBaseKg(uuid)
+        if bw and bw > 0 then return bw, "APS" end
+    end
+    -- Fallback: display kg
     return getCurrentKg(t), "display"
 end
 
