@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.105"
-local VERSION_DATE = "FIX unlist: lenient success detection + raw response dump + alt-name fallback"
+local VERSION = "8.106"
+local VERSION_DATE = "Unlist: aggressive RS scan + TBC method fallback + dump all TBC methods buat debug"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2460,7 +2460,43 @@ do
             end
 
             if not removeRE then
-                statusLbl.Text = "❌ removeRE gak ada"
+                -- v8.106: coba pake TBC method kalo removeRE total gak ada
+                if BH.TBC then
+                    L("[Unlist-ALL] removeRE missing, coba TBC method")
+                    local tbcMethods = {"RemoveListing", "Unlist", "DeleteListing", "RemoveItem"}
+                    local foundMethod = nil
+                    for _, mname in ipairs(tbcMethods) do
+                        if type(BH.TBC[mname]) == "function" then
+                            foundMethod = mname; break
+                        end
+                    end
+                    if foundMethod then
+                        L("[Unlist-ALL] TBC method: "..foundMethod)
+                        statusLbl.Text = "🔄 Pake TBC."..foundMethod
+                        -- Try TBC method (signature unknown — best effort)
+                        -- Fetch listings dan call method per listing
+                        local data = BH.fetchBoothData(player)
+                        if data and data.Listings then
+                            local count = 0
+                            for listingUuid, _ in pairs(data.Listings) do
+                                local ok = pcall(function()
+                                    BH.TBC[foundMethod](BH.TBC, listingUuid)
+                                end)
+                                if ok then count = count + 1 end
+                                task.wait(0.3)
+                            end
+                            statusLbl.Text = "✅ "..count.." via TBC"
+                            statusLbl.TextColor3 = C.success
+                            return
+                        end
+                    else
+                        L("[Unlist-ALL] TBC pun gak punya method unlist. Dump all TBC method names:")
+                        for k, v in pairs(BH.TBC) do
+                            if type(v) == "function" then L("  TBC."..k) end
+                        end
+                    end
+                end
+                statusLbl.Text = "❌ removeRE gak ada (cek log)"
                 statusLbl.TextColor3 = C.danger
                 L("[Unlist-ALL] ❌ removeRE not found, gak bisa unlist")
                 return
@@ -3512,6 +3548,47 @@ pcall(function()
         removeBoothRE = Booths:FindFirstChild("RemoveBooth")
     end
 end)
+
+-- v8.106: AGGRESSIVE FALLBACK — scan SEMUA RemoteEvent/RemoteFunction di ReplicatedStorage
+-- yang namanya mengandung "remove" atau "unlist" or "delete" + "list"/"item"
+if not removeRE then
+    L("[Init] 🔍 Aggressive scan: cari removeRE di seluruh ReplicatedStorage...")
+    local candidates = {}
+    local function scanFolder(obj, depth)
+        if depth > 6 then return end
+        for _, c in ipairs(obj:GetChildren()) do
+            if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
+                local n = c.Name:lower()
+                local hasRemove = n:find("remove") or n:find("unlist") or n:find("delist") or n:find("delete")
+                local hasList = n:find("list") or n:find("item") or n:find("pet") or n:find("booth")
+                if hasRemove and hasList then
+                    table.insert(candidates, c)
+                    L("[Init] candidate: "..c:GetFullName().." ("..c.ClassName..")")
+                end
+            elseif c:IsA("Folder") or c:IsA("Configuration") then
+                scanFolder(c, depth + 1)
+            end
+        end
+    end
+    pcall(function() scanFolder(RS, 0) end)
+    -- Prefer one that contains "list" AND "remove"/"unlist"
+    for _, c in ipairs(candidates) do
+        local n = c.Name:lower()
+        if (n:find("remove") or n:find("unlist") or n:find("delist")) and n:find("list") then
+            removeRE = c
+            L("[Init] ✅ removeRE PICKED: "..c:GetFullName())
+            break
+        end
+    end
+    -- Fallback: ambil yang pertama kalo gak ada match strict
+    if not removeRE and #candidates > 0 then
+        removeRE = candidates[1]
+        L("[Init] ⚠ removeRE fallback (1st match): "..candidates[1]:GetFullName())
+    end
+    if not removeRE then
+        L("[Init] ❌❌❌ removeRE bener-bener gak ada di RS. Coba pake TBC method.")
+    end
+end
 local skinRE
 pcall(function() skinRE = RS.GameEvents.TradeBoothSkinService.Equip end)
 
