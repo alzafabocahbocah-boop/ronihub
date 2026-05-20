@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v4.5 (Font gede + GUI lebih besar)"
+local SCRIPT_VERSION = "v4.5 (Pills KG pet font lebih gede)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -143,16 +143,14 @@ local function stroke(p, col, th) return mk("UIStroke",{Color=col or C.Teal, Thi
 local function lbl(p, txt, ts, col, xa)
     return mk("TextLabel",{
         BackgroundTransparency=1, Text=txt, TextColor3=col or C.White,
-        -- v4.5: font default 11 → 16 (gede biar enak dibaca)
-        Font=Enum.Font.GothamBold, TextSize=(ts and ts * 1.5) or 16, TextScaled=false,
+        Font=Enum.Font.GothamBold, TextSize=ts or 11, TextScaled=false,
         TextXAlignment=xa or Enum.TextXAlignment.Left, Parent=p
     })
 end
 local function btn(p, txt, ts, bg, tc)
     local b = mk("TextButton",{
         BackgroundColor3=bg or C.Card, Text=txt, TextColor3=tc or C.White,
-        -- v4.5: font default 11 → 16
-        Font=Enum.Font.GothamBold, TextSize=(ts and ts * 1.5) or 16, TextScaled=false, AutoButtonColor=false, Parent=p
+        Font=Enum.Font.GothamBold, TextSize=ts or 11, TextScaled=false, AutoButtonColor=false, Parent=p
     })
     corner(b, 7)
     return b
@@ -162,28 +160,25 @@ local function div(parent, lo)
 end
 
 local function togRow(parent, labelTxt, descTxt, lo)
-    local row = mk("Frame",{Size=UDim2.new(1,0,0,44), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=parent})
+    local row = mk("Frame",{Size=UDim2.new(1,0,0,32), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=parent})
     corner(row, 6) local rowStroke = stroke(row, C.Dim, 1.1)
-    -- v4.5: bumped sizes for bigger fonts (was 9/8 → now 14/12)
-    local l = lbl(row, labelTxt, 14, C.White) l.Size = UDim2.new(0.65,0,0,20) l.Position = UDim2.new(0,10,0,5)
+    local l = lbl(row, labelTxt, 9, C.White) l.Size = UDim2.new(0.65,0,0,16) l.Position = UDim2.new(0,8,0,4)
     if descTxt then
-        local dl = lbl(row, descTxt, 12, C.Dim) dl.Size = UDim2.new(0.75,0,0,16) dl.Position = UDim2.new(0,10,0,25)
+        local dl = lbl(row, descTxt, 8, C.Dim) dl.Size = UDim2.new(0.75,0,0,11) dl.Position = UDim2.new(0,8,0,19)
     end
-    local tog = btn(row, "OFF", 14, C.Panel, C.Gray) tog.Size = UDim2.new(0,60,0,28) tog.Position = UDim2.new(1,-66,0.5,-14)
+    local tog = btn(row, "OFF", 9, C.Panel, C.Gray) tog.Size = UDim2.new(0,44,0,20) tog.Position = UDim2.new(1,-50,0.5,-10)
     local togStroke = stroke(tog, C.Dim, 1.1)
     return row, tog, togStroke, rowStroke
 end
 
 local function cfgRow(parent, labelTxt, lo, default, onChange)
-    local r = mk("Frame",{Size=UDim2.new(1,0,0,36), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=parent})
+    local r = mk("Frame",{Size=UDim2.new(1,0,0,26), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=lo, Parent=parent})
     corner(r, 6) stroke(r, C.Dim, 1.1)
-    -- v4.5: 9 → 14
-    local l = lbl(r, labelTxt, 14, C.Gray) l.Size = UDim2.new(0.6,0,1,0) l.Position = UDim2.new(0,10,0,0)
+    local l = lbl(r, labelTxt, 9, C.Gray) l.Size = UDim2.new(0.6,0,1,0) l.Position = UDim2.new(0,8,0,0)
     local box = mk("TextBox",{
-        Size=UDim2.new(0,72,0,26), Position=UDim2.new(1,-78,0.5,-13),
+        Size=UDim2.new(0,56,0,20), Position=UDim2.new(1,-62,0.5,-10),
         BackgroundColor3=C.Panel, Text=tostring(default), TextColor3=C.White,
-        -- v4.5: 10 → 15
-        Font=Enum.Font.GothamBold, TextSize=15, TextScaled=false,
+        Font=Enum.Font.GothamBold, TextSize=10, TextScaled=false,
         TextXAlignment=Enum.TextXAlignment.Center, ClearTextOnFocus=false, Parent=r
     })
     corner(box, 5) stroke(box, C.Dim, 1)
@@ -418,7 +413,7 @@ end
 -- ============================================
 -- BUILD GUI
 -- ============================================
-local GUI_W = 540 local GUI_H_COMPACT = 220 local GUI_H_FULL = 480 local GUI_H = GUI_H_COMPACT  -- v4.5: lebih gede biar font baru muat
+local GUI_W = 420 local GUI_H_COMPACT = 165 local GUI_H_FULL = 360 local GUI_H = GUI_H_COMPACT  -- v4.0: lebar 420 buat 5 pills per row
 
 -- Try parent ke CoreGui supaya tidak bisa di-destroy oleh script game/script lain
 local guiParent = player:WaitForChild("PlayerGui")
@@ -510,7 +505,7 @@ local miniIcon = mk("TextButton",{
     Size=UDim2.new(0,40,0,40),
     Position=UDim2.new(0,18,0.5,-20),
     BackgroundColor3=C.BG, Text="Z", TextColor3=C.Teal,
-    Font=Enum.Font.GothamBold, TextSize=28, AutoButtonColor=false,
+    Font=Enum.Font.GothamBold, TextSize=22, AutoButtonColor=false,
     Visible=false, Active=false, Draggable=false, Parent=sg
 })
 corner(miniIcon, 8) stroke(miniIcon, C.Teal, 2)
@@ -536,12 +531,13 @@ invRefreshBtn.Size = UDim2.new(0,80,0,20) invRefreshBtn.Position = UDim2.new(1,-
 stroke(invRefreshBtn, C.Teal, 1.2)
 
 -- v4.0: WEIGHT CATEGORY PILLS - 2 rows × 5 pills each
+-- v4.5: pill text gedein dari 9 → 16, row tinggiin 28 → 42
 -- Top: 0-2, 2-3, 3-3.7, 3.8-4, Gajah Abu 38+
 -- Bot: 3-4, 4-5, 5-5.9, 5.9-6.4, Gajah Merah 60+
-local catRow1 = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
+local catRow1 = mk("Frame",{Size=UDim2.new(1,0,0,42), BackgroundTransparency=1, LayoutOrder=2, Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,3), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow1})
 
-local catRow2 = mk("Frame",{Size=UDim2.new(1,0,0,28), BackgroundTransparency=1, LayoutOrder=3, Parent=content})
+local catRow2 = mk("Frame",{Size=UDim2.new(1,0,0,42), BackgroundTransparency=1, LayoutOrder=3, Parent=content})
 mk("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal, Padding=UDim.new(0,3), HorizontalAlignment=Enum.HorizontalAlignment.Left, Parent=catRow2})
 
 -- Pill width: 5 pills + 4 gaps × 3px = 12, di GUI 420 dengan padding ~16 = ~78 per pill
@@ -551,7 +547,7 @@ local catTopLabels = {}
 for i, cat in ipairs(CAT_TOP) do
     local pill = mk("Frame",{Size=UDim2.new(0, PILL_W, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow1})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, cat.name..": 0", 9, C.Gray, Enum.TextXAlignment.Center)
+    local pl = lbl(pill, cat.name..": 0", 16, C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
     pl.Font = Enum.Font.GothamBold
     catTopLabels[i] = pl
@@ -561,7 +557,7 @@ local catBotLabels = {}
 for i, cat in ipairs(CAT_BOT) do
     local pill = mk("Frame",{Size=UDim2.new(0, PILL_W, 1, 0), BackgroundColor3=C.Card, BorderSizePixel=0, LayoutOrder=i, Parent=catRow2})
     corner(pill, 5) stroke(pill, C.Dim, 1)
-    local pl = lbl(pill, cat.name..": 0", 9, C.Gray, Enum.TextXAlignment.Center)
+    local pl = lbl(pill, cat.name..": 0", 16, C.Gray, Enum.TextXAlignment.Center)
     pl.Size = UDim2.new(1,0,1,0)
     pl.Font = Enum.Font.GothamBold
     catBotLabels[i] = pl
@@ -625,7 +621,7 @@ do
         Size=UDim2.new(0.7,-10,0,20), Position=UDim2.new(0.3,0,0.5,-10),
         BackgroundColor3=C.Panel, Text=psLink, PlaceholderText="paste link / kosong = OFF",
         TextColor3=C.White, PlaceholderColor3=C.Dim,
-        Font=Enum.Font.Gotham, TextSize=14, TextScaled=false,
+        Font=Enum.Font.Gotham, TextSize=9, TextScaled=false,
         TextXAlignment=Enum.TextXAlignment.Left, ClearTextOnFocus=false, Parent=r
     })
     corner(box, 5) stroke(box, C.Dim, 1)
@@ -704,7 +700,7 @@ dbgLbl.Text = ""
 local rawLbl = lbl(content, "", 8, C.Gray, Enum.TextXAlignment.Center)
 rawLbl.Size = UDim2.new(1,0,0,16) rawLbl.LayoutOrder=12
 rawLbl.BackgroundTransparency = 1
-rawLbl.TextSize = 13
+rawLbl.TextSize = 9
 
 local function fmtAge(sec)
     sec = math.floor(sec)
