@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.116"
-local VERSION_DATE = "APS safe init (FindFirstChild) biar gak hang di place beda"
+local VERSION = "8.117"
+local VERSION_DATE = "APS init di task.spawn — biar gak hang main script di market place"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -137,36 +137,14 @@ do
     end
 end
 
--- ===== v8.116: APS (ActivePetsService) — source of truth Age/BaseWeight/Mutation =====
--- SAFE INIT: pake FindFirstChild biar gak hang di place lain (e.g. market area)
+-- ===== v8.117: APS (ActivePetsService) — source of truth Age/BaseWeight/Mutation =====
+-- ASYNC INIT: spawn thread biar require gak hang main script (e.g. di market place)
 do
-    local ZAPS = {api = nil, mutMap = nil}
+    local ZAPS = {api = nil, mutMap = nil, ready = false}
     local cache, cacheTime = {}, {}
     local dsCache, dsCacheTime = nil, 0
     local TTL, DS_TTL = 5, 8
 
-    -- Try get APS api safely (FindFirstChild biar gak hang kalo module gak ada)
-    pcall(function()
-        local modules = RS:FindFirstChild("Modules")
-        if not modules then return end
-        local petServices = modules:FindFirstChild("PetServices")
-        if not petServices then return end
-        local apsMod = petServices:FindFirstChild("ActivePetsService")
-        if not apsMod then return end
-        ZAPS.api = require(apsMod)
-    end)
-    pcall(function()
-        local data = RS:FindFirstChild("Data")
-        if not data then return end
-        local petReg = data:FindFirstChild("PetRegistry")
-        if not petReg then return end
-        local mutReg = petReg:FindFirstChild("PetMutationRegistry")
-        if not mutReg then return end
-        local mr = require(mutReg)
-        if mr and mr.EnumToPetMutation then ZAPS.mutMap = mr.EnumToPetMutation end
-    end)
-
-    -- Normalize UUID to braced format (server expects {uuid})
     local function brace(uuid)
         local k = tostring(uuid)
         if k:sub(1,1) ~= "{" then k = "{"..k.."}" end
@@ -227,7 +205,31 @@ do
     end
 
     getgenv().ZenxAPS = ZAPS
-    L("[APS] api="..(ZAPS.api and "OK" or "FAIL").." mutMap="..(ZAPS.mutMap and "OK" or "FAIL"))
+
+    -- Spawn init di thread terpisah biar gak block main script
+    task.spawn(function()
+        pcall(function()
+            local modules = RS:FindFirstChild("Modules")
+            if not modules then return end
+            local petServices = modules:FindFirstChild("PetServices")
+            if not petServices then return end
+            local apsMod = petServices:FindFirstChild("ActivePetsService")
+            if not apsMod then return end
+            ZAPS.api = require(apsMod)
+        end)
+        pcall(function()
+            local data = RS:FindFirstChild("Data")
+            if not data then return end
+            local petReg = data:FindFirstChild("PetRegistry")
+            if not petReg then return end
+            local mutReg = petReg:FindFirstChild("PetMutationRegistry")
+            if not mutReg then return end
+            local mr = require(mutReg)
+            if mr and mr.EnumToPetMutation then ZAPS.mutMap = mr.EnumToPetMutation end
+        end)
+        ZAPS.ready = true
+        L("[APS] api="..(ZAPS.api and "OK" or "FAIL").." mutMap="..(ZAPS.mutMap and "OK" or "FAIL"))
+    end)
 end
 
 -- ===== v8.35: MUTATION strip helper (sync sama inventory.lua) =====
