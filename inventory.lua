@@ -2,7 +2,7 @@
 -- Weight categories (Large/Huge/Titanic/Godly/Colossal) sesuai game.guide
 -- Formula: weight = baseKG * (age + 10) / 11
 
-local SCRIPT_VERSION = "v5.9 (STRICT APS-only, no fallback)"
+local SCRIPT_VERSION = "v5.14 (getgc bypass + age-1 normalized base × 1.1)"
 print("==== [ZenxInv] LOAD ("..SCRIPT_VERSION..") ====")
 
 local Players = game:GetService("Players")
@@ -11,17 +11,61 @@ local HttpService = game:GetService("HttpService")
 local RS = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 
--- ===== v5.7: APS (ActivePetsService) — async init biar gak hang di place beda =====
+-- ===== v5.13: APS via getgc memory container (bypass require, works di market+garden) =====
 do
-    local ZAPS = {api = nil, mutMap = nil, ready = false}
+    local ZAPS = {api = nil, memContainer = nil, memContainerCount = 0, ready = false}
     local cache, cacheTime = {}, {}
-    local dsCache, dsCacheTime = nil, 0
-    local TTL, DS_TTL = 5, 8
+    local TTL = 5
+    local APS_CACHE_FILE = "ZenxMarket_APS_cache.json"
+    local persistentCache = {}
+
+    -- Load persistent cache
+    pcall(function()
+        if isfile and readfile and isfile(APS_CACHE_FILE) then
+            local raw = readfile(APS_CACHE_FILE)
+            local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
+            if ok and type(data) == "table" then
+                persistentCache = data
+                local cnt = 0
+                for _ in pairs(persistentCache) do cnt = cnt + 1 end
+                print("[ZenxInv] [APS] loaded "..cnt.." entries from cache file")
+            end
+        end
+    end)
 
     local function brace(uuid)
         local k = tostring(uuid)
         if k:sub(1,1) ~= "{" then k = "{"..k.."}" end
         return k
+    end
+
+    -- v5.13: Find UUID→PetData container in memory (bypass require!)
+    function ZAPS.findMemoryContainer()
+        if not getgc then return nil, 0 end
+        local best, bestCount = nil, 0
+        pcall(function()
+            for _, obj in pairs(getgc(true)) do
+                if type(obj) == "table" then
+                    local uuidLike = 0
+                    for k in pairs(obj) do
+                        if type(k) == "string" and #k >= 32 and k:find("-") then
+                            uuidLike = uuidLike + 1
+                            if uuidLike >= 5 then break end
+                        end
+                    end
+                    if uuidLike >= 5 then
+                        local sample = nil
+                        for _, v in pairs(obj) do sample = v; break end
+                        if type(sample) == "table" and rawget(sample, "PetData") then
+                            local cnt = 0
+                            for _ in pairs(obj) do cnt = cnt + 1 end
+                            if cnt > bestCount then best = obj; bestCount = cnt end
+                        end
+                    end
+                end
+            end
+        end)
+        return best, bestCount
     end
 
     function ZAPS.getPetData(uuid)
@@ -38,42 +82,70 @@ do
     end
 
     function ZAPS.getAge(uuid)
+        if ZAPS.memContainer then
+            local entry = ZAPS.memContainer[brace(uuid)]
+            if type(entry) == "table" and entry.PetData and entry.PetData.Level then
+                return entry.PetData.Level
+            end
+        end
         local info = ZAPS.getPetData(uuid)
         if info and info.PetData and info.PetData.Level then return info.PetData.Level end
+        local pc = persistentCache[brace(uuid)]
+        if pc and pc.Level then return pc.Level end
         return nil
     end
 
     function ZAPS.getBaseKg(uuid)
+        if ZAPS.memContainer then
+            local entry = ZAPS.memContainer[brace(uuid)]
+            if type(entry) == "table" and entry.PetData and entry.PetData.BaseWeight then
+                return entry.PetData.BaseWeight
+            end
+        end
         local info = ZAPS.getPetData(uuid)
         if info and info.PetData and info.PetData.BaseWeight then return info.PetData.BaseWeight end
+        local pc = persistentCache[brace(uuid)]
+        if pc and pc.BaseWeight then return pc.BaseWeight end
         return nil
     end
 
     getgenv().ZenxInvAPS = ZAPS
 
-    -- Spawn init di thread terpisah biar gak block main script
+    -- Async init: getgc first, require as fallback
     task.spawn(function()
-        pcall(function()
-            local modules = RS:FindFirstChild("Modules")
-            if not modules then return end
-            local petServices = modules:FindFirstChild("PetServices")
-            if not petServices then return end
-            local apsMod = petServices:FindFirstChild("ActivePetsService")
-            if not apsMod then return end
-            ZAPS.api = require(apsMod)
-        end)
-        pcall(function()
-            local data = RS:FindFirstChild("Data")
-            if not data then return end
-            local petReg = data:FindFirstChild("PetRegistry")
-            if not petReg then return end
-            local mutReg = petReg:FindFirstChild("PetMutationRegistry")
-            if not mutReg then return end
-            local mr = require(mutReg)
-            if mr and mr.EnumToPetMutation then ZAPS.mutMap = mr.EnumToPetMutation end
-        end)
+        ZAPS.memContainer, ZAPS.memContainerCount = ZAPS.findMemoryContainer()
+        if ZAPS.memContainer then
+            print("[ZenxInv] [APS] memContainer FOUND: "..ZAPS.memContainerCount.." entries")
+        end
+        if not ZAPS.memContainer then
+            local attempt = 0
+            while not ZAPS.api and attempt < 3 do
+                attempt = attempt + 1
+                local done = false
+                task.spawn(function()
+                    pcall(function()
+                        local m = RS:FindFirstChild("Modules") and RS.Modules:FindFirstChild("PetServices")
+                        local am = m and m:FindFirstChild("ActivePetsService")
+                        if am then ZAPS.api = require(am) end
+                    end)
+                    done = true
+                end)
+                local waited = 0
+                while not done and waited < 5 do task.wait(0.5); waited = waited + 0.5 end
+                if not ZAPS.api and attempt < 3 then task.wait(3) end
+            end
+        end
         ZAPS.ready = true
-        print("[ZenxInv] [APS] api="..(ZAPS.api and "OK" or "FAIL"))
+        print("[ZenxInv] [APS] FINAL: memContainer="..(ZAPS.memContainer and ZAPS.memContainerCount.." entries" or "FAIL").." api="..(ZAPS.api and "OK" or "FAIL"))
+
+        -- Periodic re-scan
+        task.spawn(function()
+            while true do
+                task.wait(60)
+                local new, cnt = ZAPS.findMemoryContainer()
+                if new and cnt > 0 then ZAPS.memContainer = new; ZAPS.memContainerCount = cnt end
+            end
+        end)
     end)
 end
 
@@ -445,16 +517,16 @@ local function getEstimatedAge(item)
     return nil
 end
 
--- v5.9: STRICT APS-only. Pet tanpa APS data → return nil → gak masuk pill
+-- v5.14: APS BaseWeight (age 0) × 1.1 = age-1 normalized (sesuai display pet baru)
 local function getPetBaseKG(item)
     if getgenv().ZenxInvAPS then
         local okU, uuid = pcall(function() return item:GetAttribute("PET_UUID") end)
         if okU and uuid then
             local bw = getgenv().ZenxInvAPS.getBaseKg(uuid)
-            if bw and bw > 0 then return bw end
+            if bw and bw > 0 then return bw * 1.1 end  -- age-1 normalized
         end
     end
-    return nil
+    return getKG(item)  -- fallback display kg
 end
 
 local function calcBaseKG(kg, age)
