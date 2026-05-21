@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.145"
-local VERSION_DATE = "v8.145: AUTO-UNLIST NON-MATCH — toggle di MISC tab. Scan booth tiap 30s, unlist pet yg gak match rule (type+kg+price). Plus tombol CLEAN NOW manual."
+local VERSION = "8.147"
+local VERSION_DATE = "v8.147: Auto-Clean interval 30s → 10s (lebih responsif)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2295,8 +2295,8 @@ end
 -- v8.145: AUTO-UNLIST NON-MATCH card — auto unlist pet di booth yg gak match rule
 do
     local cleanCard = makeCard(miscPanel, 110)
-    lblOf(cleanCard, "🧹  AUTO-UNLIST NON-MATCH", 14, 10, 360, 22, C.accent, 14, FB)
-    lblOf(cleanCard, "Auto unlist pet di booth-mu yg gak match rule (cek tiap 30s)", 14, 32, 480, 18, C.textDim, 11)
+    lblOf(cleanCard, "🧹  AUTO-CLEAN BOOTH", 14, 10, 360, 22, C.accent, 14, FB)
+    lblOf(cleanCard, "Unlist pet non-match rule + cap kelebihan maxListings (cek 10s)", 14, 32, 480, 18, C.textDim, 11)
     local cleanState = (BH.marketState and BH.marketState.autoCleanNonMatch) == true
     local cleanBtn = btnOf(cleanCard, 14, 54, 220, 26,
         cleanState and "🧹 Auto-Clean: ON" or "🧹 Auto-Clean: OFF",
@@ -2338,22 +2338,65 @@ do
         local data = BH.fetchBoothData(player)
         if not data or not data.Listings then return 0, 0, "no booth data" end
 
-        local toUnlist = {}
-        local matchCount = 0
+        -- v8.146: Group listings by matching rule index, then cap by maxListings
+        local function findMatchingRuleIdx(listing, item)
+            if not item or not item.PetData then return nil end
+            local pType = tostring(item.PetType or "")
+            local pd = item.PetData
+            local kg = BH.computeBaseKgFromPetData(pd)
+            local price = tonumber(listing.Price) or 0
+            for idx, r in ipairs(listingRules) do
+                local typeOk = (r.type == pType or r.type == "All" or not r.type or r.type == "")
+                local kgOk = kg >= (r.min or 0) and kg <= (r.max or math.huge)
+                local priceOk = price == (r.price or 0)
+                if typeOk and kgOk and priceOk then return idx end
+            end
+            return nil
+        end
+
+        local listingsByRule = {}  -- ruleIdx → {uuids}
+        local nonMatching = {}
+        local totalListings = 0
+
         for listingUuid, listing in pairs(data.Listings) do
             if listing.ItemType == "Pet" and listing.ItemId then
+                totalListings = totalListings + 1
                 local item = data.Items and data.Items[listing.ItemId]
-                if item then
-                    if checkListingMatchesRule(listing, item) then
-                        matchCount = matchCount + 1
+                if item and item.PetData then
+                    local ruleIdx = findMatchingRuleIdx(listing, item)
+                    if ruleIdx then
+                        listingsByRule[ruleIdx] = listingsByRule[ruleIdx] or {}
+                        table.insert(listingsByRule[ruleIdx], listingUuid)
                     else
-                        table.insert(toUnlist, listingUuid)
+                        table.insert(nonMatching, listingUuid)
                     end
                 end
             end
         end
 
-        if #toUnlist == 0 then return 0, matchCount, "all match" end
+        -- Build unlist queue
+        local toUnlist = {}
+        -- 1. Non-matching pets (gak ada di rule manapun)
+        for _, uuid in ipairs(nonMatching) do
+            table.insert(toUnlist, uuid)
+        end
+        -- 2. Excess pet di rule yg punya maxListings
+        local excessCount = 0
+        for idx, uuids in pairs(listingsByRule) do
+            local r = listingRules[idx]
+            local maxAllowed = r.maxListings or math.huge
+            if maxAllowed ~= math.huge and #uuids > maxAllowed then
+                for i = maxAllowed + 1, #uuids do
+                    table.insert(toUnlist, uuids[i])
+                    excessCount = excessCount + 1
+                end
+            end
+        end
+
+        L(string.format("[Auto-Clean] scan: total=%d, non-match=%d, excess=%d, will unlist=%d",
+            totalListings, #nonMatching, excessCount, #toUnlist))
+
+        if #toUnlist == 0 then return 0, totalListings - #nonMatching, "all OK" end
 
         -- PARALLEL unlist batch
         local removed = 0
@@ -2395,7 +2438,7 @@ do
             task.wait(0.3)
         end
 
-        return removed, matchCount, "done"
+        return removed, totalListings - #nonMatching, string.format("non-match=%d, excess=%d", #nonMatching, excessCount)
     end
 
     -- CLEAN NOW button — manual trigger
@@ -2419,10 +2462,10 @@ do
             BH.marketState.autoCleanNonMatch = BH.autoCleanNonMatch
             BH.saveMarketState(BH.marketState)
         end
-        L("[Auto-Clean] "..(BH.autoCleanNonMatch and "enabled (check tiap 30s)" or "disabled"))
+        L("[Auto-Clean] "..(BH.autoCleanNonMatch and "enabled (check tiap 10s)" or "disabled"))
     end)
 
-    -- Background watchdog — cek tiap 30s
+    -- Background watchdog — cek tiap 10s
     task.spawn(function()
         task.wait(15)  -- initial delay biar semua init kelar
         while gui.Parent do
@@ -2434,7 +2477,7 @@ do
                     L(string.format("[Auto-Clean] BG: removed=%d matched=%d", removed, matched or 0))
                 end
             end
-            task.wait(30)
+            task.wait(10)
         end
     end)
 end
