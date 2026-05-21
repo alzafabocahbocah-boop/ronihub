@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.144"
-local VERSION_DATE = "v8.144: UNLIST PARALLEL — batch of 10 fired simultaneously (was sequential 1-by-1). 5x lebih cepet."
+local VERSION = "8.145"
+local VERSION_DATE = "v8.145: AUTO-UNLIST NON-MATCH — toggle di MISC tab. Scan booth tiap 30s, unlist pet yg gak match rule (type+kg+price). Plus tombol CLEAN NOW manual."
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2289,6 +2289,153 @@ do
         -- Save ke state
         BH.marketState.autoStart = BH.autoStart
         BH.saveMarketState(BH.marketState)
+    end)
+end
+
+-- v8.145: AUTO-UNLIST NON-MATCH card — auto unlist pet di booth yg gak match rule
+do
+    local cleanCard = makeCard(miscPanel, 110)
+    lblOf(cleanCard, "🧹  AUTO-UNLIST NON-MATCH", 14, 10, 360, 22, C.accent, 14, FB)
+    lblOf(cleanCard, "Auto unlist pet di booth-mu yg gak match rule (cek tiap 30s)", 14, 32, 480, 18, C.textDim, 11)
+    local cleanState = (BH.marketState and BH.marketState.autoCleanNonMatch) == true
+    local cleanBtn = btnOf(cleanCard, 14, 54, 220, 26,
+        cleanState and "🧹 Auto-Clean: ON" or "🧹 Auto-Clean: OFF",
+        cleanState and C.success or C.danger)
+    local cleanNowBtn = btnOf(cleanCard, 244, 54, 130, 26, "▶ CLEAN NOW", C.accent)
+    local cleanStatus = lblOf(cleanCard, "Idle.", 14, 84, 480, 18, C.textDim, 10)
+
+    BH.autoCleanNonMatch = cleanState
+
+    -- v8.145: function buat cek apa listing match rule yg ada
+    local function checkListingMatchesRule(listing, item)
+        if not item or not item.PetData then return false end
+        local pType = tostring(item.PetType or "")
+        local pd = item.PetData
+        local kg = BH.computeBaseKgFromPetData(pd)
+        local price = tonumber(listing.Price) or 0
+        for _, r in ipairs(listingRules) do
+            local typeOk = (r.type == pType or r.type == "All" or not r.type or r.type == "")
+            local kgOk = kg >= (r.min or 0) and kg <= (r.max or math.huge)
+            local priceOk = price == (r.price or 0)
+            if typeOk and kgOk and priceOk then return true end
+        end
+        return false
+    end
+
+    BH.scanForNonMatch = function()
+        -- Resolve removeRE if nil
+        if not removeRE then
+            pcall(function()
+                removeRE = RS:FindFirstChild("GameEvents")
+                    and RS.GameEvents:FindFirstChild("TradeEvents")
+                    and RS.GameEvents.TradeEvents:FindFirstChild("Booths")
+                    and RS.GameEvents.TradeEvents.Booths:FindFirstChild("RemoveListing")
+            end)
+        end
+        if not removeRE then return 0, 0, "removeRE nil" end
+        if #listingRules == 0 then return 0, 0, "no rules" end
+
+        local data = BH.fetchBoothData(player)
+        if not data or not data.Listings then return 0, 0, "no booth data" end
+
+        local toUnlist = {}
+        local matchCount = 0
+        for listingUuid, listing in pairs(data.Listings) do
+            if listing.ItemType == "Pet" and listing.ItemId then
+                local item = data.Items and data.Items[listing.ItemId]
+                if item then
+                    if checkListingMatchesRule(listing, item) then
+                        matchCount = matchCount + 1
+                    else
+                        table.insert(toUnlist, listingUuid)
+                    end
+                end
+            end
+        end
+
+        if #toUnlist == 0 then return 0, matchCount, "all match" end
+
+        -- PARALLEL unlist batch
+        local removed = 0
+        local pending = #toUnlist
+        local boothUuid = BH.myBoothUuid and tostring(BH.myBoothUuid):gsub("[{}]","") or nil
+
+        for _, listingUuid in ipairs(toUnlist) do
+            task.spawn(function()
+                local cleanListing = tostring(listingUuid):gsub("[{}]","")
+                local itemId = data.Listings[listingUuid] and data.Listings[listingUuid].ItemId
+                local cleanItem = itemId and tostring(itemId):gsub("[{}]","") or nil
+                local attempts = {
+                    {cleanListing},
+                    {"{"..cleanListing.."}"},
+                }
+                if cleanItem then table.insert(attempts, {cleanItem}) end
+                if boothUuid then table.insert(attempts, {boothUuid, cleanListing}) end
+                for _, args in ipairs(attempts) do
+                    if not removeRE then break end
+                    local ok, r1
+                    if removeRE:IsA("RemoteFunction") then
+                        ok, r1 = pcall(function() return removeRE:InvokeServer(unpack(args)) end)
+                    else
+                        ok, r1 = pcall(function() removeRE:FireServer(unpack(args)); return true end)
+                    end
+                    if ok and (r1 == true or r1 == nil or (type(r1) == "string" and not r1:lower():find("error") and not r1:lower():find("fail"))) then
+                        removed = removed + 1
+                        break
+                    end
+                end
+                pending = pending - 1
+            end)
+            task.wait(0.05)  -- stagger
+        end
+
+        -- Wait all done
+        local waitStart = tick()
+        while pending > 0 and (tick() - waitStart) < 20 do
+            task.wait(0.3)
+        end
+
+        return removed, matchCount, "done"
+    end
+
+    -- CLEAN NOW button — manual trigger
+    cleanNowBtn.MouseButton1Click:Connect(function()
+        task.spawn(function()
+            cleanStatus.Text = "🔍 Scanning booth..."
+            cleanStatus.TextColor3 = C.accent
+            local removed, matched, msg = BH.scanForNonMatch()
+            cleanStatus.Text = string.format("✅ Removed %d non-match | %d match | %s", removed, matched, msg)
+            cleanStatus.TextColor3 = (removed > 0) and C.success or C.textDim
+            L(string.format("[Auto-Clean] manual: removed=%d matched=%d (%s)", removed, matched, msg))
+        end)
+    end)
+
+    -- Toggle
+    cleanBtn.MouseButton1Click:Connect(function()
+        BH.autoCleanNonMatch = not BH.autoCleanNonMatch
+        cleanBtn.Text = BH.autoCleanNonMatch and "🧹 Auto-Clean: ON" or "🧹 Auto-Clean: OFF"
+        cleanBtn.BackgroundColor3 = BH.autoCleanNonMatch and C.success or C.danger
+        if BH.marketState then
+            BH.marketState.autoCleanNonMatch = BH.autoCleanNonMatch
+            BH.saveMarketState(BH.marketState)
+        end
+        L("[Auto-Clean] "..(BH.autoCleanNonMatch and "enabled (check tiap 30s)" or "disabled"))
+    end)
+
+    -- Background watchdog — cek tiap 30s
+    task.spawn(function()
+        task.wait(15)  -- initial delay biar semua init kelar
+        while gui.Parent do
+            if BH.autoCleanNonMatch and #listingRules > 0 then
+                local ok, removed, matched, msg = pcall(BH.scanForNonMatch)
+                if ok and removed and removed > 0 then
+                    cleanStatus.Text = string.format("Auto: removed %d non-match", removed)
+                    cleanStatus.TextColor3 = C.success
+                    L(string.format("[Auto-Clean] BG: removed=%d matched=%d", removed, matched or 0))
+                end
+            end
+            task.wait(30)
+        end
     end)
 end
 
