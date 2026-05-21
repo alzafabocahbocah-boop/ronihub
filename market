@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.139"
-local VERSION_DATE = "v8.139: CRITICAL FIX nil-check removeRE before :IsA() call (was crashing with 'attempt to index nil with IsA'). Auto-fallback ke TBC method"
+local VERSION = "8.141"
+local VERSION_DATE = "v8.141: Fix removeRE nil race condition — use WaitForChild(5s) + lazy retry resolveRemotes() pas unlist click. Debug confirm remote EXIST di RS.GameEvents.TradeEvents.Booths.RemoveListing"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2859,6 +2859,11 @@ do
 
             -- v8.139: guard — kalo removeRE nil, coba TBC method dulu
             local useTbcMethod = nil
+            -- v8.141: lazy retry resolve dulu (kadang remote baru replicate setelah init)
+            if not removeRE then
+                pcall(resolveRemotes)
+                if removeRE then L("[Pantau] removeRE found via lazy retry") end
+            end
             if not removeRE then
                 L("[Pantau] removeRE NIL — cari TBC method...")
                 if BH.TBC then
@@ -2992,6 +2997,11 @@ do
                 return
             end
 
+            if not removeRE then
+                -- v8.141: lazy retry resolve dulu (kadang remote baru replicate setelah init)
+                pcall(resolveRemotes)
+                if removeRE then L("[Unlist-ALL] removeRE found via lazy retry") end
+            end
             if not removeRE then
                 -- v8.106: coba pake TBC method kalo removeRE total gak ada
                 if BH.TBC then
@@ -4186,14 +4196,33 @@ end  -- end do block for snipe UI
 -- LOGIC
 -- ============================================================
 -- v8.52: safe remote access (di garden server TradeEvents gak ada)
+-- v8.141: Use WaitForChild + lazy retry — RemoveListing kadang lambat replicate ke client
 local createRE, removeRE, buyRE, claimRE, removeBoothRE
+local function resolveRemotes()
+    pcall(function()
+        local GE = RS:FindFirstChild("GameEvents") or RS:WaitForChild("GameEvents", 8)
+        if not GE then return end
+        local TE = GE:FindFirstChild("TradeEvents") or GE:WaitForChild("TradeEvents", 8)
+        if not TE then return end
+        local Booths = TE:FindFirstChild("Booths") or TE:WaitForChild("Booths", 8)
+        if not Booths then return end
+        -- WaitForChild dgn timeout pendek (5s)
+        if not createRE then createRE = Booths:FindFirstChild("CreateListing") or Booths:WaitForChild("CreateListing", 5) end
+        if not removeRE then removeRE = Booths:FindFirstChild("RemoveListing") or Booths:WaitForChild("RemoveListing", 5) end
+        if not buyRE then buyRE = Booths:FindFirstChild("BuyListing") or Booths:WaitForChild("BuyListing", 5) end
+        if not claimRE then claimRE = Booths:FindFirstChild("ClaimBooth") or Booths:WaitForChild("ClaimBooth", 5) end
+        if not removeBoothRE then removeBoothRE = Booths:FindFirstChild("RemoveBooth") or Booths:WaitForChild("RemoveBooth", 5) end
+    end)
+    return removeRE ~= nil
+end
+resolveRemotes()  -- initial attempt
 pcall(function()
     local Booths = RS:FindFirstChild("GameEvents")
         and RS.GameEvents:FindFirstChild("TradeEvents")
         and RS.GameEvents.TradeEvents:FindFirstChild("Booths")
     if Booths then
-        createRE = Booths:FindFirstChild("CreateListing")
-        removeRE = Booths:FindFirstChild("RemoveListing")
+        if not createRE then createRE = Booths:FindFirstChild("CreateListing") end
+        if not removeRE then removeRE = Booths:FindFirstChild("RemoveListing") end
         -- v8.105: fallback names (kalo game rename)
         if not removeRE then
             for _, alt in ipairs({"UnlistItem", "Unlist", "DeleteListing", "RemoveItem", "Delist"}) do
@@ -4210,9 +4239,9 @@ pcall(function()
             for _, c in ipairs(Booths:GetChildren()) do table.insert(names, c.Name) end
             L("[Init] ⚠ RemoveListing NOT FOUND! Booths children: "..table.concat(names, ", "))
         end
-        buyRE = Booths:FindFirstChild("BuyListing")
-        claimRE = Booths:FindFirstChild("ClaimBooth")
-        removeBoothRE = Booths:FindFirstChild("RemoveBooth")
+        if not buyRE then buyRE = Booths:FindFirstChild("BuyListing") end
+        if not claimRE then claimRE = Booths:FindFirstChild("ClaimBooth") end
+        if not removeBoothRE then removeBoothRE = Booths:FindFirstChild("RemoveBooth") end
     end
 end)
 
@@ -4257,11 +4286,35 @@ if not removeRE then
     end
 end
 
--- v8.138: dump info removeRE + TBC methods buat debug unlist
+-- v8.140: deep dump SEMUA remote candidates buat unlist (since TBC cuma punya 3 method)
 task.spawn(function()
     task.wait(3)
     if removeRE then
         L("[Init] ✅ removeRE: "..removeRE.ClassName.." @ "..removeRE:GetFullName())
+    else
+        L("[Init] ⚠⚠⚠ removeRE NIL — dumping ALL booth/list remotes in RS:")
+        local found = {}
+        local function scan(folder, depth)
+            if depth > 10 then return end
+            for _, c in ipairs(folder:GetChildren()) do
+                if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
+                    local n = c.Name:lower()
+                    local p = c:GetFullName():lower()
+                    -- catch wider range: anything with booth/list/trade/market in name OR path
+                    if n:find("booth") or n:find("list") or n:find("trade") or n:find("market")
+                       or n:find("sell") or n:find("buy") or n:find("remove") or n:find("delete")
+                       or n:find("unlist") or n:find("delist") or n:find("clear")
+                       or p:find("booth") or p:find("trade") then
+                        table.insert(found, c)
+                        L("[Init] 📡 "..c.ClassName.." | "..c:GetFullName())
+                    end
+                elseif c:IsA("Folder") or c:IsA("Configuration") or c:IsA("ModuleScript") then
+                    pcall(function() scan(c, depth+1) end)
+                end
+            end
+        end
+        pcall(function() scan(RS, 0) end)
+        L("[Init] dump total: "..#found.." candidates")
     end
     if BH.TBC then
         local methods = {}
