@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.134"
-local VERSION_DATE = "v8.134: Fix getSetting boolean bug + verbose log buat verify settings save/load"
+local VERSION = "8.135"
+local VERSION_DATE = "v8.135: CRITICAL FIX auto-start watchdog — sg.Parent → gui.Parent (sg undefined, loop never started)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -8014,7 +8014,7 @@ task.spawn(function()
     L("")
     L("🚀 [Auto-Start] watchdog started — checking every 10s")
     local firedThisSession = false  -- biar gak spam fire
-    while sg.Parent do
+    while gui.Parent do
         if BH.autoStart and #listingRules > 0 and not isRunning and not firedThisSession then
             L("🚀 [Auto-Start] conditions met (autoStart=ON, rules="..#listingRules..") — firing in 3s...")
             task.wait(3)
