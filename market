@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.129"
-local VERSION_DATE = "Guard START button — wajib ada rule LIST HARGA sebelum bisa start"
+local VERSION = "8.130"
+local VERSION_DATE = "v8.130: Fix keyboard close di LIST HARGA (in-place refresh) + persist listing inputs"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1573,8 +1573,9 @@ local rebuildRulesUI  -- forward declare so buildRuleRow can call it
 
 local function buildRuleRow(parent, r, idx, big)
     local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, big and 46 or 34)  -- v8.87: 38→34 (more compact)
+    row.Size = UDim2.new(1, 0, 0, big and 46 or 34)
     row.BackgroundColor3 = C.input row.BorderSizePixel = 0 row.Parent = parent
+    row:SetAttribute("RuleIdx", idx)  -- v8.130: tag for in-place refresh
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
 
     local fSize = big and 13 or 10                    -- v8.87: 11→10 (compact)
@@ -1619,6 +1620,7 @@ local function buildRuleRow(parent, r, idx, big)
 
     -- Type label (with optional [N] count badge for LIST HARGA)
     local typeLbl = Instance.new("TextLabel")
+    typeLbl.Name = "TypeLbl"  -- v8.130: named for in-place refresh
     typeLbl.Size = UDim2.new(0, 100, 1, 0) typeLbl.Position = UDim2.new(0, 6, 0, 0)
     typeLbl.BackgroundTransparency = 1
     typeLbl.TextColor3 = C.text typeLbl.Font = FB typeLbl.TextSize = fSize + 1
@@ -1726,10 +1728,25 @@ function rebuildRulesUI()
     end
 end
 
--- v8.87: callback from scanBoothListings — refresh count badges di LIST HARGA
--- v8.122: ALWAYS refresh regardless of visibility (panel mungkin di-toggle)
+-- v8.130: refresh count badges WITHOUT destroy/rebuild (anti keyboard close)
 BH.refreshPriceCounts = function()
-    pcall(rebuildRulesUI)
+    pcall(function()
+        if not priceScroll then return end
+        for _, row in ipairs(priceScroll:GetChildren()) do
+            if row:IsA("Frame") and row:GetAttribute("RuleIdx") then
+                local idx = row:GetAttribute("RuleIdx")
+                local r = listingRules[idx]
+                if r then
+                    local lbl = row:FindFirstChild("TypeLbl")
+                    if lbl and BH.countMyPetsForRule then
+                        local cnt = BH.countMyPetsForRule(r) or 0
+                        local typeText = r.type or "All"
+                        lbl.Text = string.format("<font color='#22D3EE'>[%d]</font> %s", cnt, typeText)
+                    end
+                end
+            end
+        end
+    end)
 end
 
 addRuleBtn.MouseButton1Click:Connect(function()
@@ -2041,6 +2058,12 @@ BH.bindInput(hopTargetBox, "hopTarget")
 BH.bindInput(hopDelayBox, "hopDelay")
 BH.bindToggle(hopForeignToggle, "hopForeign")
 BH.bindToggle(autoHopToggle, "autoHopEnabled")
+
+-- v8.130: persist listing rule input fields too
+BH.bindInput(minKgBox,   "lastMinKg")
+BH.bindInput(maxKgBox,   "lastMaxKg")
+BH.bindInput(priceBox,   "lastPrice")
+BH.bindInput(maxListBox, "lastMaxList")
 
 -- For backward compat - autoRejoinBox alias + hopMinBox alias
 local autoRejoinBox = listingBox
