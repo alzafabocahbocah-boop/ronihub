@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.142"
-local VERSION_DATE = "v8.142: AGGRESSIVE removeRE retry — 30s WaitForChild pas click + background loop max 60s + diagnostic log (Booths.children list)"
+local VERSION = "8.144"
+local VERSION_DATE = "v8.144: UNLIST PARALLEL — batch of 10 fired simultaneously (was sequential 1-by-1). 5x lebih cepet."
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2859,15 +2859,29 @@ do
 
             -- v8.139: guard — kalo removeRE nil, coba TBC method dulu
             local useTbcMethod = nil
-            -- v8.142: lazy retry resolve dengan 30s WaitForChild — tunggu beneran sampai dapet
-            if not removeRE then
-                statusLbl.Text = "⏳ Tunggu remote replicate (max 30s)..."
+            -- v8.143: AKSES DIRECT VIA PATH — debug confirm path exist, bypass cached removeRE
+            local directRE = nil
+            pcall(function()
+                directRE = RS:FindFirstChild("GameEvents")
+                    and RS.GameEvents:FindFirstChild("TradeEvents")
+                    and RS.GameEvents.TradeEvents:FindFirstChild("Booths")
+                    and RS.GameEvents.TradeEvents.Booths:FindFirstChild("RemoveListing")
+            end)
+            if directRE then
+                removeRE = directRE
+                L("[Pantau] ✅ direct path: removeRE = "..directRE.ClassName)
+            else
+                statusLbl.Text = "⏳ Wait remote replicate..."
                 statusLbl.TextColor3 = C.accent
-                local ok, diag = resolveRemotes(30)
-                if removeRE then
-                    L("[Pantau] ✅ removeRE found via 30s retry")
-                else
-                    L("[Pantau] ❌ removeRE STILL nil after 30s | "..table.concat(diag or {}, " | "))
+                pcall(function()
+                    directRE = RS:WaitForChild("GameEvents", 15)
+                        :WaitForChild("TradeEvents", 5)
+                        :WaitForChild("Booths", 5)
+                        :WaitForChild("RemoveListing", 10)
+                end)
+                if directRE then
+                    removeRE = directRE
+                    L("[Pantau] ✅ WaitForChild: removeRE found")
                 end
             end
             if not removeRE then
@@ -2889,104 +2903,92 @@ do
                 end
             end
 
-            statusLbl.Text = "🗑️ Unlist "..#toUnlist.." pet..."
+            statusLbl.Text = "🗑️ Unlist "..#toUnlist.." pet (parallel)..."
             statusLbl.TextColor3 = C.accent
 
+            -- v8.144: PARALLEL batched unlist
             local removed = 0
-            for _, listingUuid in ipairs(toUnlist) do
-                -- v8.47: Brute force semua format + log mana yang work
-                local data = BH.getMyBoothData()
-                local itemId = nil
-                if data and data.Listings and data.Listings[listingUuid] then
-                    itemId = data.Listings[listingUuid].ItemId
-                end
+            local failed = 0
+            local BATCH_SIZE = 10
+            local data = BH.getMyBoothData()
+            local boothUuid = BH.myBoothUuid and tostring(BH.myBoothUuid):gsub("[{}]","") or nil
 
+            local function tryUnlistOne(listingUuid)
+                local itemId = data and data.Listings and data.Listings[listingUuid] and data.Listings[listingUuid].ItemId
                 local cleanListing = tostring(listingUuid):gsub("[{}]","")
                 local bracedListing = "{"..cleanListing.."}"
                 local cleanItem = itemId and tostring(itemId):gsub("[{}]","") or nil
-                local bracedItem = itemId and ("{"..(cleanItem or "").."}") or nil
-                local boothUuid = BH.myBoothUuid and tostring(BH.myBoothUuid):gsub("[{}]","") or nil
-                local bracedBooth = boothUuid and ("{"..boothUuid.."}") or nil
 
-                -- v8.138: tambah banyak format + booth+listing combos
                 local attempts = {
                     {label="listing-clean", args={cleanListing}},
                     {label="listing-braced", args={bracedListing}},
                 }
                 if cleanItem then
                     table.insert(attempts, {label="item-clean", args={cleanItem}})
-                    table.insert(attempts, {label="item-braced", args={bracedItem}})
                 end
                 if boothUuid then
-                    table.insert(attempts, {label="booth+listing-clean", args={boothUuid, cleanListing}})
-                    table.insert(attempts, {label="booth+listing-braced", args={bracedBooth, bracedListing}})
-                    if cleanItem then
-                        table.insert(attempts, {label="booth+item-clean", args={boothUuid, cleanItem}})
-                    end
-                end
-                table.insert(attempts, {label="tbl-listing", args={{Listing=cleanListing}}})
-                table.insert(attempts, {label="tbl-listingUuid", args={{ListingUuid=cleanListing}}})
-                if cleanItem then
-                    table.insert(attempts, {label="tbl-item", args={{ItemId=cleanItem, Listing=cleanListing}}})
+                    table.insert(attempts, {label="booth+listing", args={boothUuid, cleanListing}})
                 end
 
-                local success = false
-                local lastRaw = nil
-
-                -- v8.139: TBC method path (kalo removeRE nil)
+                -- TBC fallback
                 if useTbcMethod then
-                    local ok, r1 = pcall(function() return BH.TBC[useTbcMethod](BH.TBC, cleanListing) end)
-                    if ok then
-                        success = true
-                        L("[Pantau] ✅ TBC."..useTbcMethod.."("..cleanListing:sub(1,16)..") OK")
-                    else
-                        -- try with bracedListing
-                        ok, r1 = pcall(function() return BH.TBC[useTbcMethod](BH.TBC, bracedListing) end)
-                        if ok then
-                            success = true
-                            L("[Pantau] ✅ TBC."..useTbcMethod.." (braced) OK")
-                        else
-                            L("[Pantau] ✗ TBC."..useTbcMethod..": "..tostring(r1):sub(1,200))
-                        end
-                    end
-                    if success then removed = removed + 1 end
-                    task.wait(0.3)
-                else
+                    local ok = pcall(function() return BH.TBC[useTbcMethod](BH.TBC, cleanListing) end)
+                    if ok then return true, "TBC."..useTbcMethod end
+                    ok = pcall(function() return BH.TBC[useTbcMethod](BH.TBC, bracedListing) end)
+                    if ok then return true, "TBC."..useTbcMethod.." (braced)" end
+                    return false, "TBC failed"
+                end
+
                 for _, a in ipairs(attempts) do
-                    -- v8.138: support both InvokeServer & FireServer
-                    local ok, r1, r2, r3, r4
+                    if not removeRE then return false, "removeRE nil" end
+                    local ok, r1
                     if removeRE:IsA("RemoteFunction") then
-                        ok, r1, r2, r3, r4 = pcall(function() return removeRE:InvokeServer(unpack(a.args)) end)
-                    else  -- RemoteEvent
+                        ok, r1 = pcall(function() return removeRE:InvokeServer(unpack(a.args)) end)
+                    else
                         ok, r1 = pcall(function() removeRE:FireServer(unpack(a.args)); return true end)
                     end
-                    -- v8.138: LOG FULL r1 (was sub(1,40), now sub(1,200) buat liat error message)
-                    local raw = string.format("ok=%s r1=%s(%s) r2=%s r3=%s r4=%s",
-                        tostring(ok), type(r1), tostring(r1):sub(1,200),
-                        tostring(r2):sub(1,30), tostring(r3):sub(1,20), tostring(r4):sub(1,20))
-                    lastRaw = raw
                     local isSuccess = (ok and r1 == true)
-                        or (ok and r1 == nil and r2 == nil)
+                        or (ok and r1 == nil)
                         or (ok and type(r1) == "string" and not r1:lower():find("error") and not r1:lower():find("fail") and not r1:lower():find("not"))
-                    if isSuccess then
-                        success = true
-                        L("[Pantau] ✅ "..a.label.." → "..tostring(a.args[1]):sub(1,20).." | "..raw)
-                        break
-                    else
-                        L("[Pantau] ✗ "..a.label..": "..raw)
-                    end
-                    task.wait(0.2)
+                    if isSuccess then return true, a.label end
+                end
+                return false, "all_formats_failed"
+            end
+
+            -- Batch processing
+            for batchStart = 1, #toUnlist, BATCH_SIZE do
+                local batchEnd = math.min(batchStart + BATCH_SIZE - 1, #toUnlist)
+                local pending = batchEnd - batchStart + 1
+
+                for i = batchStart, batchEnd do
+                    task.spawn(function()
+                        local success, info = tryUnlistOne(toUnlist[i])
+                        if success then
+                            removed = removed + 1
+                        else
+                            failed = failed + 1
+                            L("[Pantau] ["..i.."] ✗ "..tostring(info))
+                        end
+                        pending = pending - 1
+                    end)
+                    task.wait(0.05)
                 end
 
-                if success then removed = removed + 1 end
-                task.wait(0.3)
-                end  -- v8.139: end else branch
+                -- Wait batch complete
+                local waitStart = tick()
+                while pending > 0 and (tick() - waitStart) < 15 do
+                    statusLbl.Text = string.format("🗑️ Batch %d-%d: %d✓ (pending %d)", batchStart, batchEnd, removed, pending)
+                    task.wait(0.3)
+                end
+
+                if batchEnd < #toUnlist then task.wait(0.3) end
             end
 
             statusLbl.Text = "✅ Unlisted "..removed.." / "..#toUnlist
-            statusLbl.TextColor3 = C.success
+            statusLbl.TextColor3 = (removed == #toUnlist) and C.success or C.accent
+            L("[Pantau] DONE: "..removed.."/"..#toUnlist)
             task.wait(1)
-            refreshList()  -- auto refresh after unlist
+            refreshList()
         end)
     end)
 
@@ -3003,15 +3005,31 @@ do
                 return
             end
 
-            if not removeRE then
-                -- v8.142: lazy retry resolve dengan 30s WaitForChild
-                statusLbl.Text = "⏳ Tunggu remote replicate (max 30s)..."
-                statusLbl.TextColor3 = C.accent
-                local ok, diag = resolveRemotes(30)
-                if removeRE then
-                    L("[Unlist-ALL] ✅ removeRE found via 30s retry")
+            -- v8.143: AKSES DIRECT VIA PATH — debug confirm path exist
+            do
+                local directRE = nil
+                pcall(function()
+                    directRE = RS:FindFirstChild("GameEvents")
+                        and RS.GameEvents:FindFirstChild("TradeEvents")
+                        and RS.GameEvents.TradeEvents:FindFirstChild("Booths")
+                        and RS.GameEvents.TradeEvents.Booths:FindFirstChild("RemoveListing")
+                end)
+                if directRE then
+                    removeRE = directRE
+                    L("[Unlist-ALL] ✅ direct path: removeRE = "..directRE.ClassName)
                 else
-                    L("[Unlist-ALL] ❌ removeRE STILL nil after 30s | "..table.concat(diag or {}, " | "))
+                    statusLbl.Text = "⏳ Wait remote replicate..."
+                    statusLbl.TextColor3 = C.accent
+                    pcall(function()
+                        directRE = RS:WaitForChild("GameEvents", 15)
+                            :WaitForChild("TradeEvents", 5)
+                            :WaitForChild("Booths", 5)
+                            :WaitForChild("RemoveListing", 10)
+                    end)
+                    if directRE then
+                        removeRE = directRE
+                        L("[Unlist-ALL] ✅ WaitForChild: removeRE found")
+                    end
                 end
             end
             if not removeRE then
@@ -3079,36 +3097,26 @@ do
                 return
             end
 
-            L("[Unlist-ALL] start: "..#allUuids.." listings")
-            statusLbl.Text = "🗑️ Unlist "..#allUuids.." pet..."
+            L("[Unlist-ALL] start: "..#allUuids.." listings (PARALLEL batch=10)")
+            statusLbl.Text = "🗑️ Unlist "..#allUuids.." pet (parallel)..."
             statusLbl.TextColor3 = C.accent
 
-            -- v8.78: rate-limit handling
-            local globalCooldownUntil = 0
+            -- v8.144: PARALLEL batched unlist — fire 10 at once
             local removed = 0
-            local rateFails = 0
+            local failed = 0
+            local rateLimited = false
+            local BATCH_SIZE = 10
+            local boothUuid = BH.myBoothUuid and tostring(BH.myBoothUuid):gsub("[{}]","") or nil
+            local bracedBooth = boothUuid and ("{"..boothUuid.."}") or nil
 
-            for i, listingUuid in ipairs(allUuids) do
-                -- Check global cooldown sebelum tiap pet
-                if tick() < globalCooldownUntil then
-                    local waitLeft = math.ceil(globalCooldownUntil - tick())
-                    L("[Unlist-ALL] ⏸ rate-limit pause "..waitLeft.."s sebelum unlist ke-"..i)
-                    statusLbl.Text = "⏸ Rate limited — wait "..waitLeft.."s"
-                    statusLbl.TextColor3 = C.danger
-                    task.wait(waitLeft + 1)
-                end
-
-                statusLbl.Text = string.format("🗑️ [%d/%d] unlisting...", i, #allUuids)
-
+            -- Helper untuk unlist 1 pet (run di task.spawn)
+            local function tryUnlistOne(listingUuid, idx)
                 local itemId = data.Listings[listingUuid] and data.Listings[listingUuid].ItemId
                 local cleanListing = tostring(listingUuid):gsub("[{}]","")
                 local bracedListing = "{"..cleanListing.."}"
                 local cleanItem = itemId and tostring(itemId):gsub("[{}]","") or nil
                 local bracedItem = itemId and ("{"..(cleanItem or "").."}") or nil
-                local boothUuid = BH.myBoothUuid and tostring(BH.myBoothUuid):gsub("[{}]","") or nil
-                local bracedBooth = boothUuid and ("{"..boothUuid.."}") or nil
 
-                -- v8.138: tambah banyak format + booth+listing combos
                 local attempts = {
                     {label="listing-clean", args={cleanListing}},
                     {label="listing-braced", args={bracedListing}},
@@ -3119,79 +3127,82 @@ do
                 end
                 if boothUuid then
                     table.insert(attempts, {label="booth+listing-clean", args={boothUuid, cleanListing}})
-                    table.insert(attempts, {label="booth+listing-braced", args={bracedBooth, bracedListing}})
                 end
-                table.insert(attempts, {label="tbl-listing", args={{Listing=cleanListing}}})
-                table.insert(attempts, {label="tbl-listingUuid", args={{ListingUuid=cleanListing}}})
-
-                local success = false
-                local lastErr = nil
-                local isRateLimit = false
 
                 for _, a in ipairs(attempts) do
-                    -- v8.138: support both InvokeServer & FireServer + full error log
-                    local ok, r1, r2, r3, r4
-                    -- v8.139: safety check (UNLIST ALL has earlier removeRE check, tapi tambah safety)
-                    if not removeRE then
-                        L("[Unlist-ALL] removeRE nil at runtime — abort")
-                        break
-                    end
+                    if not removeRE then return false, "removeRE nil" end
+                    local ok, r1
                     if removeRE:IsA("RemoteFunction") then
-                        ok, r1, r2, r3, r4 = pcall(function() return removeRE:InvokeServer(unpack(a.args)) end)
+                        ok, r1 = pcall(function() return removeRE:InvokeServer(unpack(a.args)) end)
                     else
                         ok, r1 = pcall(function() removeRE:FireServer(unpack(a.args)); return true end)
                     end
-                    local raw = string.format("ok=%s r1=%s(%s) r2=%s r3=%s",
-                        tostring(ok), type(r1), tostring(r1):sub(1,200),
-                        tostring(r2):sub(1,30), tostring(r3):sub(1,20))
                     local isSuccess = (ok and r1 == true)
-                        or (ok and r1 == nil and r2 == nil)
+                        or (ok and r1 == nil)
                         or (ok and type(r1) == "string" and not r1:lower():find("error") and not r1:lower():find("fail"))
                     if isSuccess then
-                        success = true
-                        L("[Unlist-ALL] ["..i.."] ✅ "..a.label.." → "..tostring(a.args[1]):sub(1,16).." | "..raw)
-                        break
+                        return true, a.label
                     end
-                    if ok then
-                        lastErr = tostring(r1)
-                    else
-                        lastErr = "pcall_fail:"..tostring(r1)
+                    -- detect rate limit
+                    if ok and type(r1) == "string" then
+                        local lo = r1:lower()
+                        if lo:find("please wait") or lo:find("cooldown") or lo:find("too fast") or lo:find("rate") then
+                            return false, "RATE_LIMIT:"..r1:sub(1, 80)
+                        end
                     end
-                    L("[Unlist-ALL] ["..i.."] ✗ "..a.label..": "..raw)
-                    local lowErr = (lastErr or ""):lower()
-                    if lowErr:find("please wait") or lowErr:find("cooldown") or lowErr:find("too fast")
-                       or lowErr:find("rate") then
-                        isRateLimit = true
-                        break
-                    end
-                    task.wait(0.2)
+                end
+                return false, "all_formats_failed"
+            end
+
+            -- Batch processing
+            for batchStart = 1, #allUuids, BATCH_SIZE do
+                if rateLimited then break end
+                local batchEnd = math.min(batchStart + BATCH_SIZE - 1, #allUuids)
+                local pending = batchEnd - batchStart + 1
+                local batchRemoved = 0
+                local batchFailed = 0
+
+                statusLbl.Text = string.format("🗑️ Batch %d-%d / %d (parallel)", batchStart, batchEnd, #allUuids)
+
+                -- Fire batch in parallel
+                for i = batchStart, batchEnd do
+                    task.spawn(function()
+                        local success, info = tryUnlistOne(allUuids[i], i)
+                        if success then
+                            batchRemoved = batchRemoved + 1
+                            removed = removed + 1
+                        else
+                            batchFailed = batchFailed + 1
+                            failed = failed + 1
+                            if info and info:find("RATE_LIMIT") then
+                                rateLimited = true
+                                L("[Unlist-ALL] ⏳ RATE LIMIT detected — stopping further batches")
+                            end
+                        end
+                        pending = pending - 1
+                    end)
+                    task.wait(0.05)  -- small stagger
                 end
 
-                if success then
-                    removed = removed + 1
-                    rateFails = 0  -- reset on success
-                elseif isRateLimit then
-                    rateFails = rateFails + 1
-                    -- Exponential backoff: 30s → 60s → 90s → 120s
-                    local backoff = math.min(30 + (rateFails - 1) * 30, 120)
-                    globalCooldownUntil = tick() + backoff
-                    L(string.format("[Unlist-ALL] ⏳ [%d] RATE LIMIT (hit #%d) → wait %ds | err: %s",
-                        i, rateFails, backoff, tostring(lastErr):sub(1, 50)))
-                    -- Don't increment i — retry this same pet after cooldown
-                    -- (Lua for doesn't allow easy retry, so we just continue; might miss this pet
-                    --  but next button click + fresh TBC fetch will retry)
-                else
-                    L(string.format("[Unlist-ALL] [%d] ❌ all 4 formats failed | err: %s",
-                        i, tostring(lastErr):sub(1, 60)))
+                -- Wait for batch to complete
+                local waitStart = tick()
+                while pending > 0 and (tick() - waitStart) < 15 do
+                    statusLbl.Text = string.format("🗑️ Batch %d-%d: %d✓ %d✗ (pending %d)", batchStart, batchEnd, batchRemoved, batchFailed, pending)
+                    task.wait(0.3)
                 end
 
-                task.wait(0.3)
+                L(string.format("[Unlist-ALL] batch %d-%d: %d✓ %d✗", batchStart, batchEnd, batchRemoved, batchFailed))
+
+                -- Small pause between batches
+                if batchEnd < #allUuids and not rateLimited then
+                    task.wait(0.5)
+                end
             end
 
             local color = removed == #allUuids and C.success or (removed > 0 and C.accent or C.danger)
             statusLbl.Text = string.format("✅ %d / %d unlisted", removed, #allUuids)
             statusLbl.TextColor3 = color
-            L("[Unlist-ALL] done: "..removed.."/"..#allUuids.." | failed: "..(#allUuids - removed))
+            L("[Unlist-ALL] DONE: "..removed.."/"..#allUuids.." (failed: "..failed..")")
             task.wait(1)
             refreshList()
         end)
