@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.132"
-local VERSION_DATE = "v8.132: Auto-Claim persistent + auto-start diagnostic logging (cek log buat tau kenapa gak fire)"
+local VERSION = "8.134"
+local VERSION_DATE = "v8.134: Fix getSetting boolean bug + verbose log buat verify settings save/load"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -147,21 +147,37 @@ do
 
     -- v8.127: centralized settings save — semua input/toggle bisa persist
     BH.marketState.settings = BH.marketState.settings or {}
-    function BH.getSetting(key, default) return BH.marketState.settings[key] ~= nil and BH.marketState.settings[key] or default end
+    -- v8.133: fix boolean false bug (return false correctly, not default)
+    function BH.getSetting(key, default)
+        local v = BH.marketState.settings[key]
+        if v == nil then return default end
+        return v
+    end
     function BH.setSetting(key, val)
         BH.marketState.settings[key] = val
         BH.saveMarketState(BH.marketState)
+        L("[Settings] saved "..key.."="..tostring(val))  -- v8.133: log
     end
     -- Auto-bind a TextBox to persist its value on FocusLost
     function BH.bindInput(box, key)
         local saved = BH.getSetting(key, nil)
-        if saved ~= nil then box.Text = tostring(saved) end
+        if saved ~= nil then
+            box.Text = tostring(saved)
+            L("[Settings] restored input "..key.."="..tostring(saved))
+        end
         box.FocusLost:Connect(function() BH.setSetting(key, box.Text) end)
     end
     -- Auto-bind a toggle handle (from addToggleRow) — needs handle to expose .set()
     function BH.bindToggle(handle, key)
         local saved = BH.getSetting(key, nil)
-        if saved ~= nil and handle.set then handle.set(saved == true) end
+        if saved ~= nil then
+            if handle.set then
+                handle.set(saved == true)
+                L("[Settings] restored toggle "..key.."="..tostring(saved == true))
+            else
+                L("[Settings] ⚠ "..key..": handle has no .set method")
+            end
+        end
         -- Wrap getter: each click → save
         local origGet = handle.get
         handle.get = function() return origGet() end
@@ -7991,27 +8007,35 @@ task.spawn(function()
     tryClaim()
 end)
 
--- v8.48: AUTO-START — if enabled & ada rules, fire START btn after delay
--- v8.132: Longer wait + better diagnostic logging
+-- v8.48: AUTO-START
+-- v8.133: Continuous watchdog — bisa fire kapan aja, bahkan kalau toggle ON setelah init
 task.spawn(function()
-    task.wait(8)  -- v8.132: 5 → 8 detik biar pasti rules + state loaded
+    task.wait(8)  -- initial delay biar state + rules loaded
     L("")
-    L("🚀 [Auto-Start] check: autoStart="..tostring(BH.autoStart)..", rules="..#listingRules..", running="..tostring(isRunning))
-    if BH.autoStart and #listingRules > 0 and not isRunning then
-        L("🚀 [Auto-Start] enabled — firing START in 3s...")
-        task.wait(3)
-        if not isRunning then
-            L("🚀 [Auto-Start] calling onStartClick()")
-            local ok, err = pcall(BH.onStartClick)
-            if not ok then
-                L("✗ [Auto-Start] FAIL: "..tostring(err))
+    L("🚀 [Auto-Start] watchdog started — checking every 10s")
+    local firedThisSession = false  -- biar gak spam fire
+    while sg.Parent do
+        if BH.autoStart and #listingRules > 0 and not isRunning and not firedThisSession then
+            L("🚀 [Auto-Start] conditions met (autoStart=ON, rules="..#listingRules..") — firing in 3s...")
+            task.wait(3)
+            if not isRunning and BH.autoStart then
+                L("🚀 [Auto-Start] calling onStartClick()")
+                local ok, err = pcall(BH.onStartClick)
+                if ok then
+                    firedThisSession = true
+                else
+                    L("✗ [Auto-Start] FAIL: "..tostring(err))
+                end
             end
-        else
-            L("⚠ [Auto-Start] isRunning already true, skip")
         end
-    elseif BH.autoStart and #listingRules == 0 then
-        L("⚠ [Auto-Start] enabled tapi 0 rules — skip (cek state file)")
-    elseif not BH.autoStart then
-        L("[Auto-Start] OFF — skip")
+        -- Reset firedThisSession kalo listing udah STOP (biar bisa auto-restart kalo nyala lagi)
+        if not isRunning and firedThisSession then
+            -- udah pernah fired, tunggu user manual restart atau next session
+        end
+        -- Kalau user matikan Auto-Start, reset flag
+        if not BH.autoStart then
+            firedThisSession = false
+        end
+        task.wait(10)
     end
 end)
