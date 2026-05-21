@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.141"
-local VERSION_DATE = "v8.141: Fix removeRE nil race condition — use WaitForChild(5s) + lazy retry resolveRemotes() pas unlist click. Debug confirm remote EXIST di RS.GameEvents.TradeEvents.Booths.RemoveListing"
+local VERSION = "8.142"
+local VERSION_DATE = "v8.142: AGGRESSIVE removeRE retry — 30s WaitForChild pas click + background loop max 60s + diagnostic log (Booths.children list)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2859,10 +2859,16 @@ do
 
             -- v8.139: guard — kalo removeRE nil, coba TBC method dulu
             local useTbcMethod = nil
-            -- v8.141: lazy retry resolve dulu (kadang remote baru replicate setelah init)
+            -- v8.142: lazy retry resolve dengan 30s WaitForChild — tunggu beneran sampai dapet
             if not removeRE then
-                pcall(resolveRemotes)
-                if removeRE then L("[Pantau] removeRE found via lazy retry") end
+                statusLbl.Text = "⏳ Tunggu remote replicate (max 30s)..."
+                statusLbl.TextColor3 = C.accent
+                local ok, diag = resolveRemotes(30)
+                if removeRE then
+                    L("[Pantau] ✅ removeRE found via 30s retry")
+                else
+                    L("[Pantau] ❌ removeRE STILL nil after 30s | "..table.concat(diag or {}, " | "))
+                end
             end
             if not removeRE then
                 L("[Pantau] removeRE NIL — cari TBC method...")
@@ -2998,9 +3004,15 @@ do
             end
 
             if not removeRE then
-                -- v8.141: lazy retry resolve dulu (kadang remote baru replicate setelah init)
-                pcall(resolveRemotes)
-                if removeRE then L("[Unlist-ALL] removeRE found via lazy retry") end
+                -- v8.142: lazy retry resolve dengan 30s WaitForChild
+                statusLbl.Text = "⏳ Tunggu remote replicate (max 30s)..."
+                statusLbl.TextColor3 = C.accent
+                local ok, diag = resolveRemotes(30)
+                if removeRE then
+                    L("[Unlist-ALL] ✅ removeRE found via 30s retry")
+                else
+                    L("[Unlist-ALL] ❌ removeRE STILL nil after 30s | "..table.concat(diag or {}, " | "))
+                end
             end
             if not removeRE then
                 -- v8.106: coba pake TBC method kalo removeRE total gak ada
@@ -4197,25 +4209,53 @@ end  -- end do block for snipe UI
 -- ============================================================
 -- v8.52: safe remote access (di garden server TradeEvents gak ada)
 -- v8.141: Use WaitForChild + lazy retry — RemoveListing kadang lambat replicate ke client
+-- v8.142: more aggressive + diagnostic + background retry loop
 local createRE, removeRE, buyRE, claimRE, removeBoothRE
-local function resolveRemotes()
+local function resolveRemotes(timeout)
+    timeout = timeout or 5
+    local diag = {}
     pcall(function()
-        local GE = RS:FindFirstChild("GameEvents") or RS:WaitForChild("GameEvents", 8)
-        if not GE then return end
-        local TE = GE:FindFirstChild("TradeEvents") or GE:WaitForChild("TradeEvents", 8)
-        if not TE then return end
-        local Booths = TE:FindFirstChild("Booths") or TE:WaitForChild("Booths", 8)
-        if not Booths then return end
-        -- WaitForChild dgn timeout pendek (5s)
-        if not createRE then createRE = Booths:FindFirstChild("CreateListing") or Booths:WaitForChild("CreateListing", 5) end
-        if not removeRE then removeRE = Booths:FindFirstChild("RemoveListing") or Booths:WaitForChild("RemoveListing", 5) end
-        if not buyRE then buyRE = Booths:FindFirstChild("BuyListing") or Booths:WaitForChild("BuyListing", 5) end
-        if not claimRE then claimRE = Booths:FindFirstChild("ClaimBooth") or Booths:WaitForChild("ClaimBooth", 5) end
-        if not removeBoothRE then removeBoothRE = Booths:FindFirstChild("RemoveBooth") or Booths:WaitForChild("RemoveBooth", 5) end
+        local GE = RS:FindFirstChild("GameEvents") or RS:WaitForChild("GameEvents", timeout)
+        if not GE then table.insert(diag, "GE=nil"); return end
+        table.insert(diag, "GE="..GE.Name)
+        local TE = GE:FindFirstChild("TradeEvents") or GE:WaitForChild("TradeEvents", timeout)
+        if not TE then table.insert(diag, "TE=nil"); return end
+        table.insert(diag, "TE="..TE.Name)
+        local Booths = TE:FindFirstChild("Booths") or TE:WaitForChild("Booths", timeout)
+        if not Booths then table.insert(diag, "Booths=nil"); return end
+        table.insert(diag, "Booths="..Booths.Name)
+        -- Dump all Booths children sekali doang biar tau apa yg available
+        local children = {}
+        for _, c in ipairs(Booths:GetChildren()) do table.insert(children, c.Name) end
+        table.insert(diag, "Booths.children=["..table.concat(children, ",").."]")
+        if not createRE then createRE = Booths:FindFirstChild("CreateListing") or Booths:WaitForChild("CreateListing", timeout) end
+        if not removeRE then removeRE = Booths:FindFirstChild("RemoveListing") or Booths:WaitForChild("RemoveListing", timeout) end
+        if not buyRE then buyRE = Booths:FindFirstChild("BuyListing") or Booths:WaitForChild("BuyListing", timeout) end
+        if not claimRE then claimRE = Booths:FindFirstChild("ClaimBooth") or Booths:WaitForChild("ClaimBooth", timeout) end
+        if not removeBoothRE then removeBoothRE = Booths:FindFirstChild("RemoveBooth") or Booths:WaitForChild("RemoveBooth", timeout) end
     end)
-    return removeRE ~= nil
+    return removeRE ~= nil, diag
 end
-resolveRemotes()  -- initial attempt
+
+-- Initial attempt
+local _ok, _diag = resolveRemotes(5)
+L("[Init] resolveRemotes initial — removeRE="..(removeRE and "FOUND" or "nil").." | "..table.concat(_diag or {}, " | "))
+
+-- v8.142: BACKGROUND retry loop — kalo init missed, terus coba sampai dapet (max 60s)
+task.spawn(function()
+    local startTime = tick()
+    while not removeRE and (tick() - startTime) < 60 do
+        task.wait(2)
+        local ok = resolveRemotes(3)
+        if ok then
+            L("[Init] ✅ removeRE finally found via background retry (after "..math.floor(tick()-startTime).."s)")
+            break
+        end
+    end
+    if not removeRE then
+        L("[Init] ⚠ removeRE STILL nil setelah 60s background retry — manual lookup needed")
+    end
+end)
 pcall(function()
     local Booths = RS:FindFirstChild("GameEvents")
         and RS.GameEvents:FindFirstChild("TradeEvents")
