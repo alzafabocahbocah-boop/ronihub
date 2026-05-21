@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.147"
-local VERSION_DATE = "v8.147: Auto-Clean interval 30s → 10s (lebih responsif)"
+local VERSION = "8.149"
+local VERSION_DATE = "v8.149: GARDEN font lebih gede lagi (13→15) + row 26→32. Tabs ALL/60kg+/60kg- udah ada di v8.148 (age-1 BaseWeight basis)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -8292,8 +8292,38 @@ BH.buildGardenPanel = function()
     gStatsLbl.TextYAlignment = Enum.TextYAlignment.Top
     gStatsLbl.TextWrapped = true gStatsLbl.Parent = statsCard
 
+    -- v8.148: Filter tabs (ALL / 60kg+ / 60kg-) — based on age-1 normalized base weight
+    local gardenFilter = "all"  -- "all", "60plus", "60minus"
+    local tabBar = Instance.new("Frame")
+    tabBar.Size = UDim2.new(1, -28, 0, 28) tabBar.Position = UDim2.new(0, 14, 0, 100)
+    tabBar.BackgroundTransparency = 1 tabBar.Parent = gp
+    local function makeTab(text, x, w)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, w, 1, 0) b.Position = UDim2.new(0, x, 0, 0)
+        b.BackgroundColor3 = C.card b.AutoButtonColor = false
+        b.Text = text b.TextColor3 = C.textDim
+        b.Font = FB b.TextSize = 12 b.BorderSizePixel = 0
+        b.Parent = tabBar
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        return b
+    end
+    local tabAll = makeTab("ALL", 0, 80)
+    local tab60p = makeTab("60kg+", 86, 80)
+    local tab60m = makeTab("60kg-", 172, 80)
+    local function setTabActive(active)
+        for _, b in ipairs({tabAll, tab60p, tab60m}) do
+            b.BackgroundColor3 = C.card
+            b.TextColor3 = C.textDim
+        end
+        if active == "all" then tabAll.BackgroundColor3 = C.accent; tabAll.TextColor3 = Color3.new(0,0,0)
+        elseif active == "60plus" then tab60p.BackgroundColor3 = C.accent; tab60p.TextColor3 = Color3.new(0,0,0)
+        elseif active == "60minus" then tab60m.BackgroundColor3 = C.accent; tab60m.TextColor3 = Color3.new(0,0,0)
+        end
+    end
+    setTabActive("all")
+
     local gListScroll = Instance.new("ScrollingFrame")
-    gListScroll.Size = UDim2.new(1, -28, 1, -110) gListScroll.Position = UDim2.new(0, 14, 0, 102)
+    gListScroll.Size = UDim2.new(1, -28, 1, -142) gListScroll.Position = UDim2.new(0, 14, 0, 134)
     gListScroll.BackgroundColor3 = C.input gListScroll.BorderSizePixel = 0
     gListScroll.ScrollBarThickness = 4 gListScroll.ScrollBarImageColor3 = C.accent
     gListScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -8302,7 +8332,7 @@ BH.buildGardenPanel = function()
     Instance.new("UICorner", gListScroll).CornerRadius = UDim.new(0, 6)
     do
         local lay = Instance.new("UIListLayout")
-        lay.Padding = UDim.new(0, 2) lay.Parent = gListScroll
+        lay.Padding = UDim.new(0, 3) lay.Parent = gListScroll
         local pad = Instance.new("UIPadding")
         pad.PaddingTop = UDim.new(0, 4) pad.PaddingBottom = UDim.new(0, 4)
         pad.PaddingLeft = UDim.new(0, 6) pad.PaddingRight = UDim.new(0, 6)
@@ -8323,41 +8353,51 @@ BH.buildGardenPanel = function()
                 if isFav(t) then favC = favC + 1 end
                 local pt = getPetType(t)
                 local kg = getCurrentKg(t)
-                if not tc[pt] then tc[pt] = {n=0, mn=math.huge, mx=0} end
-                tc[pt].n = tc[pt].n + 1
-                if kg > 0 then
-                    tc[pt].mn = math.min(tc[pt].mn, kg)
-                    tc[pt].mx = math.max(tc[pt].mx, kg)
+                -- v8.148: get age-1 normalized base weight buat filter
+                local baseKg = getBaseKg(t)
+                -- Apply filter
+                local include = true
+                if gardenFilter == "60plus" and baseKg < 6 then include = false end
+                if gardenFilter == "60minus" and baseKg >= 6 then include = false end
+                if include then
+                    if not tc[pt] then tc[pt] = {n=0, mn=math.huge, mx=0, baseSum=0} end
+                    tc[pt].n = tc[pt].n + 1
+                    tc[pt].baseSum = tc[pt].baseSum + baseKg
+                    if kg > 0 then
+                        tc[pt].mn = math.min(tc[pt].mn, kg)
+                        tc[pt].mx = math.max(tc[pt].mx, kg)
+                    end
                 end
             end
         end
         local nTypes = 0 for _ in pairs(tc) do nTypes = nTypes + 1 end
-        gStatsLbl.Text = string.format("%d pets  |  %d fav  |  %d types", total, favC, nTypes)
+        local filterLabel = gardenFilter == "all" and "" or (" ["..gardenFilter.."]")
+        gStatsLbl.Text = string.format("%d pets  |  %d fav  |  %d types%s", total, favC, nTypes, filterLabel)
         local sorted = {}
         for pt, info in pairs(tc) do table.insert(sorted, {pt=pt, info=info}) end
         table.sort(sorted, function(a, b) return a.info.n > b.info.n end)
         for i, e in ipairs(sorted) do
             local row = Instance.new("Frame")
-            row.Size = UDim2.new(1, -8, 0, 22)
+            row.Size = UDim2.new(1, -8, 0, 32)  -- v8.149: 26 → 32 lebih tinggi lagi
             row.BackgroundColor3 = (i % 2 == 0) and C.bg or C.card
             row.BorderSizePixel = 0 row.Parent = gListScroll
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
             local nm = Instance.new("TextLabel")
-            nm.Size = UDim2.new(0.55, -4, 1, 0) nm.Position = UDim2.new(0, 8, 0, 0)
+            nm.Size = UDim2.new(0.55, -4, 1, 0) nm.Position = UDim2.new(0, 10, 0, 0)
             nm.BackgroundTransparency = 1 nm.Text = e.pt
-            nm.TextColor3 = C.text nm.Font = FM nm.TextSize = 11
+            nm.TextColor3 = C.text nm.Font = FM nm.TextSize = 15  -- v8.149: 13 → 15
             nm.TextXAlignment = Enum.TextXAlignment.Left
             nm.TextTruncate = Enum.TextTruncate.AtEnd nm.Parent = row
             local cn = Instance.new("TextLabel")
             cn.Size = UDim2.new(0.20, 0, 1, 0) cn.Position = UDim2.new(0.55, 0, 0, 0)
             cn.BackgroundTransparency = 1 cn.Text = "×"..e.info.n
-            cn.TextColor3 = C.accent cn.Font = FB cn.TextSize = 11
+            cn.TextColor3 = C.accent cn.Font = FB cn.TextSize = 15  -- v8.149: 13 → 15
             cn.TextXAlignment = Enum.TextXAlignment.Center cn.Parent = row
             local kg = Instance.new("TextLabel")
             kg.Size = UDim2.new(0.25, 0, 1, 0) kg.Position = UDim2.new(0.75, 0, 0, 0)
             kg.BackgroundTransparency = 1
             kg.Text = (e.info.mx > 0) and string.format("%.1f-%.1f", e.info.mn, e.info.mx) or "-"
-            kg.TextColor3 = C.textDim kg.Font = FM kg.TextSize = 10
+            kg.TextColor3 = C.textDim kg.Font = FM kg.TextSize = 13  -- v8.149: 12 → 13
             kg.TextXAlignment = Enum.TextXAlignment.Right kg.Parent = row
         end
     end
@@ -8368,6 +8408,11 @@ BH.buildGardenPanel = function()
     if BH.autoTrade then
         gTradeBtn.Text = "Auto Accept Trade: ON" gTradeBtn.TextColor3 = C.accent
     end
+
+    -- v8.148: wire tab clicks
+    tabAll.MouseButton1Click:Connect(function() gardenFilter = "all"; setTabActive("all"); pcall(BH.refreshGardenStats) end)
+    tab60p.MouseButton1Click:Connect(function() gardenFilter = "60plus"; setTabActive("60plus"); pcall(BH.refreshGardenStats) end)
+    tab60m.MouseButton1Click:Connect(function() gardenFilter = "60minus"; setTabActive("60minus"); pcall(BH.refreshGardenStats) end)
 
     do
         local bp = player:FindFirstChild("Backpack")
