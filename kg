@@ -7,10 +7,58 @@
 
 local Players    = game:GetService("Players")
 local CoreGui    = game:GetService("CoreGui")
+local HS         = game:GetService("HttpService")
 local player     = Players.LocalPlayer
 local playerGui  = player:WaitForChild("PlayerGui", 10)
-local VER = "v1.1"
+local VER = "v1.3"
 local KG_THRESHOLD = 60
+local SETTINGS_FILE = "ZenxKgStats_settings.json"
+
+-- Mutation prefixes for type normalization
+local MUTATION_PREFIXES = {
+    "Everchanted ","Rainbow ","Frozen ","Inverted ","Golden ","Diamond ",
+    "Mythical ","Hexed ","Ascended ","Radiant ","Shocked ","Bloodlit ",
+    "Twilight ","Voidtouched ","Foxfire ","Aurora ","Static ","Stormcloud ",
+    "Frost ","Burnt ","Lethal ","Cooked ","Choc ",
+}
+local function stripMutation(s)
+    if not s then return "" end
+    for _, p in ipairs(MUTATION_PREFIXES) do
+        if s:sub(1, #p) == p then return s:sub(#p + 1) end
+    end
+    return s
+end
+
+-- Settings persistence
+local selectedPetTypes = {}  -- {[petName]=true}
+
+local function loadSettings()
+    local ok, content = pcall(function()
+        if isfile and readfile and isfile(SETTINGS_FILE) then return readfile(SETTINGS_FILE) end
+        return nil
+    end)
+    if not ok or not content then return end
+    local ok2, data = pcall(function() return HS:JSONDecode(content) end)
+    if ok2 and type(data) == "table" then
+        if type(data.petTypes) == "table" then
+            for _, n in ipairs(data.petTypes) do
+                if type(n) == "string" then selectedPetTypes[n] = true end
+            end
+        end
+    end
+end
+
+local function saveSettings()
+    local types = {}
+    for k in pairs(selectedPetTypes) do table.insert(types, k) end
+    pcall(function()
+        if writefile then writefile(SETTINGS_FILE, HS:JSONEncode({petTypes=types})) end
+    end)
+end
+
+local function petTypeCount()
+    local n = 0; for _ in pairs(selectedPetTypes) do n = n + 1 end; return n
+end
 
 -- ===== CLEANUP =====
 local function cleanup()
@@ -77,10 +125,16 @@ local function collectStats(container)
     local total, above, below = 0, 0, 0
     local bp = player:FindFirstChild("Backpack")
     if not bp then return total, above, below end
+    local hasFilter = petTypeCount() > 0
     for _, tool in ipairs(bp:GetChildren()) do
         if tool:IsA("Tool") then
             local uuid = tool:GetAttribute("PET_UUID")
             if uuid then
+                -- Apply pet type filter if any
+                if hasFilter then
+                    local pType = stripMutation(tostring(tool:GetAttribute("f") or "?"))
+                    if not selectedPetTypes[pType] then goto continue end
+                end
                 local kg = getDisplayKg(container, uuid)
                 if kg >= KG_THRESHOLD then
                     above = above + 1
@@ -90,6 +144,7 @@ local function collectStats(container)
                 total = total + 1
             end
         end
+        ::continue::
     end
     return total, above, below
 end
@@ -163,15 +218,29 @@ tbFix.BorderSizePixel = 0
 tbFix.Parent = titleBar
 
 local titleLbl = Instance.new("TextLabel")
-titleLbl.Size = UDim2.new(1, -68, 1, 0)
+titleLbl.Size = UDim2.new(1, -150, 1, 0)
 titleLbl.Position = UDim2.new(0, 12, 0, 0)
 titleLbl.BackgroundTransparency = 1
-titleLbl.Text = "⚡ ZENX KG STATS "..VER
+titleLbl.Text = "ZENX KG STATS "..VER
 titleLbl.TextColor3 = C.Accent
 titleLbl.Font = Enum.Font.GothamBold
-titleLbl.TextSize = 13
+titleLbl.TextSize = 12
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 titleLbl.Parent = titleBar
+
+-- Pet picker button (small, in title bar)
+local petPickBtn = Instance.new("TextButton")
+petPickBtn.Size = UDim2.new(0, 68, 0, 22)
+petPickBtn.Position = UDim2.new(1, -150, 0.5, -11)
+petPickBtn.BackgroundColor3 = C.Card
+petPickBtn.Text = "Pet ▼"
+petPickBtn.TextColor3 = C.Dim
+petPickBtn.Font = Enum.Font.GothamBold
+petPickBtn.TextSize = 10
+petPickBtn.BorderSizePixel = 0
+petPickBtn.AutoButtonColor = false
+petPickBtn.Parent = titleBar
+Instance.new("UICorner", petPickBtn).CornerRadius = UDim.new(0, 4)
 
 local function mkTitleBtn(x, txt, color, txtColor)
     local b = Instance.new("TextButton")
@@ -226,8 +295,8 @@ local function mkStat(parent, x, w, labelText, valColor)
     return v
 end
 local totalVal = mkStat(header, 0,    0.33, "TOTAL",                C.Text)
-local aboveVal = mkStat(header, 0.33, 0.33, "KG "..KG_THRESHOLD.."+", C.Green)
-local belowVal = mkStat(header, 0.66, 0.33, "KG "..KG_THRESHOLD.."-", C.Orange)
+local aboveVal = mkStat(header, 0.33, 0.33, "KG "..KG_THRESHOLD.."+", C.Text)
+local belowVal = mkStat(header, 0.66, 0.33, "KG "..KG_THRESHOLD.."-", C.Text)
 
 -- ============================================================
 -- RENDER
@@ -255,7 +324,7 @@ zLogo.AutoButtonColor = false
 zLogo.Active = true
 zLogo.Draggable = true
 zLogo.Visible = false
-zLogo.Parent = sg 
+zLogo.Parent = sg
 Instance.new("UICorner", zLogo).CornerRadius = UDim.new(1, 0)
 local zStroke = Instance.new("UIStroke", zLogo)
 zStroke.Color = Color3.new(0,0,0) zStroke.Thickness = 1.5
@@ -268,6 +337,240 @@ zLogo.MouseButton1Click:Connect(function()
     main.Visible = true
     zLogo.Visible = false
 end)
+
+-- ============================================================
+-- PET TYPE PICKER MODAL
+-- ============================================================
+local function updatePetPickBtn()
+    local cnt = petTypeCount()
+    if cnt == 0 then
+        petPickBtn.Text = "Pet ▼"
+        petPickBtn.TextColor3 = C.Dim
+    else
+        petPickBtn.Text = cnt.." pet ▼"
+        petPickBtn.TextColor3 = C.Accent
+    end
+end
+
+local pickerOverlay = nil
+
+local function openPetPicker()
+    if pickerOverlay then pickerOverlay:Destroy() end
+
+    pickerOverlay = Instance.new("Frame")
+    pickerOverlay.Size = UDim2.new(1, 0, 1, 0)
+    pickerOverlay.BackgroundColor3 = Color3.new(0, 0, 0)
+    pickerOverlay.BackgroundTransparency = 0.4
+    pickerOverlay.BorderSizePixel = 0
+    pickerOverlay.ZIndex = 100
+    pickerOverlay.Parent = main
+
+    local backBtn = Instance.new("TextButton")
+    backBtn.Size = UDim2.new(1, 0, 1, 0)
+    backBtn.BackgroundTransparency = 1
+    backBtn.Text = "" backBtn.AutoButtonColor = false
+    backBtn.ZIndex = 100
+    backBtn.Parent = pickerOverlay
+
+    local box = Instance.new("Frame")
+    box.Size = UDim2.new(0, 320, 0, 360)
+    box.Position = UDim2.new(0.5, 0, 0.5, 0)
+    box.AnchorPoint = Vector2.new(0.5, 0.5)
+    box.BackgroundColor3 = C.BG
+    box.BorderSizePixel = 0
+    box.ZIndex = 101
+    box.Parent = pickerOverlay
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 8)
+    local bStroke = Instance.new("UIStroke", box)
+    bStroke.Color = C.Accent
+    bStroke.Thickness = 1.5
+
+    local guard = Instance.new("TextButton")
+    guard.Size = UDim2.new(1, 0, 1, 0)
+    guard.BackgroundTransparency = 1
+    guard.Text = "" guard.AutoButtonColor = false
+    guard.ZIndex = 101
+    guard.Parent = box
+
+    local pTitleBar = Instance.new("Frame")
+    pTitleBar.Size = UDim2.new(1, 0, 0, 32)
+    pTitleBar.BackgroundColor3 = C.Panel
+    pTitleBar.BorderSizePixel = 0
+    pTitleBar.ZIndex = 102
+    pTitleBar.Parent = box
+    Instance.new("UICorner", pTitleBar).CornerRadius = UDim.new(0, 8)
+    local pTbFix = Instance.new("Frame")
+    pTbFix.Size = UDim2.new(1, 0, 0, 10)
+    pTbFix.Position = UDim2.new(0, 0, 1, -10)
+    pTbFix.BackgroundColor3 = C.Panel
+    pTbFix.BorderSizePixel = 0
+    pTbFix.ZIndex = 102
+    pTbFix.Parent = pTitleBar
+
+    local pTitle = Instance.new("TextLabel")
+    pTitle.Size = UDim2.new(1, -120, 1, 0)
+    pTitle.Position = UDim2.new(0, 12, 0, 0)
+    pTitle.BackgroundTransparency = 1
+    pTitle.Text = "Pilih Jenis Pet"
+    pTitle.TextColor3 = C.Accent
+    pTitle.Font = Enum.Font.GothamBold
+    pTitle.TextSize = 13
+    pTitle.TextXAlignment = Enum.TextXAlignment.Left
+    pTitle.ZIndex = 103
+    pTitle.Parent = pTitleBar
+
+    local doneBtn = Instance.new("TextButton")
+    doneBtn.Size = UDim2.new(0, 56, 0, 22)
+    doneBtn.Position = UDim2.new(1, -110, 0.5, -11)
+    doneBtn.BackgroundColor3 = C.Green
+    doneBtn.Text = "DONE"
+    doneBtn.TextColor3 = Color3.new(0, 0, 0)
+    doneBtn.Font = Enum.Font.GothamBold
+    doneBtn.TextSize = 10
+    doneBtn.BorderSizePixel = 0
+    doneBtn.AutoButtonColor = false
+    doneBtn.ZIndex = 103
+    doneBtn.Parent = pTitleBar
+    Instance.new("UICorner", doneBtn).CornerRadius = UDim.new(0, 4)
+
+    local clearBtn = Instance.new("TextButton")
+    clearBtn.Size = UDim2.new(0, 40, 0, 22)
+    clearBtn.Position = UDim2.new(1, -50, 0.5, -11)
+    clearBtn.BackgroundColor3 = C.Red
+    clearBtn.Text = "CLR"
+    clearBtn.TextColor3 = Color3.new(1, 1, 1)
+    clearBtn.Font = Enum.Font.GothamBold
+    clearBtn.TextSize = 10
+    clearBtn.BorderSizePixel = 0
+    clearBtn.AutoButtonColor = false
+    clearBtn.ZIndex = 103
+    clearBtn.Parent = pTitleBar
+    Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 4)
+
+    local pSearch = Instance.new("TextBox")
+    pSearch.Size = UDim2.new(1, -16, 0, 28)
+    pSearch.Position = UDim2.new(0, 8, 0, 40)
+    pSearch.BackgroundColor3 = C.Card
+    pSearch.Text = ""
+    pSearch.PlaceholderText = "Cari pet..."
+    pSearch.PlaceholderColor3 = C.Dim
+    pSearch.TextColor3 = C.Text
+    pSearch.Font = Enum.Font.Gotham
+    pSearch.TextSize = 12
+    pSearch.ClearTextOnFocus = false
+    pSearch.BorderSizePixel = 0
+    pSearch.ZIndex = 102
+    pSearch.Parent = box
+    Instance.new("UICorner", pSearch).CornerRadius = UDim.new(0, 4)
+    local psPad = Instance.new("UIPadding", pSearch)
+    psPad.PaddingLeft = UDim.new(0, 10)
+
+    local pScroll = Instance.new("ScrollingFrame")
+    pScroll.Size = UDim2.new(1, -16, 1, -80)
+    pScroll.Position = UDim2.new(0, 8, 0, 76)
+    pScroll.BackgroundTransparency = 1
+    pScroll.BorderSizePixel = 0
+    pScroll.ScrollBarThickness = 4
+    pScroll.ScrollBarImageColor3 = C.Accent
+    pScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    pScroll.ZIndex = 102
+    pScroll.Parent = box
+    local pLayout = Instance.new("UIListLayout")
+    pLayout.Padding = UDim.new(0, 3)
+    pLayout.Parent = pScroll
+
+    local function closePicker()
+        if pickerOverlay then pickerOverlay:Destroy() end
+        pickerOverlay = nil
+        updatePetPickBtn()
+        render()  -- refresh stats with new filter
+    end
+    backBtn.MouseButton1Click:Connect(closePicker)
+    doneBtn.MouseButton1Click:Connect(closePicker)
+    clearBtn.MouseButton1Click:Connect(function()
+        selectedPetTypes = {}
+        saveSettings()
+    end)
+
+    local function renderList(filter)
+        for _, c in ipairs(pScroll:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
+        end
+        filter = (filter or ""):lower()
+        -- Build pet type list from backpack + memContainer + already-selected
+        local byType = {}
+        local bp = player:FindFirstChild("Backpack")
+        if bp then
+            for _, tool in ipairs(bp:GetChildren()) do
+                if tool:IsA("Tool") and tool:GetAttribute("PET_UUID") then
+                    local pType = stripMutation(tostring(tool:GetAttribute("f") or "?"))
+                    byType[pType] = (byType[pType] or 0) + 1
+                end
+            end
+        end
+        if cachedContainer then
+            for _, entry in pairs(cachedContainer) do
+                if type(entry) == "table" and entry.PetType then
+                    local pType = stripMutation(tostring(entry.PetType))
+                    if not byType[pType] then byType[pType] = 0 end
+                end
+            end
+        end
+        for k in pairs(selectedPetTypes) do
+            if not byType[k] then byType[k] = 0 end
+        end
+
+        local items = {}
+        for k, v in pairs(byType) do table.insert(items, {name=k, count=v}) end
+        table.sort(items, function(a, b)
+            local aSel = selectedPetTypes[a.name] and 1 or 0
+            local bSel = selectedPetTypes[b.name] and 1 or 0
+            if aSel ~= bSel then return aSel > bSel end
+            if a.count ~= b.count then return a.count > b.count end
+            return a.name < b.name
+        end)
+
+        for _, it in ipairs(items) do
+            if filter == "" or it.name:lower():find(filter, 1, true) then
+                local sel = selectedPetTypes[it.name] == true
+                local row = Instance.new("TextButton")
+                row.Size = UDim2.new(1, -4, 0, 28)
+                row.BackgroundColor3 = sel and C.Accent or C.Card
+                row.Text = (sel and "v " or "  ")..it.name..(it.count > 0 and ("  ("..it.count..")") or "")
+                row.TextColor3 = sel and Color3.new(0,0,0) or C.Text
+                row.Font = sel and Enum.Font.GothamBold or Enum.Font.Gotham
+                row.TextSize = 12
+                row.TextXAlignment = Enum.TextXAlignment.Left
+                row.BorderSizePixel = 0
+                row.AutoButtonColor = false
+                row.ZIndex = 103
+                row.Parent = pScroll
+                Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+                local rPad = Instance.new("UIPadding", row)
+                rPad.PaddingLeft = UDim.new(0, 10)
+                row.MouseButton1Click:Connect(function()
+                    if selectedPetTypes[it.name] then
+                        selectedPetTypes[it.name] = nil
+                    else
+                        selectedPetTypes[it.name] = true
+                    end
+                    saveSettings()
+                    renderList(pSearch.Text)
+                end)
+            end
+        end
+        pScroll.CanvasSize = UDim2.new(0, 0, 0, pLayout.AbsoluteContentSize.Y + 8)
+    end
+
+    pSearch:GetPropertyChangedSignal("Text"):Connect(function() renderList(pSearch.Text) end)
+    renderList("")
+end
+
+petPickBtn.MouseButton1Click:Connect(openPetPicker)
+
+-- Load saved settings
+loadSettings()
+updatePetPickBtn()
 
 -- ============================================================
 -- INIT + AUTO-REFRESH
