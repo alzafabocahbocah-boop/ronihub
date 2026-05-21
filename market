@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.131"
-local VERSION_DATE = "v8.131: CRITICAL FIX — saveMarketState({myBoothUuid}) was WIPING all other state. Now properly merges."
+local VERSION = "8.132"
+local VERSION_DATE = "v8.132: Auto-Claim persistent + auto-start diagnostic logging (cek log buat tau kenapa gak fire)"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2094,13 +2094,20 @@ local boothCard = makeCard(miscPanel, 120)
 lblOf(boothCard, "🏠  BOOTH", 14, 10, 200, 22, C.accent, 14, FB)
 lblOf(boothCard, "Auto-claim booth empty (unlist all dipindah ke Pantau)", 14, 32, 400, 18, C.textDim, 11)
 local claimBtn = btnOf(boothCard, 14, 54, 140, 26, "🏠 CLAIM BOOTH", C.accent)
--- v8.43: Auto-Claim toggle
-local autoClaimState = false
-local autoClaimBtn = btnOf(boothCard, 14, 86, 200, 26, "🤖 Auto-Claim: OFF", C.danger)
+-- v8.43: Auto-Claim toggle | v8.132: persist
+local autoClaimState = (BH.marketState and BH.marketState.autoClaim) == true
+local autoClaimBtn = btnOf(boothCard, 14, 86, 200, 26,
+    autoClaimState and "🤖 Auto-Claim: ON" or "🤖 Auto-Claim: OFF",
+    autoClaimState and C.success or C.danger)
 autoClaimBtn.MouseButton1Click:Connect(function()
     autoClaimState = not autoClaimState
     autoClaimBtn.Text = autoClaimState and "🤖 Auto-Claim: ON" or "🤖 Auto-Claim: OFF"
     autoClaimBtn.BackgroundColor3 = autoClaimState and C.success or C.danger
+    -- v8.132: persist
+    if BH.marketState then
+        BH.marketState.autoClaim = autoClaimState
+        BH.saveMarketState(BH.marketState)
+    end
     L(autoClaimState and "[Auto-Claim] enabled (check 15s)" or "[Auto-Claim] disabled")
 end)
 
@@ -7985,16 +7992,26 @@ task.spawn(function()
 end)
 
 -- v8.48: AUTO-START — if enabled & ada rules, fire START btn after delay
+-- v8.132: Longer wait + better diagnostic logging
 task.spawn(function()
-    task.wait(5)  -- biar semua init kelar
+    task.wait(8)  -- v8.132: 5 → 8 detik biar pasti rules + state loaded
+    L("")
+    L("🚀 [Auto-Start] check: autoStart="..tostring(BH.autoStart)..", rules="..#listingRules..", running="..tostring(isRunning))
     if BH.autoStart and #listingRules > 0 and not isRunning then
-        L("")
         L("🚀 [Auto-Start] enabled — firing START in 3s...")
         task.wait(3)
         if not isRunning then
-            BH.onStartClick()
+            L("🚀 [Auto-Start] calling onStartClick()")
+            local ok, err = pcall(BH.onStartClick)
+            if not ok then
+                L("✗ [Auto-Start] FAIL: "..tostring(err))
+            end
+        else
+            L("⚠ [Auto-Start] isRunning already true, skip")
         end
     elseif BH.autoStart and #listingRules == 0 then
-        L("⚠ [Auto-Start] enabled tapi 0 rules — skip")
+        L("⚠ [Auto-Start] enabled tapi 0 rules — skip (cek state file)")
+    elseif not BH.autoStart then
+        L("[Auto-Start] OFF — skip")
     end
 end)
