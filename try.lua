@@ -11,7 +11,7 @@ local RS         = game:GetService("ReplicatedStorage")
 local HS         = game:GetService("HttpService")
 local player     = Players.LocalPlayer
 local playerGui  = player:WaitForChild("PlayerGui", 10)
-local VER = "v2.8"
+local VER = "v2.9"
 local TARGETS_FILE = "ZenxAgeStats_targets.json"
 local SETTINGS_FILE = "ZenxAgeStats_settings.json"
 local MAX_RECENT = 8
@@ -38,15 +38,35 @@ cleanup()
 -- ============================================================
 local function findMemoryContainer()
     if not getgc then return nil, 0 end
-    local best, bestCount = nil, 0
+    -- v2.9: Get backpack UUIDs to find the RIGHT container (yg sesuai pet user)
+    local backpackUUIDs = {}
+    local bpCount = 0
+    local bp = player:FindFirstChild("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") then
+                local u = t:GetAttribute("PET_UUID")
+                if u then
+                    local k = tostring(u)
+                    if k:sub(1,1) ~= "{" then k = "{"..k.."}" end
+                    backpackUUIDs[k] = true
+                    bpCount = bpCount + 1
+                end
+            end
+        end
+    end
+
+    local best, bestCount, bestMatch = nil, 0, 0
     pcall(function()
         for _, obj in pairs(getgc(true)) do
             if type(obj) == "table" then
-                local uuidLike = 0
+                -- Count UUID-like keys AND how many match backpack
+                local uuidLike, matchCount = 0, 0
                 for k in pairs(obj) do
                     if type(k) == "string" and #k >= 32 and k:find("-") then
                         uuidLike = uuidLike + 1
-                        if uuidLike >= 5 then break end
+                        if backpackUUIDs[k] then matchCount = matchCount + 1 end
+                        if uuidLike >= 50 and matchCount == 0 then break end
                     end
                 end
                 if uuidLike >= 5 then
@@ -55,12 +75,28 @@ local function findMemoryContainer()
                     if type(sample) == "table" and rawget(sample, "PetData") then
                         local cnt = 0
                         for _ in pairs(obj) do cnt = cnt + 1 end
-                        if cnt > bestCount then best = obj; bestCount = cnt end
+                        -- Prefer container with MORE matches to backpack
+                        -- Fallback: if backpack empty, use largest
+                        local better = false
+                        if bpCount > 0 then
+                            if matchCount > bestMatch then better = true
+                            elseif matchCount == bestMatch and cnt > bestCount then better = true end
+                        else
+                            if cnt > bestCount then better = true end
+                        end
+                        if better then
+                            best = obj
+                            bestCount = cnt
+                            bestMatch = matchCount
+                        end
                     end
                 end
             end
         end
     end)
+    if best then
+        print("[ZenxAgeStats] container: "..bestCount.." entries, "..bestMatch.."/"..bpCount.." backpack match")
+    end
     return best, bestCount
 end
 
