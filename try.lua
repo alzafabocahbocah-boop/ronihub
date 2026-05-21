@@ -11,7 +11,7 @@ local RS         = game:GetService("ReplicatedStorage")
 local HS         = game:GetService("HttpService")
 local player     = Players.LocalPlayer
 local playerGui  = player:WaitForChild("PlayerGui", 10)
-local VER = "v2.10"
+local VER = "v2.11"
 local TARGETS_FILE = "ZenxAgeStats_targets.json"
 local SETTINGS_FILE = "ZenxAgeStats_settings.json"
 local MAX_RECENT = 8
@@ -1313,6 +1313,10 @@ end
 local function petMatchesFilter(tool)
     local uuid = tool:GetAttribute("PET_UUID")
     if not uuid then return false end
+    -- v2.11: SKIP favorite pets (cek multiple field names)
+    if tool:GetAttribute("FAVORITE") == true then return false end
+    if tool:GetAttribute("IsFavorited") == true then return false end
+    if tool:GetAttribute("Favorited") == true then return false end
     -- pet type filter
     if petTypeCount() > 0 then
         local pType = stripMutation(tostring(tool:GetAttribute("f") or "?"))
@@ -1323,6 +1327,8 @@ local function petMatchesFilter(tool)
     if key:sub(1,1) ~= "{" then key = "{"..key.."}" end
     local entry = cachedContainer and cachedContainer[key]
     if not entry or not entry.PetData then return false end
+    -- v2.11: also check IsFavorite di PetData
+    if entry.PetData.IsFavorite == true then return false end
     local bw = tonumber(entry.PetData.BaseWeight) or 0
     local lvl = tonumber(entry.PetData.Level) or 0
     local kg = bw * (10 + lvl) / 10
@@ -1360,17 +1366,31 @@ local function startGift()
     persistGiftSettings()
 
     task.spawn(function()
+        math.randomseed(tick())  -- v2.11: fresh seed
+        local lastPoolLog = 0
         while not giftStopReq do
-            -- Refresh online targets each cycle
+            -- Refresh online targets each cycle (with dedup)
             local poolTargets = {}
+            local seenPlayer = {}
             for name in pairs(selectedTargets) do
                 local p = findPlayerByName(name)
-                if p then table.insert(poolTargets, p) end
+                if p and not seenPlayer[p] then
+                    table.insert(poolTargets, p)
+                    seenPlayer[p] = true
+                end
+            end
+
+            -- v2.11: log pool size periodically biar bisa diagnose
+            if tick() - lastPoolLog > 10 then
+                lastPoolLog = tick()
+                local names = {}
+                for _, p in ipairs(poolTargets) do table.insert(names, p.Name) end
+                print(string.format("[ZenxGift] pool=%d/%d (online/selected) — %s",
+                    #poolTargets, targetCount(), table.concat(names, ", ")))
             end
 
             if #poolTargets == 0 then
-                -- v2.10: wait instead of break (user told us "kalau on ya on")
-                statusLbl.Text = "Waiting: target offline semua..."
+                statusLbl.Text = "Waiting: target offline semua... ("..targetCount().." selected)"
                 statusLbl.TextColor3 = C.Orange
                 task.wait(5)
             else
@@ -1387,7 +1407,6 @@ local function startGift()
                     end
                 end
                 if #matching == 0 then
-                    -- v2.10: wait instead of break
                     statusLbl.Text = "Waiting: no pet match filter di backpack..."
                     statusLbl.TextColor3 = C.Orange
                     task.wait(5)
