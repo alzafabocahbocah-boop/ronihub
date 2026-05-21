@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.137"
-local VERSION_DATE = "v8.137: CRITICAL FIX populateModalList nil crash di line 8001 → kill watchdog auto-start. pcall wrap"
+local VERSION = "8.138"
+local VERSION_DATE = "v8.138: Unlist — 11 format attempts (was 4), support RemoteEvent FireServer, log error message FULL (200 char vs 40), dump remote+TBC info"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2873,33 +2873,52 @@ do
                 local bracedListing = "{"..cleanListing.."}"
                 local cleanItem = itemId and tostring(itemId):gsub("[{}]","") or nil
                 local bracedItem = itemId and ("{"..(cleanItem or "").."}") or nil
+                local boothUuid = BH.myBoothUuid and tostring(BH.myBoothUuid):gsub("[{}]","") or nil
+                local bracedBooth = boothUuid and ("{"..boothUuid.."}") or nil
 
+                -- v8.138: tambah banyak format + booth+listing combos
                 local attempts = {
-                    {label="listing-clean", arg=cleanListing},
-                    {label="listing-braced", arg=bracedListing},
+                    {label="listing-clean", args={cleanListing}},
+                    {label="listing-braced", args={bracedListing}},
                 }
                 if cleanItem then
-                    table.insert(attempts, {label="item-clean", arg=cleanItem})
-                    table.insert(attempts, {label="item-braced", arg=bracedItem})
+                    table.insert(attempts, {label="item-clean", args={cleanItem}})
+                    table.insert(attempts, {label="item-braced", args={bracedItem}})
+                end
+                if boothUuid then
+                    table.insert(attempts, {label="booth+listing-clean", args={boothUuid, cleanListing}})
+                    table.insert(attempts, {label="booth+listing-braced", args={bracedBooth, bracedListing}})
+                    if cleanItem then
+                        table.insert(attempts, {label="booth+item-clean", args={boothUuid, cleanItem}})
+                    end
+                end
+                table.insert(attempts, {label="tbl-listing", args={{Listing=cleanListing}}})
+                table.insert(attempts, {label="tbl-listingUuid", args={{ListingUuid=cleanListing}}})
+                if cleanItem then
+                    table.insert(attempts, {label="tbl-item", args={{ItemId=cleanItem, Listing=cleanListing}}})
                 end
 
                 local success = false
                 local lastRaw = nil
                 for _, a in ipairs(attempts) do
-                    -- v8.105: capture ALL return values for lenient detection
-                    local ok, r1, r2, r3, r4 = pcall(function() return removeRE:InvokeServer(a.arg) end)
-                    -- Build raw dump for diagnostic
+                    -- v8.138: support both InvokeServer & FireServer
+                    local ok, r1, r2, r3, r4
+                    if removeRE:IsA("RemoteFunction") then
+                        ok, r1, r2, r3, r4 = pcall(function() return removeRE:InvokeServer(unpack(a.args)) end)
+                    else  -- RemoteEvent
+                        ok, r1 = pcall(function() removeRE:FireServer(unpack(a.args)); return true end)
+                    end
+                    -- v8.138: LOG FULL r1 (was sub(1,40), now sub(1,200) buat liat error message)
                     local raw = string.format("ok=%s r1=%s(%s) r2=%s r3=%s r4=%s",
-                        tostring(ok), type(r1), tostring(r1):sub(1,40),
+                        tostring(ok), type(r1), tostring(r1):sub(1,200),
                         tostring(r2):sub(1,30), tostring(r3):sub(1,20), tostring(r4):sub(1,20))
                     lastRaw = raw
-                    -- Lenient success: r1 == true, OR (ok AND nothing returned), OR r1 is a non-nil non-false value (string id?)
                     local isSuccess = (ok and r1 == true)
-                        or (ok and r1 == nil and r2 == nil)  -- server may return nothing on success
+                        or (ok and r1 == nil and r2 == nil)
                         or (ok and type(r1) == "string" and not r1:lower():find("error") and not r1:lower():find("fail") and not r1:lower():find("not"))
                     if isSuccess then
                         success = true
-                        L("[Pantau] ✅ "..a.label.." → "..tostring(a.arg):sub(1,20).." | "..raw)
+                        L("[Pantau] ✅ "..a.label.." → "..tostring(a.args[1]):sub(1,20).." | "..raw)
                         break
                     else
                         L("[Pantau] ✗ "..a.label..": "..raw)
@@ -3022,47 +3041,59 @@ do
                 local bracedListing = "{"..cleanListing.."}"
                 local cleanItem = itemId and tostring(itemId):gsub("[{}]","") or nil
                 local bracedItem = itemId and ("{"..(cleanItem or "").."}") or nil
+                local boothUuid = BH.myBoothUuid and tostring(BH.myBoothUuid):gsub("[{}]","") or nil
+                local bracedBooth = boothUuid and ("{"..boothUuid.."}") or nil
 
+                -- v8.138: tambah banyak format + booth+listing combos
                 local attempts = {
-                    {label="listing-clean", arg=cleanListing},
-                    {label="listing-braced", arg=bracedListing},
+                    {label="listing-clean", args={cleanListing}},
+                    {label="listing-braced", args={bracedListing}},
                 }
                 if cleanItem then
-                    table.insert(attempts, {label="item-clean", arg=cleanItem})
-                    table.insert(attempts, {label="item-braced", arg=bracedItem})
+                    table.insert(attempts, {label="item-clean", args={cleanItem}})
+                    table.insert(attempts, {label="item-braced", args={bracedItem}})
                 end
+                if boothUuid then
+                    table.insert(attempts, {label="booth+listing-clean", args={boothUuid, cleanListing}})
+                    table.insert(attempts, {label="booth+listing-braced", args={bracedBooth, bracedListing}})
+                end
+                table.insert(attempts, {label="tbl-listing", args={{Listing=cleanListing}}})
+                table.insert(attempts, {label="tbl-listingUuid", args={{ListingUuid=cleanListing}}})
 
                 local success = false
                 local lastErr = nil
                 local isRateLimit = false
 
                 for _, a in ipairs(attempts) do
-                    -- v8.105: capture all return values + lenient success detection
-                    local ok, r1, r2, r3, r4 = pcall(function() return removeRE:InvokeServer(a.arg) end)
+                    -- v8.138: support both InvokeServer & FireServer + full error log
+                    local ok, r1, r2, r3, r4
+                    if removeRE:IsA("RemoteFunction") then
+                        ok, r1, r2, r3, r4 = pcall(function() return removeRE:InvokeServer(unpack(a.args)) end)
+                    else
+                        ok, r1 = pcall(function() removeRE:FireServer(unpack(a.args)); return true end)
+                    end
                     local raw = string.format("ok=%s r1=%s(%s) r2=%s r3=%s",
-                        tostring(ok), type(r1), tostring(r1):sub(1,40),
+                        tostring(ok), type(r1), tostring(r1):sub(1,200),
                         tostring(r2):sub(1,30), tostring(r3):sub(1,20))
                     local isSuccess = (ok and r1 == true)
                         or (ok and r1 == nil and r2 == nil)
                         or (ok and type(r1) == "string" and not r1:lower():find("error") and not r1:lower():find("fail"))
                     if isSuccess then
                         success = true
-                        L("[Unlist-ALL] ["..i.."] ✅ "..a.label.." → "..tostring(a.arg):sub(1,16).." | "..raw)
+                        L("[Unlist-ALL] ["..i.."] ✅ "..a.label.." → "..tostring(a.args[1]):sub(1,16).." | "..raw)
                         break
                     end
-                    -- track last error for diagnostics
                     if ok then
                         lastErr = tostring(r1)
                     else
                         lastErr = "pcall_fail:"..tostring(r1)
                     end
                     L("[Unlist-ALL] ["..i.."] ✗ "..a.label..": "..raw)
-                    -- detect rate-limit in error message
                     local lowErr = (lastErr or ""):lower()
                     if lowErr:find("please wait") or lowErr:find("cooldown") or lowErr:find("too fast")
                        or lowErr:find("rate") then
                         isRateLimit = true
-                        break  -- stop trying other formats, all akan fail
+                        break
                     end
                     task.wait(0.2)
                 end
@@ -4178,6 +4209,21 @@ if not removeRE then
         L("[Init] ❌❌❌ removeRE bener-bener gak ada di RS. Coba pake TBC method.")
     end
 end
+
+-- v8.138: dump info removeRE + TBC methods buat debug unlist
+task.spawn(function()
+    task.wait(3)
+    if removeRE then
+        L("[Init] ✅ removeRE: "..removeRE.ClassName.." @ "..removeRE:GetFullName())
+    end
+    if BH.TBC then
+        local methods = {}
+        for k, v in pairs(BH.TBC) do
+            if type(v) == "function" then table.insert(methods, k) end
+        end
+        L("[Init] TBC methods ("..#methods.."): "..table.concat(methods, ", "):sub(1, 300))
+    end
+end)
 local skinRE
 pcall(function() skinRE = RS.GameEvents.TradeBoothSkinService.Equip end)
 
