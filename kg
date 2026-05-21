@@ -1,0 +1,291 @@
+-- ============================================================
+-- ZENX KG STATS v1.1 (minimal)
+-- Cuma show TOTAL / KG 60+ / KG 60- — no table, no search
+-- Data via getgc memory container
+-- Scope: backpack only — Auto-refresh 5 detik
+-- ============================================================
+
+local Players    = game:GetService("Players")
+local CoreGui    = game:GetService("CoreGui")
+local player     = Players.LocalPlayer
+local playerGui  = player:WaitForChild("PlayerGui", 10)
+local VER = "v1.1"
+local KG_THRESHOLD = 60
+
+-- ===== CLEANUP =====
+local function cleanup()
+    for _, p in ipairs({playerGui, CoreGui}) do
+        for _, c in ipairs(p:GetChildren()) do
+            if c.Name == "ZenxKgStats" then pcall(function() c:Destroy() end) end
+        end
+    end
+    pcall(function()
+        if gethui then
+            for _, c in ipairs(gethui():GetChildren()) do
+                if c.Name == "ZenxKgStats" then c:Destroy() end
+            end
+        end
+    end)
+end
+cleanup()
+
+-- ============================================================
+-- MEMORY CONTAINER
+-- ============================================================
+local function findMemoryContainer()
+    if not getgc then return nil, 0 end
+    local best, bestCount = nil, 0
+    pcall(function()
+        for _, obj in pairs(getgc(true)) do
+            if type(obj) == "table" then
+                local uuidLike = 0
+                for k in pairs(obj) do
+                    if type(k) == "string" and #k >= 32 and k:find("-") then
+                        uuidLike = uuidLike + 1
+                        if uuidLike >= 5 then break end
+                    end
+                end
+                if uuidLike >= 5 then
+                    local sample = nil
+                    for _, v in pairs(obj) do sample = v; break end
+                    if type(sample) == "table" and rawget(sample, "PetData") then
+                        local cnt = 0
+                        for _ in pairs(obj) do cnt = cnt + 1 end
+                        if cnt > bestCount then best = obj; bestCount = cnt end
+                    end
+                end
+            end
+        end
+    end)
+    return best, bestCount
+end
+
+local function getDisplayKg(container, uuid)
+    if not container or not uuid then return 0 end
+    local key = tostring(uuid)
+    if key:sub(1,1) ~= "{" then key = "{"..key.."}" end
+    local entry = container[key]
+    if type(entry) == "table" and entry.PetData then
+        local bw = tonumber(entry.PetData.BaseWeight) or 0
+        local lvl = tonumber(entry.PetData.Level) or 0
+        return bw * (10 + lvl) / 10
+    end
+    return 0
+end
+
+local function collectStats(container)
+    local total, above, below = 0, 0, 0
+    local bp = player:FindFirstChild("Backpack")
+    if not bp then return total, above, below end
+    for _, tool in ipairs(bp:GetChildren()) do
+        if tool:IsA("Tool") then
+            local uuid = tool:GetAttribute("PET_UUID")
+            if uuid then
+                local kg = getDisplayKg(container, uuid)
+                if kg >= KG_THRESHOLD then
+                    above = above + 1
+                else
+                    below = below + 1
+                end
+                total = total + 1
+            end
+        end
+    end
+    return total, above, below
+end
+
+-- ============================================================
+-- COLORS
+-- ============================================================
+local C = {
+    BG     = Color3.fromRGB(18, 18, 18),
+    Panel  = Color3.fromRGB(28, 28, 28),
+    Card   = Color3.fromRGB(36, 36, 36),
+    Accent = Color3.fromRGB(255, 200, 0),
+    Text   = Color3.fromRGB(230, 230, 230),
+    Dim    = Color3.fromRGB(140, 140, 140),
+    Green  = Color3.fromRGB(100, 200, 120),
+    Orange = Color3.fromRGB(255, 140, 60),
+    Red    = Color3.fromRGB(220, 80, 80),
+    Blue   = Color3.fromRGB(80, 130, 200),
+}
+
+-- ============================================================
+-- ScreenGui
+-- ============================================================
+local sg = Instance.new("ScreenGui")
+sg.Name = "ZenxKgStats"
+sg.ResetOnSpawn = false
+sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+sg.DisplayOrder = 9999
+local parented = false
+pcall(function() if gethui then sg.Parent = gethui(); parented = true end end)
+if not parented then sg.Parent = playerGui end
+
+-- ============================================================
+-- DIMENSIONS
+-- ============================================================
+local W = 340
+local TITLE_H = 34
+local HEADER_H = 54
+local TOTAL_H = TITLE_H + 8 + HEADER_H + 8
+
+-- ============================================================
+-- MAIN
+-- ============================================================
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, W, 0, TOTAL_H)
+main.Position = UDim2.new(0, 10, 0.5, -TOTAL_H/2)
+main.BackgroundColor3 = C.BG
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.Parent = sg
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+local mainStroke = Instance.new("UIStroke", main)
+mainStroke.Color = C.Accent
+mainStroke.Thickness = 1.5
+
+-- ============================================================
+-- TITLE BAR
+-- ============================================================
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, TITLE_H)
+titleBar.BackgroundColor3 = C.Panel
+titleBar.BorderSizePixel = 0
+titleBar.Parent = main
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
+local tbFix = Instance.new("Frame")
+tbFix.Size = UDim2.new(1, 0, 0, 10)
+tbFix.Position = UDim2.new(0, 0, 1, -10)
+tbFix.BackgroundColor3 = C.Panel
+tbFix.BorderSizePixel = 0
+tbFix.Parent = titleBar
+
+local titleLbl = Instance.new("TextLabel")
+titleLbl.Size = UDim2.new(1, -68, 1, 0)
+titleLbl.Position = UDim2.new(0, 12, 0, 0)
+titleLbl.BackgroundTransparency = 1
+titleLbl.Text = "⚡ ZENX KG STATS "..VER
+titleLbl.TextColor3 = C.Accent
+titleLbl.Font = Enum.Font.GothamBold
+titleLbl.TextSize = 13
+titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+titleLbl.Parent = titleBar
+
+local function mkTitleBtn(x, txt, color, txtColor)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, 26, 0, 22)
+    b.Position = UDim2.new(1, x, 0.5, -11)
+    b.BackgroundColor3 = color
+    b.Text = txt b.TextColor3 = txtColor or Color3.new(1,1,1)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 14
+    b.BorderSizePixel = 0
+    b.AutoButtonColor = false
+    b.Parent = titleBar
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+    return b
+end
+
+local minBtn   = mkTitleBtn(-62, "—", C.Blue)
+local closeBtn = mkTitleBtn(-32, "✕", C.Red)
+closeBtn.MouseButton1Click:Connect(function() sg:Destroy() end)
+
+-- ============================================================
+-- HEADER STATS
+-- ============================================================
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, -16, 0, HEADER_H)
+header.Position = UDim2.new(0, 8, 0, TITLE_H + 8)
+header.BackgroundColor3 = C.Card
+header.BorderSizePixel = 0
+header.Parent = main
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 6)
+
+local function mkStat(parent, x, w, labelText, valColor)
+    local cell = Instance.new("Frame")
+    cell.Size = UDim2.new(w, 0, 1, 0)
+    cell.Position = UDim2.new(x, 0, 0, 0)
+    cell.BackgroundTransparency = 1
+    cell.Parent = parent
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, 0, 0, 16)
+    t.Position = UDim2.new(0, 0, 0, 6)
+    t.BackgroundTransparency = 1
+    t.Text = labelText t.TextColor3 = C.Dim
+    t.Font = Enum.Font.Gotham t.TextSize = 10
+    t.Parent = cell
+    local v = Instance.new("TextLabel")
+    v.Size = UDim2.new(1, 0, 0, 28)
+    v.Position = UDim2.new(0, 0, 0, 22)
+    v.BackgroundTransparency = 1
+    v.Text = "0" v.TextColor3 = valColor or C.Text
+    v.Font = Enum.Font.GothamBold v.TextSize = 18
+    v.Parent = cell
+    return v
+end
+local totalVal = mkStat(header, 0,    0.33, "TOTAL",                C.Text)
+local aboveVal = mkStat(header, 0.33, 0.33, "KG "..KG_THRESHOLD.."+", C.Green)
+local belowVal = mkStat(header, 0.66, 0.33, "KG "..KG_THRESHOLD.."-", C.Orange)
+
+-- ============================================================
+-- RENDER
+-- ============================================================
+local cachedContainer, cachedCount = nil, 0
+
+local function render()
+    local total, above, below = collectStats(cachedContainer)
+    totalVal.Text = tostring(total)
+    aboveVal.Text = tostring(above)
+    belowVal.Text = tostring(below)
+end
+
+-- ============================================================
+-- FLOATING LOGO + MINIMIZE
+-- ============================================================
+local zLogo = Instance.new("TextButton")
+zLogo.Size = UDim2.new(0, 42, 0, 42)
+zLogo.Position = UDim2.new(0, 10, 0.5, -21)
+zLogo.BackgroundColor3 = C.Accent
+zLogo.Text = "⚖" zLogo.TextColor3 = Color3.new(0,0,0)
+zLogo.Font = Enum.Font.GothamBold zLogo.TextSize = 22
+zLogo.BorderSizePixel = 0
+zLogo.AutoButtonColor = false
+zLogo.Active = true
+zLogo.Draggable = true
+zLogo.Visible = false
+zLogo.Parent = sg 
+Instance.new("UICorner", zLogo).CornerRadius = UDim.new(1, 0)
+local zStroke = Instance.new("UIStroke", zLogo)
+zStroke.Color = Color3.new(0,0,0) zStroke.Thickness = 1.5
+
+minBtn.MouseButton1Click:Connect(function()
+    main.Visible = false
+    zLogo.Visible = true
+end)
+zLogo.MouseButton1Click:Connect(function()
+    main.Visible = true
+    zLogo.Visible = false
+end)
+
+-- ============================================================
+-- INIT + AUTO-REFRESH
+-- ============================================================
+cachedContainer, cachedCount = findMemoryContainer()
+print("[ZenxKgStats] memContainer: "..(cachedContainer and cachedCount.." entries" or "FAIL"))
+print("[ZenxKgStats] threshold: "..KG_THRESHOLD.."kg")
+
+render()
+
+task.spawn(function()
+    while sg.Parent do
+        task.wait(5)
+        if not sg.Parent then break end
+        local nc, ncnt = findMemoryContainer()
+        if nc and ncnt > 0 then cachedContainer = nc; cachedCount = ncnt end
+        render()
+    end
+end)
+
+print("[ZenxKgStats] "..VER.." loaded")
