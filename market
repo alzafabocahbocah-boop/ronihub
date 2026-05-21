@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.149"
-local VERSION_DATE = "v8.149: GARDEN font lebih gede lagi (13→15) + row 26→32. Tabs ALL/60kg+/60kg- udah ada di v8.148 (age-1 BaseWeight basis)"
+local VERSION = "8.150"
+local VERSION_DATE = "v8.150: FIX auto-clean KG basis (BaseWeight × 1.1 age-1 normalized, sesuai rule) + strip mutation prefix dari pet type + SAFETY GUARD abort kalo 100% non-match"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -2338,16 +2338,19 @@ do
         local data = BH.fetchBoothData(player)
         if not data or not data.Listings then return 0, 0, "no booth data" end
 
-        -- v8.146: Group listings by matching rule index, then cap by maxListings
+        -- v8.150: Group listings by matching rule index, then cap by maxListings
+        -- FIX: KG basis age-1 (×1.1), strip mutation prefix dari pType
         local function findMatchingRuleIdx(listing, item)
             if not item or not item.PetData then return nil end
-            local pType = tostring(item.PetType or "")
+            local rawType = tostring(item.PetType or "")
+            local pType = (BH.getBaseName and rawType ~= "") and BH.getBaseName(rawType) or rawType
             local pd = item.PetData
-            local kg = BH.computeBaseKgFromPetData(pd)
+            local bw = tonumber(pd.BaseWeight) or 0
+            local ageOneKg = bw * 1.1   -- age-1 normalized (cocok dgn rule input)
             local price = tonumber(listing.Price) or 0
             for idx, r in ipairs(listingRules) do
-                local typeOk = (r.type == pType or r.type == "All" or not r.type or r.type == "")
-                local kgOk = kg >= (r.min or 0) and kg <= (r.max or math.huge)
+                local typeOk = (r.type == pType or r.type == rawType or r.type == "All" or not r.type or r.type == "")
+                local kgOk = ageOneKg >= (r.min or 0) and ageOneKg <= (r.max or math.huge)
                 local priceOk = price == (r.price or 0)
                 if typeOk and kgOk and priceOk then return idx end
             end
@@ -2395,6 +2398,26 @@ do
 
         L(string.format("[Auto-Clean] scan: total=%d, non-match=%d, excess=%d, will unlist=%d",
             totalListings, #nonMatching, excessCount, #toUnlist))
+
+        -- v8.150: SAFETY GUARD — kalo 100% listing classified non-match, abort.
+        -- Itu hampir pasti bug (KG mismatch atau pet type wrong), bukan keadaan asli
+        if totalListings > 0 and #nonMatching == totalListings and #listingRules > 0 then
+            L("[Auto-Clean] ⚠⚠⚠ SEMUA listing classified non-match — kemungkinan bug match logic, ABORT")
+            -- log sample rule + sample listing untuk diagnose
+            local sampleRule = listingRules[1]
+            L("[Auto-Clean] sample rule: type='"..tostring(sampleRule.type).."' min="..tostring(sampleRule.min).." max="..tostring(sampleRule.max).." price="..tostring(sampleRule.price))
+            for listingUuid, listing in pairs(data.Listings) do
+                if listing.ItemType == "Pet" and listing.ItemId then
+                    local item = data.Items and data.Items[listing.ItemId]
+                    if item and item.PetData then
+                        local bw = tonumber(item.PetData.BaseWeight) or 0
+                        L("[Auto-Clean] sample listing: type='"..tostring(item.PetType).."' BW="..bw.." → age1Kg="..(bw*1.1).." price="..tostring(listing.Price))
+                        break
+                    end
+                end
+            end
+            return 0, 0, "SAFETY ABORT — 100% non-match"
+        end
 
         if #toUnlist == 0 then return 0, totalListings - #nonMatching, "all OK" end
 
