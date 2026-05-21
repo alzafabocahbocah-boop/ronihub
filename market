@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.130"
-local VERSION_DATE = "v8.130: Fix keyboard close di LIST HARGA (in-place refresh) + persist listing inputs"
+local VERSION = "8.131"
+local VERSION_DATE = "v8.131: CRITICAL FIX — saveMarketState({myBoothUuid}) was WIPING all other state. Now properly merges."
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -742,7 +742,10 @@ do
             local clean = tostring(data.Booth):gsub("[{}]", "")
             if clean ~= "" then
                 BH.myBoothUuid = clean
-                pcall(function() BH.saveMarketState({myBoothUuid = clean}) end)
+                -- v8.131 CRITICAL FIX: merge ke marketState, JANGAN replace
+                -- sebelumnya: saveMarketState({myBoothUuid=clean}) → WIPE semua state lain
+                BH.marketState.myBoothUuid = clean
+                pcall(function() BH.saveMarketState(BH.marketState) end)
                 return clean
             end
         end
@@ -2725,7 +2728,9 @@ do
         -- Save booth UUID
         local clean = tostring(boothUuid):gsub("[{}]","")
         BH.myBoothUuid = clean
-        pcall(function() BH.saveMarketState({myBoothUuid = clean}) end)
+        -- v8.131: merge, don't replace
+        BH.marketState.myBoothUuid = clean
+        pcall(function() BH.saveMarketState(BH.marketState) end)
 
         -- Collect listings
         local listings = {}
