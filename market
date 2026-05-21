@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.135"
-local VERSION_DATE = "v8.135: CRITICAL FIX auto-start watchdog — sg.Parent → gui.Parent (sg undefined, loop never started)"
+local VERSION = "8.136"
+local VERSION_DATE = "v8.136: Aggressive logging buat verify watchdog spawn + lower wait 8s → 4s"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -8008,34 +8008,32 @@ task.spawn(function()
 end)
 
 -- v8.48: AUTO-START
--- v8.133: Continuous watchdog — bisa fire kapan aja, bahkan kalau toggle ON setelah init
+-- v8.136: log spawn IMMEDIATELY biar tau task.spawn reached, lower wait 8s → 4s
+L("🚀 [Auto-Start] spawning watchdog...")
 task.spawn(function()
-    task.wait(8)  -- initial delay biar state + rules loaded
-    L("")
-    L("🚀 [Auto-Start] watchdog started — checking every 10s")
-    local firedThisSession = false  -- biar gak spam fire
+    L("🚀 [Auto-Start] watchdog task entered, waiting 4s...")
+    task.wait(4)
+    L("🚀 [Auto-Start] watchdog ACTIVE — checking every 5s")
+    L("🚀 [Auto-Start] initial state: autoStart="..tostring(BH.autoStart)..", rules="..#listingRules..", running="..tostring(isRunning))
+    local firedThisSession = false
     while gui.Parent do
         if BH.autoStart and #listingRules > 0 and not isRunning and not firedThisSession then
-            L("🚀 [Auto-Start] conditions met (autoStart=ON, rules="..#listingRules..") — firing in 3s...")
-            task.wait(3)
+            L("🚀 [Auto-Start] FIRING (autoStart=ON, rules="..#listingRules..")")
+            task.wait(2)
             if not isRunning and BH.autoStart then
-                L("🚀 [Auto-Start] calling onStartClick()")
                 local ok, err = pcall(BH.onStartClick)
                 if ok then
+                    L("🚀 [Auto-Start] onStartClick() called — OK")
                     firedThisSession = true
                 else
                     L("✗ [Auto-Start] FAIL: "..tostring(err))
                 end
             end
         end
-        -- Reset firedThisSession kalo listing udah STOP (biar bisa auto-restart kalo nyala lagi)
-        if not isRunning and firedThisSession then
-            -- udah pernah fired, tunggu user manual restart atau next session
-        end
-        -- Kalau user matikan Auto-Start, reset flag
         if not BH.autoStart then
             firedThisSession = false
         end
-        task.wait(10)
+        task.wait(5)
     end
+    L("🚀 [Auto-Start] watchdog EXITED (gui destroyed)")
 end)
