@@ -10,7 +10,7 @@ local CoreGui    = game:GetService("CoreGui")
 local HS         = game:GetService("HttpService")
 local player     = Players.LocalPlayer
 local playerGui  = player:WaitForChild("PlayerGui", 10)
-local VER = "v1.3"
+local VER = "v1.4"
 local KG_THRESHOLD = 60
 local SETTINGS_FILE = "ZenxKgStats_settings.json"
 
@@ -130,21 +130,22 @@ local function collectStats(container)
         if tool:IsA("Tool") then
             local uuid = tool:GetAttribute("PET_UUID")
             if uuid then
-                -- Apply pet type filter if any
+                local skip = false
                 if hasFilter then
                     local pType = stripMutation(tostring(tool:GetAttribute("f") or "?"))
-                    if not selectedPetTypes[pType] then goto continue end
+                    if not selectedPetTypes[pType] then skip = true end
                 end
-                local kg = getDisplayKg(container, uuid)
-                if kg >= KG_THRESHOLD then
-                    above = above + 1
-                else
-                    below = below + 1
+                if not skip then
+                    local kg = getDisplayKg(container, uuid)
+                    if kg >= KG_THRESHOLD then
+                        above = above + 1
+                    else
+                        below = below + 1
+                    end
+                    total = total + 1
                 end
-                total = total + 1
             end
         end
-        ::continue::
     end
     return total, above, below
 end
