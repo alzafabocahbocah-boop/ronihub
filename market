@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.136"
-local VERSION_DATE = "v8.136: Aggressive logging buat verify watchdog spawn + lower wait 8s → 4s"
+local VERSION = "8.137"
+local VERSION_DATE = "v8.137: CRITICAL FIX populateModalList nil crash di line 8001 → kill watchdog auto-start. pcall wrap"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -7997,14 +7997,15 @@ BH.buildGardenPanel = function()
 end
 
 -- v8.49: build garden panel after all helpers defined
-BH.buildGardenPanel()
+pcall(BH.buildGardenPanel)
 
-populateModalList()
-refreshPriceList()
-refreshBackpackStats()  -- initial stats load
+-- v8.137: wrap di pcall — populateModalList scoped di do-block, refreshPriceList/refreshBackpackStats juga bisa nil. Crash di sini = kill watchdog
+pcall(function() if populateModalList then populateModalList() end end)
+pcall(function() if refreshPriceList then refreshPriceList() end end)
+pcall(function() if refreshBackpackStats then refreshBackpackStats() end end)
 task.spawn(function()
     task.wait(1)
-    tryClaim()
+    pcall(tryClaim)
 end)
 
 -- v8.48: AUTO-START
