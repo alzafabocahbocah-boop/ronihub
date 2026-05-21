@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.126"
-local VERSION_DATE = "State save diag + remove 'All Pet Types' + guard ADD button (wajib pilih pet)"
+local VERSION = "8.129"
+local VERSION_DATE = "Guard START button — wajib ada rule LIST HARGA sebelum bisa start"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -143,6 +143,29 @@ do
     -- v8.70: load anti-afk pref dari state (default true kalo gak ada)
     if BH.marketState.antiAfkEnabled ~= nil then
         antiAfkEnabled = BH.marketState.antiAfkEnabled
+    end
+
+    -- v8.127: centralized settings save — semua input/toggle bisa persist
+    BH.marketState.settings = BH.marketState.settings or {}
+    function BH.getSetting(key, default) return BH.marketState.settings[key] ~= nil and BH.marketState.settings[key] or default end
+    function BH.setSetting(key, val)
+        BH.marketState.settings[key] = val
+        BH.saveMarketState(BH.marketState)
+    end
+    -- Auto-bind a TextBox to persist its value on FocusLost
+    function BH.bindInput(box, key)
+        local saved = BH.getSetting(key, nil)
+        if saved ~= nil then box.Text = tostring(saved) end
+        box.FocusLost:Connect(function() BH.setSetting(key, box.Text) end)
+    end
+    -- Auto-bind a toggle handle (from addToggleRow) — needs handle to expose .set()
+    function BH.bindToggle(handle, key)
+        local saved = BH.getSetting(key, nil)
+        if saved ~= nil and handle.set then handle.set(saved == true) end
+        -- Wrap getter: each click → save
+        local origGet = handle.get
+        handle.get = function() return origGet() end
+        if handle.onChange then handle.onChange(function(v) BH.setSetting(key, v) end) end
     end
 end
 
@@ -1710,13 +1733,14 @@ BH.refreshPriceCounts = function()
 end
 
 addRuleBtn.MouseButton1Click:Connect(function()
-    -- v8.125: guard — wajib pilih pet
-    if not selectedType then
-        L("[Rule] ⚠️ Pilih pet type dulu sebelum add rule")
+    local picked = {}
+    for k in pairs(BH.selectedTypes) do table.insert(picked, k) end
+    if #picked == 0 then
         typeDropLbl.Text = "⚠️ Pilih pet dulu!"
         typeDropLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
         task.delay(2, function()
-            if not selectedType then
+            local cnt = 0; for _ in pairs(BH.selectedTypes) do cnt = cnt + 1 end
+            if cnt == 0 then
                 typeDropLbl.Text = "Pilih Pet Type..."
                 typeDropLbl.TextColor3 = C.text
             end
@@ -1727,21 +1751,22 @@ addRuleBtn.MouseButton1Click:Connect(function()
     local maxKg = tonumber(maxKgBox.Text) or math.huge
     local price = tonumber(priceBox.Text) or 100
     local maxList = tonumber(maxListBox.Text) or math.huge
-    table.insert(listingRules, {
-        type = selectedType,
-        min = minKg,
-        max = maxKg,
-        price = price,
-        maxListings = maxList,
-    })
+    table.sort(picked)
+    for _, petName in ipairs(picked) do
+        table.insert(listingRules, {
+            type = petName, min = minKg, max = maxKg,
+            price = price, maxListings = maxList,
+        })
+    end
     rebuildRulesUI()
     BH.marketState.listingRules = listingRules
     BH.saveMarketState(BH.marketState)
-    L("[State] saved "..#listingRules.." rule(s)")
+    L("[State] saved "..#listingRules.." rule(s) (added "..#picked..")")
     minKgBox.Text = ""
     maxKgBox.Text = ""
     priceBox.Text = ""
     maxListBox.Text = ""
+    BH.selectedTypes = {}
     selectedType = nil
     typeDropLbl.Text = "Pilih Pet Type..."
     lhTypeDropLbl.Text = "Pilih Pet Type..."
@@ -1749,11 +1774,14 @@ end)
 
 -- List Harga add rule (same flow)
 lhAddBtn.MouseButton1Click:Connect(function()
-    if not selectedType then
+    local picked = {}
+    for k in pairs(BH.selectedTypes) do table.insert(picked, k) end
+    if #picked == 0 then
         lhTypeDropLbl.Text = "⚠️ Pilih pet dulu!"
         lhTypeDropLbl.TextColor3 = Color3.fromRGB(255, 120, 120)
         task.delay(2, function()
-            if not selectedType then
+            local cnt = 0; for _ in pairs(BH.selectedTypes) do cnt = cnt + 1 end
+            if cnt == 0 then
                 lhTypeDropLbl.Text = "Pilih Pet Type..."
                 lhTypeDropLbl.TextColor3 = C.text
             end
@@ -1764,21 +1792,22 @@ lhAddBtn.MouseButton1Click:Connect(function()
     local maxKg = tonumber(lhMaxKgBox.Text) or math.huge
     local price = tonumber(lhPriceBox.Text) or 100
     local maxList = tonumber(lhMaxListBox.Text) or math.huge
-    table.insert(listingRules, {
-        type = selectedType,
-        min = minKg,
-        max = maxKg,
-        price = price,
-        maxListings = maxList,
-    })
+    table.sort(picked)
+    for _, petName in ipairs(picked) do
+        table.insert(listingRules, {
+            type = petName, min = minKg, max = maxKg,
+            price = price, maxListings = maxList,
+        })
+    end
     rebuildRulesUI()
     BH.marketState.listingRules = listingRules
     BH.saveMarketState(BH.marketState)
-    L("[State] saved "..#listingRules.." rule(s)")
+    L("[State] saved "..#listingRules.." rule(s) (added "..#picked..")")
     lhMinKgBox.Text = ""
     lhMaxKgBox.Text = ""
     lhPriceBox.Text = ""
     lhMaxListBox.Text = ""
+    BH.selectedTypes = {}
     selectedType = nil
     typeDropLbl.Text = "Pilih Pet Type..."
     lhTypeDropLbl.Text = "Pilih Pet Type..."
@@ -1931,11 +1960,19 @@ local function addToggleRow(parent, label, defaultState)
     btn.Size = UDim2.new(1, 0, 1, 0) btn.BackgroundTransparency = 1
     btn.Text = "" btn.AutoButtonColor = false btn.Parent = tBg
     local state = defaultState
-    local handle = {get = function() return state end}
+    local listeners = {}
+    local handle = {
+        get = function() return state end,
+        set = function(v)
+            state = v and true or false
+            tBg.BackgroundColor3 = state and C.accent or C.input
+            knob.Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+        end,
+        onChange = function(fn) table.insert(listeners, fn) end,
+    }
     btn.MouseButton1Click:Connect(function()
-        state = not state
-        tBg.BackgroundColor3 = state and C.accent or C.input
-        knob.Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+        handle.set(not state)
+        for _, fn in ipairs(listeners) do pcall(fn, state) end
     end)
     return handle
 end
@@ -1975,6 +2012,11 @@ end)
 local autoRejoinToggle = addToggleRow(rejBody, "Auto Rejoin (interval)", false)
 local rejoinBtn = addButtonRow(rejBody, "🔄 REJOIN NOW", C.accent)
 
+-- v8.127: bind rejoin settings to persist
+BH.bindInput(intervalBox, "rejoinIntervalMin")
+BH.bindInput(listingBox, "rejoinAfterListings")
+BH.bindToggle(autoRejoinToggle, "autoRejoinEnabled")
+
 -- ===== Section 2: Hop Server =====
 local hopBody = makeCollapsibleCard(rejoinScroll, "Hop Server (cari server lain)", false)
 addReadOnlyRow(hopBody, "Current Players", function()
@@ -1990,6 +2032,15 @@ local hopForeignToggle = addToggleRow(hopBody, "Skip server kalau banyak Indo", 
 local autoHopToggle = addToggleRow(hopBody, "Auto Hop Server", false)
 local hopNowBtn = addButtonRow(hopBody, "🔀 HOP NOW", C.accent)
 local hopScanBtn = addButtonRow(hopBody, "🔍 SCAN PLAYER SEKARANG", C.card)
+
+-- v8.127: bind hop settings to persist
+BH.bindInput(hopAutoMinBox, "hopAutoMin")
+BH.bindInput(hopMinPlayersBox, "hopMinPlayers")
+BH.bindInput(hopMaxPlayersBox, "hopMaxPlayers")
+BH.bindInput(hopTargetBox, "hopTarget")
+BH.bindInput(hopDelayBox, "hopDelay")
+BH.bindToggle(hopForeignToggle, "hopForeign")
+BH.bindToggle(autoHopToggle, "autoHopEnabled")
 
 -- For backward compat - autoRejoinBox alias + hopMinBox alias
 local autoRejoinBox = listingBox
@@ -3275,6 +3326,7 @@ do
 
     BH.autoSnipe.typeInput = petTypeBtn
     BH.autoSnipe.pickedPetType = ""
+    BH.autoSnipe.selectedTypes = BH.autoSnipe.selectedTypes or {}  -- v8.127: multi-select set
     local function setPetType(val)
         BH.autoSnipe.pickedPetType = val or ""
         if val and val ~= "" then
@@ -3286,6 +3338,29 @@ do
         end
     end
     BH.autoSnipe.setPetType = setPetType
+    -- v8.127: update label based on multi-select state
+    local function updateSnipeLabel()
+        local cnt = 0
+        local first = nil
+        for k in pairs(BH.autoSnipe.selectedTypes) do
+            cnt = cnt + 1
+            if not first then first = k end
+        end
+        if cnt == 0 then
+            petTypeBtn.Text = "🐾 Tap to pick"
+            petTypeBtn.TextColor3 = C.textDim
+            BH.autoSnipe.pickedPetType = ""
+        elseif cnt == 1 then
+            petTypeBtn.Text = first
+            petTypeBtn.TextColor3 = C.text
+            BH.autoSnipe.pickedPetType = first
+        else
+            petTypeBtn.Text = first.." +"..(cnt-1)
+            petTypeBtn.TextColor3 = C.text
+            BH.autoSnipe.pickedPetType = first
+        end
+    end
+    BH.autoSnipe.updateLabel = updateSnipeLabel
 
     BH.autoSnipe.kgInput = makeAutoInput(0.45, 0.25, "Max KG")
     BH.autoSnipe.priceInput = makeAutoInput(0.70, 0.30, "💰 Max Price")
@@ -3315,6 +3390,20 @@ do
     pickerHeader.Font = FB pickerHeader.TextSize = 12
     pickerHeader.TextXAlignment = Enum.TextXAlignment.Left
     pickerHeader.ZIndex = 51 pickerHeader.Parent = petPicker
+
+    -- v8.127: DONE button (multi-select)
+    local pickerDoneBtn = Instance.new("TextButton")
+    pickerDoneBtn.Size = UDim2.new(0, 60, 0, 24)
+    pickerDoneBtn.Position = UDim2.new(1, -94, 0, 4)
+    pickerDoneBtn.BackgroundColor3 = C.accent
+    pickerDoneBtn.Text = "✓ DONE" pickerDoneBtn.TextColor3 = Color3.new(0, 0, 0)
+    pickerDoneBtn.Font = FB pickerDoneBtn.TextSize = 10
+    pickerDoneBtn.BorderSizePixel = 0
+    pickerDoneBtn.ZIndex = 51 pickerDoneBtn.Parent = petPicker
+    Instance.new("UICorner", pickerDoneBtn).CornerRadius = UDim.new(0, 4)
+    pickerDoneBtn.MouseButton1Click:Connect(function()
+        petPicker.Visible = false
+    end)
 
     local pickerCloseBtn = Instance.new("TextButton")
     pickerCloseBtn.Size = UDim2.new(0, 24, 0, 24)
@@ -3418,19 +3507,26 @@ do
         table.sort(list)
 
         for _, name in ipairs(list) do
+            local sel = BH.autoSnipe.selectedTypes[name] == true
             local row = Instance.new("TextButton")
             row.Size = UDim2.new(1, -8, 0, 26)
-            row.BackgroundColor3 = C.input
-            row.Text = "  "..name
-            row.TextColor3 = C.text
-            row.Font = F row.TextSize = 11
+            row.BackgroundColor3 = sel and C.accent or C.input
+            row.Text = (sel and "✓ " or "  ")..name
+            row.TextColor3 = sel and Color3.new(0,0,0) or C.text
+            row.Font = sel and FB or F
+            row.TextSize = 11
             row.TextXAlignment = Enum.TextXAlignment.Left
             row.BorderSizePixel = 0
             row.ZIndex = 52 row.Parent = pickerScroll
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
             row.MouseButton1Click:Connect(function()
-                setPetType(name)
-                petPicker.Visible = false
+                if BH.autoSnipe.selectedTypes[name] then
+                    BH.autoSnipe.selectedTypes[name] = nil
+                else
+                    BH.autoSnipe.selectedTypes[name] = true
+                end
+                updateSnipeLabel()
+                populatePicker(pickerSearch.Text)
             end)
         end
 
@@ -3501,7 +3597,7 @@ do
     BH.autoSnipe.layout = layout
 
     -- Rebuild rules UI
-    local function rebuildAutoSnipeRules()
+    BH.autoSnipe.rebuildRules = function()
         for _, c in ipairs(BH.autoSnipe.scroll:GetChildren()) do
             if c:IsA("Frame") then c:Destroy() end
         end
@@ -3513,7 +3609,7 @@ do
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
 
             local info = Instance.new("TextLabel")
-            info.Size = UDim2.new(1, -34, 1, 0) info.Position = UDim2.new(0, 8, 0, 0)
+            info.Size = UDim2.new(1, -60, 1, 0) info.Position = UDim2.new(0, 8, 0, 0)
             info.BackgroundTransparency = 1
             local mutStr = (r.mutation and r.mutation ~= "") and (" ["..r.mutation.."]") or ""
             local kgStr = (r.maxKg and r.maxKg > 0) and (" ≤"..r.maxKg.."kg") or ""
@@ -3526,6 +3622,62 @@ do
             info.TextTruncate = Enum.TextTruncate.AtEnd
             info.Parent = row
 
+            -- v8.127: EDIT button
+            local editBtn = Instance.new("TextButton")
+            editBtn.Size = UDim2.new(0, 24, 0, 22)
+            editBtn.Position = UDim2.new(1, -54, 0.5, -11)
+            editBtn.BackgroundColor3 = C.accent
+            editBtn.Text = "✏️" editBtn.TextColor3 = Color3.new(0,0,0)
+            editBtn.Font = FB editBtn.TextSize = 10
+            editBtn.BorderSizePixel = 0 editBtn.Parent = row
+            Instance.new("UICorner", editBtn).CornerRadius = UDim.new(0, 4)
+            editBtn.MouseButton1Click:Connect(function()
+                -- Inline edit: replace info with input boxes
+                info.Visible = false
+                editBtn.Visible = false
+                local kgEdit = Instance.new("TextBox")
+                kgEdit.Size = UDim2.new(0, 60, 0, 22)
+                kgEdit.Position = UDim2.new(0, 8, 0.5, -11)
+                kgEdit.BackgroundColor3 = C.card
+                kgEdit.Text = tostring(r.maxKg or 0)
+                kgEdit.PlaceholderText = "kg"
+                kgEdit.TextColor3 = C.text kgEdit.Font = F kgEdit.TextSize = 11
+                kgEdit.ClearTextOnFocus = false kgEdit.BorderSizePixel = 0
+                kgEdit.TextXAlignment = Enum.TextXAlignment.Center
+                kgEdit.Parent = row
+                Instance.new("UICorner", kgEdit).CornerRadius = UDim.new(0, 4)
+                local priceEdit = Instance.new("TextBox")
+                priceEdit.Size = UDim2.new(0, 80, 0, 22)
+                priceEdit.Position = UDim2.new(0, 74, 0.5, -11)
+                priceEdit.BackgroundColor3 = C.card
+                priceEdit.Text = tostring(r.maxPrice or 0)
+                priceEdit.PlaceholderText = "price"
+                priceEdit.TextColor3 = C.text priceEdit.Font = F priceEdit.TextSize = 11
+                priceEdit.ClearTextOnFocus = false priceEdit.BorderSizePixel = 0
+                priceEdit.TextXAlignment = Enum.TextXAlignment.Center
+                priceEdit.Parent = row
+                Instance.new("UICorner", priceEdit).CornerRadius = UDim.new(0, 4)
+                local okBtn = Instance.new("TextButton")
+                okBtn.Size = UDim2.new(0, 24, 0, 22)
+                okBtn.Position = UDim2.new(1, -54, 0.5, -11)
+                okBtn.BackgroundColor3 = C.success
+                okBtn.Text = "✓" okBtn.TextColor3 = Color3.new(0,0,0)
+                okBtn.Font = FB okBtn.TextSize = 12
+                okBtn.BorderSizePixel = 0 okBtn.Parent = row
+                Instance.new("UICorner", okBtn).CornerRadius = UDim.new(0, 4)
+                okBtn.MouseButton1Click:Connect(function()
+                    local newKg = tonumber(kgEdit.Text) or r.maxKg
+                    local newPrice = tonumber(priceEdit.Text) or r.maxPrice
+                    BH.autoSnipe.rules[idx].maxKg = newKg
+                    BH.autoSnipe.rules[idx].maxPrice = newPrice
+                    if BH.marketState then
+                        BH.marketState.autoSnipeRules = BH.autoSnipe.rules
+                        pcall(function() BH.saveMarketState(BH.marketState) end)
+                    end
+                    BH.autoSnipe.rebuildRules()
+                end)
+            end)
+
             local delBtn = Instance.new("TextButton")
             delBtn.Size = UDim2.new(0, 24, 0, 22)
             delBtn.Position = UDim2.new(1, -28, 0.5, -11)
@@ -3536,7 +3688,7 @@ do
             Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 4)
             delBtn.MouseButton1Click:Connect(function()
                 table.remove(BH.autoSnipe.rules, idx)
-                rebuildAutoSnipeRules()
+                BH.autoSnipe.rebuildRules()
                 if BH.marketState then
                     BH.marketState.autoSnipeRules = BH.autoSnipe.rules
                     pcall(function() BH.saveMarketState(BH.marketState) end)
@@ -3544,10 +3696,9 @@ do
             end)
         end
         BH.autoSnipe.scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
-    end
-    BH.autoSnipe.rebuildRules = rebuildAutoSnipeRules
+    end -- end BH.autoSnipe.rebuildRules
 
-    -- Add rule handler
+    -- Add rule handler — v8.127: multi-pet loop
     BH.autoSnipe.addBtn.MouseButton1Click:Connect(function()
         local maxPrice = tonumber(BH.autoSnipe.priceInput.Text)
         if not maxPrice or maxPrice <= 0 then
@@ -3555,21 +3706,38 @@ do
             BH.autoSnipe.statusLbl.TextColor3 = C.danger
             return
         end
-        table.insert(BH.autoSnipe.rules, {
-            petType = BH.autoSnipe.pickedPetType or "",
-            mutation = "",  -- v8.90: removed from UI, always match all mutations
-            maxKg = tonumber(BH.autoSnipe.kgInput.Text) or 0,
-            maxPrice = maxPrice,
-        })
+        -- Gather selected pet types
+        local picked = {}
+        for k in pairs(BH.autoSnipe.selectedTypes) do table.insert(picked, k) end
+        if #picked == 0 then
+            -- Fallback: kalo gak ada selection tapi single pickedPetType kosong → wajib pilih
+            if not BH.autoSnipe.pickedPetType or BH.autoSnipe.pickedPetType == "" then
+                BH.autoSnipe.statusLbl.Text = "❌ Pilih pet type dulu"
+                BH.autoSnipe.statusLbl.TextColor3 = C.danger
+                return
+            end
+            picked = {BH.autoSnipe.pickedPetType}
+        end
+        table.sort(picked)
+        local maxKg = tonumber(BH.autoSnipe.kgInput.Text) or 0
+        for _, petName in ipairs(picked) do
+            table.insert(BH.autoSnipe.rules, {
+                petType = petName,
+                mutation = "",
+                maxKg = maxKg,
+                maxPrice = maxPrice,
+            })
+        end
+        BH.autoSnipe.selectedTypes = {}
         BH.autoSnipe.setPetType("")
         BH.autoSnipe.kgInput.Text = ""
         BH.autoSnipe.priceInput.Text = ""
-        rebuildAutoSnipeRules()
+        BH.autoSnipe.rebuildRules()
         if BH.marketState then
             BH.marketState.autoSnipeRules = BH.autoSnipe.rules
             pcall(function() BH.saveMarketState(BH.marketState) end)
         end
-        BH.autoSnipe.statusLbl.Text = "✅ Rule added ("..#BH.autoSnipe.rules.." total)"
+        BH.autoSnipe.statusLbl.Text = "✅ Added "..#picked.." rule(s) ("..#BH.autoSnipe.rules.." total)"
         BH.autoSnipe.statusLbl.TextColor3 = C.success
     end)
 
@@ -3612,7 +3780,7 @@ do
         L("[AutoSnipe] AUTO-RESUMED setelah rejoin dengan "..#BH.autoSnipe.rules.." rule(s)")
     end
 
-    rebuildAutoSnipeRules()
+    BH.autoSnipe.rebuildRules()
 end
 
 -- v8.96: ===== SNIPE HISTORY TAB =====
@@ -4267,91 +4435,134 @@ local function listPet(uuidBraced, price)
     return false, err
 end
 
--- ===== PICKER (modal-based, single select) =====
+-- ===== PICKER (modal-based, MULTI select v8.127) =====
 local KNOWN_PETS = {
     "Peacock","Peryton","Elephant","Mimic Octopus","Bearded Dragon","Griffin","Empress Bee","Echo Frog","Tanuki","Dragonfly","Caterpillar","Snail","Bee","Cat","Dog","Hamster","Rabbit","Fox","Wolf","Bear","Lion","Tiger","Panda","Monkey","Dolphin","Shark","Whale","Octopus","Crab","Lobster","Turtle","Snake","Lizard","Frog","Toad","Chicken","Duck","Goose","Swan","Eagle","Hawk","Owl","Parrot","Penguin","Flamingo","Pelican","Crocodile","Hippo","Giraffe","Zebra","Cheetah","Leopard","Kangaroo","Koala","Sloth","Squirrel","Mole","Mouse","Bat","Pig","Cow","Sheep","Goat","Horse","Llama","Alpaca","Hedgehog","Raccoon","Skunk","Beaver","Spider","Scorpion","Polar Bear","Grizzly Bear","Honey Bee","Bumble Bee","Wasp","Butterfly","Moth","Ladybug","Firefly","Mantis","Toucan","Vulture","Raven","Crow","Sparrow","Robin","Dragon","Phoenix","Unicorn","Pegasus",
 }
--- selectedType already declared above in RULES section
+-- v8.127: multi-select state stored in BH (avoid 200-local limit)
+BH.selectedTypes = BH.selectedTypes or {}
 
-local function scanPetTypes()
-    local types = {}
-    local TW = Workspace:FindFirstChild("TradeWorld")
-    if TW then
-        local Booths = TW:FindFirstChild("Booths")
-        if Booths then
-            for _, b in ipairs(Booths:GetDescendants()) do
-                if b:IsA("Tool") then
-                    local f = b:GetAttribute("f")
-                    if f then types[tostring(f)] = true end
+do
+    -- Add DONE button at top of modal
+    local modalDoneBtn = Instance.new("TextButton")
+    modalDoneBtn.Size = UDim2.new(0, 80, 0, 28)
+    modalDoneBtn.Position = UDim2.new(1, -88, 0, 8)
+    modalDoneBtn.BackgroundColor3 = C.accent
+    modalDoneBtn.BorderSizePixel = 0
+    modalDoneBtn.Text = "✓ DONE"
+    modalDoneBtn.TextColor3 = Color3.new(0, 0, 0)
+    modalDoneBtn.Font = FB
+    modalDoneBtn.TextSize = 12
+    modalDoneBtn.ZIndex = 12
+    modalDoneBtn.Parent = modal
+    Instance.new("UICorner", modalDoneBtn).CornerRadius = UDim.new(0, 5)
+
+    local function updatePickerLabel()
+        local cnt = 0
+        local first = nil
+        for k in pairs(BH.selectedTypes) do
+            cnt = cnt + 1
+            if not first then first = k end
+        end
+        local txt
+        if cnt == 0 then txt = "Pilih Pet Type..."
+        elseif cnt == 1 then txt = first
+        else txt = first.." +"..(cnt-1).." lainnya"
+        end
+        typeDropLbl.Text = txt
+        lhTypeDropLbl.Text = txt
+        typeDropLbl.TextColor3 = C.text
+        lhTypeDropLbl.TextColor3 = C.text
+        selectedType = first  -- legacy single-value compat
+    end
+    BH.updatePickerLabel = updatePickerLabel
+
+    modalDoneBtn.MouseButton1Click:Connect(function()
+        modalOverlay.Visible = false
+    end)
+
+    local function scanPetTypes()
+        local types = {}
+        local TW = Workspace:FindFirstChild("TradeWorld")
+        if TW then
+            local Booths = TW:FindFirstChild("Booths")
+            if Booths then
+                for _, b in ipairs(Booths:GetDescendants()) do
+                    if b:IsA("Tool") then
+                        local f = b:GetAttribute("f")
+                        if f then types[tostring(f)] = true end
+                    end
                 end
             end
         end
-    end
-    local bp = player:FindFirstChild("Backpack")
-    if bp then for _, t in ipairs(bp:GetChildren()) do if isPet(t) then types[getPetType(t)] = true end end end
-    return types
-end
-
-local function populateModalList()
-    for _, c in ipairs(modalList:GetChildren()) do
-        if c:IsA("TextButton") then c:Destroy() end
+        local bp = player:FindFirstChild("Backpack")
+        if bp then for _, t in ipairs(bp:GetChildren()) do if isPet(t) then types[getPetType(t)] = true end end end
+        return types
     end
 
-    local typesMap = {}
-    for _, t in ipairs(KNOWN_PETS) do typesMap[t] = 0 end
-    for t, _ in pairs(scanPetTypes()) do typesMap[t] = 0 end
-    local bp = player:FindFirstChild("Backpack")
-    if bp then for _, t in ipairs(bp:GetChildren()) do
-        if isPet(t) and not isFav(t) then typesMap[getPetType(t)] = (typesMap[getPetType(t)] or 0) + 1 end
-    end end
-
-    local types = {}
-    for t, c in pairs(typesMap) do table.insert(types, {name=t, count=c}) end
-    table.sort(types, function(a, b)
-        if a.count ~= b.count then return a.count > b.count end
-        return a.name < b.name
-    end)
-
-    local sf = string.lower(modalSearch.Text or "")
-
-    local function makeItem(label, value, prefix)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.new(1, -8, 0, 38) b.AutoButtonColor = false
-        b.BackgroundColor3 = C.card b.BorderSizePixel = 0
-        b.Text = label b.TextColor3 = C.text
-        b.Font = FM b.TextSize = 14 b.Parent = modalList
-        b.ZIndex = 12
-        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-        local s = Instance.new("UIStroke", b)
-        s.Color = C.accent s.Thickness = 1
-        s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-        s.Transparency = 0.6
-        b.MouseButton1Click:Connect(function()
-            selectedType = value
-            typeDropLbl.Text = label
-            lhTypeDropLbl.Text = label
-            modalOverlay.Visible = false
-        end)
-    end
-
-    -- v8.125: "All Pet Types" option DIHILANGIN (user pick)
-    -- User HARUS milih pet sebelum bisa add rule
-    -- if sf == "" or string.find("all pet types", sf, 1, true) then
-    --     makeItem("All Pet Types", nil)
-    -- end
-
-    for _, p in ipairs(types) do
-        if sf == "" or string.find(string.lower(p.name), sf, 1, true) then
-            local label = p.name..(p.count > 0 and "  ("..p.count..")" or "")
-            makeItem(label, p.name)
+    local function populateModalList()
+        for _, c in ipairs(modalList:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
         end
+
+        local typesMap = {}
+        for _, t in ipairs(KNOWN_PETS) do typesMap[t] = 0 end
+        for t, _ in pairs(scanPetTypes()) do typesMap[t] = 0 end
+        local bp = player:FindFirstChild("Backpack")
+        if bp then for _, t in ipairs(bp:GetChildren()) do
+            if isPet(t) and not isFav(t) then typesMap[getPetType(t)] = (typesMap[getPetType(t)] or 0) + 1 end
+        end end
+
+        local types = {}
+        for t, c in pairs(typesMap) do table.insert(types, {name=t, count=c}) end
+        table.sort(types, function(a, b)
+            if a.count ~= b.count then return a.count > b.count end
+            return a.name < b.name
+        end)
+
+        local sf = string.lower(modalSearch.Text or "")
+
+        local function makeItem(label, value)
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(1, -8, 0, 38) b.AutoButtonColor = false
+            local sel = BH.selectedTypes[value] == true
+            b.BackgroundColor3 = sel and C.accent or C.card
+            b.BorderSizePixel = 0
+            b.Text = (sel and "✓ " or "  ")..label
+            b.TextColor3 = sel and Color3.new(0,0,0) or C.text
+            b.Font = sel and FB or FM
+            b.TextSize = 14
+            b.TextXAlignment = Enum.TextXAlignment.Left
+            b.Parent = modalList
+            b.ZIndex = 12
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+            local s = Instance.new("UIStroke", b)
+            s.Color = C.accent s.Thickness = 1
+            s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+            s.Transparency = sel and 0 or 0.6
+            local pad = Instance.new("UIPadding")
+            pad.PaddingLeft = UDim.new(0, 12) pad.Parent = b
+            b.MouseButton1Click:Connect(function()
+                if BH.selectedTypes[value] then BH.selectedTypes[value] = nil
+                else BH.selectedTypes[value] = true end
+                updatePickerLabel()
+                populateModalList()
+            end)
+        end
+
+        for _, p in ipairs(types) do
+            if sf == "" or string.find(string.lower(p.name), sf, 1, true) then
+                local label = p.name..(p.count > 0 and "  ("..p.count..")" or "")
+                makeItem(label, p.name)
+            end
+        end
+
+        modalList.CanvasSize = UDim2.new(0, 0, 0, modalListLayout.AbsoluteContentSize.Y + 8)
     end
 
-    modalList.CanvasSize = UDim2.new(0, 0, 0, modalListLayout.AbsoluteContentSize.Y + 8)
+    modalSearch:GetPropertyChangedSignal("Text"):Connect(populateModalList)
+    typeDrop.MouseButton1Click:Connect(populateModalList)
 end
-
-modalSearch:GetPropertyChangedSignal("Text"):Connect(populateModalList)
-typeDrop.MouseButton1Click:Connect(populateModalList)
 
 -- ===== PET INVENTORY BROWSER =====
 local perTypePrices = {}  -- keep for compat with startBtn
@@ -4919,6 +5130,23 @@ BH.onStartClick = function()
     if isRunning then
         stopReq = true
         L("⛔ STOP requested")
+        return
+    end
+    -- v8.129: guard — wajib ada minimal 1 rule sebelum START
+    if #listingRules == 0 then
+        L("⚠️ Tambah rule LIST HARGA dulu sebelum START")
+        if startBtn then
+            local origText = startBtn.Text
+            local origColor = startBtn.BackgroundColor3
+            startBtn.Text = "⚠️ Tambah rule dulu!"
+            startBtn.BackgroundColor3 = C.danger
+            task.delay(2, function()
+                if not isRunning then
+                    startBtn.Text = origText
+                    startBtn.BackgroundColor3 = origColor
+                end
+            end)
+        end
         return
     end
     -- Start
