@@ -11,7 +11,7 @@ local RS         = game:GetService("ReplicatedStorage")
 local HS         = game:GetService("HttpService")
 local player     = Players.LocalPlayer
 local playerGui  = player:WaitForChild("PlayerGui", 10)
-local VER = "v2.6"
+local VER = "v2.8"
 local TARGETS_FILE = "ZenxAgeStats_targets.json"
 local SETTINGS_FILE = "ZenxAgeStats_settings.json"
 local MAX_RECENT = 8
@@ -537,8 +537,11 @@ arrowLbl.Font = Enum.Font.Gotham
 arrowLbl.TextSize = 10
 arrowLbl.Parent = targetBtn
 
--- Current selected target (separate from button text)
-local selectedTarget = ""
+-- Current selected targets (multi-select set: {[name]=true})
+local selectedTargets = {}
+local function targetCount()
+    local n = 0; for _ in pairs(selectedTargets) do n = n + 1 end; return n
+end
 
 -- ============================================================
 -- FILTER ROW: jenis pet | KG | Age
@@ -650,7 +653,7 @@ local footer = Instance.new("TextLabel")
 footer.Size = UDim2.new(1, -16, 0, 16)
 footer.Position = UDim2.new(0, 8, 1, -FOOTER_H + 4)
 footer.BackgroundTransparency = 1
-footer.Text = "scope: backpack • auto 5s"
+footer.Text = "scope: backpack • auto 2s"
 footer.TextColor3 = C.Dim
 footer.Font = Enum.Font.Gotham
 footer.TextSize = 10
@@ -671,7 +674,7 @@ local function renderStats()
     age100Val.Text = tostring(age100)
     lessVal.Text   = tostring(lessAge)
     eligibleLbl.Text = "Pet eligible (age 100): "..age100
-    footer.Text = "scope: backpack • memData "..(cachedContainer and (cachedCount.." OK") or "FAIL FAIL").." • auto 5s"
+    footer.Text = "scope: backpack • memData "..(cachedContainer and (cachedCount.." OK") or "FAIL FAIL").." • auto 2s"
 
     local sorted = {}
     for k, v in pairs(byType) do table.insert(sorted, {name=k, data=v}) end
@@ -719,36 +722,53 @@ end
 local pickerOverlay = nil
 
 -- ============================================================
--- PERSIST GIFT SETTINGS (target, pet types, kg, age)
+-- PERSIST GIFT SETTINGS (targets, pet types, kg, age)
 -- ============================================================
 local function persistGiftSettings()
     local types = {}
     for k in pairs(selectedPetTypes) do table.insert(types, k) end
+    local targets = {}
+    for k in pairs(selectedTargets) do table.insert(targets, k) end
     saveSettings({
-        target   = selectedTarget,
+        targets  = targets,
         petTypes = types,
         kg       = kgBox.Text,
         age      = ageBox.Text,
     })
 end
 
-local function setSelectedTarget(name)
-    selectedTarget = name or ""
-    if selectedTarget == "" then
+local function updateTargetBtn()
+    local cnt = targetCount()
+    if cnt == 0 then
         targetBtn.Text = "Pilih target gift..."
         targetBtn.TextColor3 = C.Dim
-    else
-        -- check online status
-        local p = findPlayerByName(selectedTarget)
+    elseif cnt == 1 then
+        -- show the single name
+        local name
+        for n in pairs(selectedTargets) do name = n; break end
+        local p = findPlayerByName(name)
         if p then
-            targetBtn.Text = selectedTarget
+            targetBtn.Text = name
             targetBtn.TextColor3 = C.Text
         else
-            targetBtn.Text = selectedTarget.." (offline)"
+            targetBtn.Text = name.." (offline)"
             targetBtn.TextColor3 = C.Accent
         end
+    else
+        targetBtn.Text = cnt.." targets ▼"
+        targetBtn.TextColor3 = C.Accent
+    end
+end
+
+local function toggleTarget(name)
+    if not name or name == "" then return end
+    if selectedTargets[name] then
+        selectedTargets[name] = nil
+    else
+        selectedTargets[name] = true
     end
     persistGiftSettings()
+    updateTargetBtn()
 end
 
 local function openTargetPicker()
@@ -807,10 +827,10 @@ local function openTargetPicker()
     pTbFix.Parent = pTitleBar
 
     local pTitle = Instance.new("TextLabel")
-    pTitle.Size = UDim2.new(1, -40, 1, 0)
+    pTitle.Size = UDim2.new(1, -120, 1, 0)
     pTitle.Position = UDim2.new(0, 12, 0, 0)
     pTitle.BackgroundTransparency = 1
-    pTitle.Text = "Target"
+    pTitle.Text = "Target (multi)"
     pTitle.TextColor3 = C.Accent
     pTitle.Font = Enum.Font.GothamBold
     pTitle.TextSize = 13
@@ -818,19 +838,33 @@ local function openTargetPicker()
     pTitle.ZIndex = 103
     pTitle.Parent = pTitleBar
 
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.new(0, 24, 0, 24)
-    closeBtn.Position = UDim2.new(1, -30, 0.5, -12)
-    closeBtn.BackgroundColor3 = C.Card
-    closeBtn.Text = "✕"
-    closeBtn.TextColor3 = C.Text
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 12
-    closeBtn.BorderSizePixel = 0
-    closeBtn.AutoButtonColor = false
-    closeBtn.ZIndex = 103
-    closeBtn.Parent = pTitleBar
-    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 4)
+    local doneBtn = Instance.new("TextButton")
+    doneBtn.Size = UDim2.new(0, 56, 0, 22)
+    doneBtn.Position = UDim2.new(1, -110, 0.5, -11)
+    doneBtn.BackgroundColor3 = C.Green
+    doneBtn.Text = "DONE"
+    doneBtn.TextColor3 = Color3.new(0, 0, 0)
+    doneBtn.Font = Enum.Font.GothamBold
+    doneBtn.TextSize = 10
+    doneBtn.BorderSizePixel = 0
+    doneBtn.AutoButtonColor = false
+    doneBtn.ZIndex = 103
+    doneBtn.Parent = pTitleBar
+    Instance.new("UICorner", doneBtn).CornerRadius = UDim.new(0, 4)
+
+    local clearBtn = Instance.new("TextButton")
+    clearBtn.Size = UDim2.new(0, 40, 0, 22)
+    clearBtn.Position = UDim2.new(1, -50, 0.5, -11)
+    clearBtn.BackgroundColor3 = C.Red
+    clearBtn.Text = "CLR"
+    clearBtn.TextColor3 = Color3.new(1, 1, 1)
+    clearBtn.Font = Enum.Font.GothamBold
+    clearBtn.TextSize = 10
+    clearBtn.BorderSizePixel = 0
+    clearBtn.AutoButtonColor = false
+    clearBtn.ZIndex = 103
+    clearBtn.Parent = pTitleBar
+    Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 4)
 
     -- Search box
     local pSearch = Instance.new("TextBox")
@@ -870,7 +904,12 @@ local function openTargetPicker()
         pickerOverlay = nil
     end
     backBtn.MouseButton1Click:Connect(closePicker)
-    closeBtn.MouseButton1Click:Connect(closePicker)
+    doneBtn.MouseButton1Click:Connect(closePicker)
+    clearBtn.MouseButton1Click:Connect(function()
+        selectedTargets = {}
+        persistGiftSettings()
+        updateTargetBtn()
+    end)
 
     local function renderList(filter)
         for _, c in ipairs(pScroll:GetChildren()) do
@@ -878,21 +917,28 @@ local function openTargetPicker()
         end
         filter = (filter or ""):lower()
 
-        -- Build combined list: saved (with offline marker) + server players (excluding saved)
+        -- Build combined list: saved + server players + already-selected (preserve picks)
         local saved = loadTargets()
-        local savedSet = {}
-        for _, n in ipairs(saved) do savedSet[n:lower()] = true end
-
+        local seen = {}
         local items = {}
-        -- Saved targets first
-        for _, name in ipairs(saved) do
-            local p = findPlayerByName(name)
-            table.insert(items, {name=name, saved=true, online=(p ~= nil)})
+        -- 1) Selected targets first (so they don't disappear)
+        for n in pairs(selectedTargets) do
+            local p = findPlayerByName(n)
+            table.insert(items, {name=n, saved=true, online=(p ~= nil), picked=true})
+            seen[n:lower()] = true
         end
-        -- Server players not in saved
+        -- 2) Recent saved (yellow)
+        for _, name in ipairs(saved) do
+            if not seen[name:lower()] then
+                local p = findPlayerByName(name)
+                table.insert(items, {name=name, saved=true, online=(p ~= nil), picked=false})
+                seen[name:lower()] = true
+            end
+        end
+        -- 3) Server players not in saved
         for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= player and not savedSet[p.Name:lower()] then
-                table.insert(items, {name=p.Name, saved=false, online=true})
+            if p ~= player and not seen[p.Name:lower()] then
+                table.insert(items, {name=p.Name, saved=false, online=true, picked=false})
             end
         end
 
@@ -900,7 +946,12 @@ local function openTargetPicker()
             if filter == "" or it.name:lower():find(filter, 1, true) then
                 local row = Instance.new("TextButton")
                 row.Size = UDim2.new(1, -4, 0, 30)
-                if it.saved then
+                local isPicked = selectedTargets[it.name] == true
+                if isPicked then
+                    row.BackgroundColor3 = C.Green
+                    row.TextColor3 = Color3.new(0, 0, 0)
+                    row.Font = Enum.Font.GothamBold
+                elseif it.saved then
                     row.BackgroundColor3 = C.Accent
                     row.TextColor3 = Color3.new(0, 0, 0)
                     row.Font = Enum.Font.GothamBold
@@ -909,18 +960,22 @@ local function openTargetPicker()
                     row.TextColor3 = C.Text
                     row.Font = Enum.Font.Gotham
                 end
+                local prefix = isPicked and "v " or "  "
                 local suffix = (it.saved and not it.online) and " (offline)" or ""
-                row.Text = it.name..suffix
+                row.Text = prefix..it.name..suffix
                 row.TextSize = 12
+                row.TextXAlignment = Enum.TextXAlignment.Left
                 row.BorderSizePixel = 0
                 row.AutoButtonColor = false
                 row.ZIndex = 103
                 row.Parent = pScroll
                 Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+                local rPad = Instance.new("UIPadding", row)
+                rPad.PaddingLeft = UDim.new(0, 10)
 
                 row.MouseButton1Click:Connect(function()
-                    setSelectedTarget(it.name)
-                    closePicker()
+                    toggleTarget(it.name)
+                    renderList(pSearch.Text)
                 end)
             end
         end
@@ -1174,12 +1229,20 @@ updatePetPickBtn()
 kgBox:GetPropertyChangedSignal("Text"):Connect(persistGiftSettings)
 ageBox:GetPropertyChangedSignal("Text"):Connect(persistGiftSettings)
 
--- Load saved settings (target + petTypes + kg + age)
+-- Load saved settings (targets + petTypes + kg + age)
 local _savedGS = loadSettings()
 if type(_savedGS) == "table" then
-    if _savedGS.target and _savedGS.target ~= "" then
-        setSelectedTarget(_savedGS.target)
+    -- New format: array of targets
+    if type(_savedGS.targets) == "table" then
+        for _, n in ipairs(_savedGS.targets) do
+            if type(n) == "string" then selectedTargets[n] = true end
+        end
     end
+    -- Backward compat: old single target field
+    if _savedGS.target and _savedGS.target ~= "" then
+        selectedTargets[_savedGS.target] = true
+    end
+    updateTargetBtn()
     if type(_savedGS.petTypes) == "table" then
         for _, n in ipairs(_savedGS.petTypes) do
             if type(n) == "string" then selectedPetTypes[n] = true end
@@ -1242,15 +1305,19 @@ toggleBtn.MouseButton1Click:Connect(function()
         statusLbl.TextColor3 = C.Orange
         return
     end
-    local targetName = (selectedTarget or ""):gsub("^%s+",""):gsub("%s+$","")
-    if targetName == "" then
-        statusLbl.Text = "Error: Target player kosong"
+    if targetCount() == 0 then
+        statusLbl.Text = "Error: Belum pilih target"
         statusLbl.TextColor3 = C.Red
         return
     end
-    local target = findPlayerByName(targetName)
-    if not target then
-        statusLbl.Text = "Error: Player '"..targetName.."' gak ada di server"
+    -- Resolve online targets from selected set
+    local onlineTargets = {}
+    for name in pairs(selectedTargets) do
+        local p = findPlayerByName(name)
+        if p then table.insert(onlineTargets, p) end
+    end
+    if #onlineTargets == 0 then
+        statusLbl.Text = "Error: Semua target offline"
         statusLbl.TextColor3 = C.Red
         return
     end
@@ -1260,34 +1327,50 @@ toggleBtn.MouseButton1Click:Connect(function()
         return
     end
 
-    addRecentTarget(target.Name)
+    -- save to recent for each online target
+    for _, p in ipairs(onlineTargets) do addRecentTarget(p.Name) end
 
     giftActive = true
     giftStopReq = false
     sentCount, failCount = 0, 0
     gCounterLbl.Text = "Sent: 0   Failed: 0"
     setRunning(true)
-    statusLbl.Text = "Status: starting → "..target.Name
+    statusLbl.Text = "Status: starting → "..#onlineTargets.." target"
     statusLbl.TextColor3 = C.Accent
 
     task.spawn(function()
         while not giftStopReq do
+            -- v2.8: refresh online targets each cycle (skip yg leave server)
+            local poolTargets = {}
+            for name in pairs(selectedTargets) do
+                local p = findPlayerByName(name)
+                if p then table.insert(poolTargets, p) end
+            end
+            if #poolTargets == 0 then
+                statusLbl.Text = "Error: Semua target left server"
+                statusLbl.TextColor3 = C.Red
+                break
+            end
+
             local bp = player:FindFirstChild("Backpack")
             if not bp then break end
-            -- Find next pet matching filter
-            local petTool = nil
+            -- collect SEMUA pet matching → pick random
+            local matching = {}
             for _, t in ipairs(bp:GetChildren()) do
                 if t:IsA("Tool") and petMatchesFilter(t) then
-                    petTool = t; break
+                    table.insert(matching, t)
                 end
             end
-            if not petTool then
+            if #matching == 0 then
                 statusLbl.Text = "OK: Selesai, gak ada pet match filter lagi"
                 statusLbl.TextColor3 = C.Green
                 break
             end
+            local petTool = matching[math.random(1, #matching)]
+            -- v2.8: random target from pool
+            local target = poolTargets[math.random(1, #poolTargets)]
             local petName = petTool.Name
-            statusLbl.Text = "Sending "..petName:sub(1,30).."..."
+            statusLbl.Text = "→ "..target.Name:sub(1,14).." : "..petName:sub(1,18)
             statusLbl.TextColor3 = C.Blue
             local ok = giftPetToPlayer(target, petTool)
             if ok then
@@ -1297,12 +1380,6 @@ toggleBtn.MouseButton1Click:Connect(function()
             end
             gCounterLbl.Text = "Sent: "..sentCount.."   Failed: "..failCount
             task.wait(1.5)  -- rate limit
-            -- Check target still in server
-            if not target.Parent then
-                statusLbl.Text = "Error: Target left server"
-                statusLbl.TextColor3 = C.Red
-                break
-            end
         end
         giftActive = false
         setRunning(false)
@@ -1405,7 +1482,7 @@ end)
 
 task.spawn(function()
     while sg.Parent do
-        task.wait(5)
+        task.wait(2)
         if not sg.Parent then break end
         local nc, ncnt = findMemoryContainer()
         if nc and ncnt > 0 then cachedContainer = nc; cachedCount = ncnt end
