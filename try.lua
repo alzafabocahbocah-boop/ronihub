@@ -11,7 +11,7 @@ local RS         = game:GetService("ReplicatedStorage")
 local HS         = game:GetService("HttpService")
 local player     = Players.LocalPlayer
 local playerGui  = player:WaitForChild("PlayerGui", 10)
-local VER = "v2.9"
+local VER = "v2.10"
 local TARGETS_FILE = "ZenxAgeStats_targets.json"
 local SETTINGS_FILE = "ZenxAgeStats_settings.json"
 local MAX_RECENT = 8
@@ -766,10 +766,11 @@ local function persistGiftSettings()
     local targets = {}
     for k in pairs(selectedTargets) do table.insert(targets, k) end
     saveSettings({
-        targets  = targets,
-        petTypes = types,
-        kg       = kgBox.Text,
-        age      = ageBox.Text,
+        targets    = targets,
+        petTypes   = types,
+        kg         = kgBox.Text,
+        age        = ageBox.Text,
+        giftActive = _G.ZenxGiftActive == true,  -- persisted state
     })
 end
 
@@ -1334,26 +1335,11 @@ local function petMatchesFilter(tool)
     return true
 end
 
-toggleBtn.MouseButton1Click:Connect(function()
-    if giftActive then
-        giftStopReq = true
-        statusLbl.Text = "Status: stopping..."
-        statusLbl.TextColor3 = C.Orange
-        return
-    end
+-- v2.10: startGift can be called from click OR auto-load
+local function startGift()
+    if giftActive then return end
     if targetCount() == 0 then
         statusLbl.Text = "Error: Belum pilih target"
-        statusLbl.TextColor3 = C.Red
-        return
-    end
-    -- Resolve online targets from selected set
-    local onlineTargets = {}
-    for name in pairs(selectedTargets) do
-        local p = findPlayerByName(name)
-        if p then table.insert(onlineTargets, p) end
-    end
-    if #onlineTargets == 0 then
-        statusLbl.Text = "Error: Semua target offline"
         statusLbl.TextColor3 = C.Red
         return
     end
@@ -1363,67 +1349,88 @@ toggleBtn.MouseButton1Click:Connect(function()
         return
     end
 
-    -- save to recent for each online target
-    for _, p in ipairs(onlineTargets) do addRecentTarget(p.Name) end
-
     giftActive = true
     giftStopReq = false
     sentCount, failCount = 0, 0
     gCounterLbl.Text = "Sent: 0   Failed: 0"
     setRunning(true)
-    statusLbl.Text = "Status: starting → "..#onlineTargets.." target"
+    statusLbl.Text = "Status: starting..."
     statusLbl.TextColor3 = C.Accent
+    _G.ZenxGiftActive = true
+    persistGiftSettings()
 
     task.spawn(function()
         while not giftStopReq do
-            -- v2.8: refresh online targets each cycle (skip yg leave server)
+            -- Refresh online targets each cycle
             local poolTargets = {}
             for name in pairs(selectedTargets) do
                 local p = findPlayerByName(name)
                 if p then table.insert(poolTargets, p) end
             end
-            if #poolTargets == 0 then
-                statusLbl.Text = "Error: Semua target left server"
-                statusLbl.TextColor3 = C.Red
-                break
-            end
 
-            local bp = player:FindFirstChild("Backpack")
-            if not bp then break end
-            -- collect SEMUA pet matching → pick random
-            local matching = {}
-            for _, t in ipairs(bp:GetChildren()) do
-                if t:IsA("Tool") and petMatchesFilter(t) then
-                    table.insert(matching, t)
+            if #poolTargets == 0 then
+                -- v2.10: wait instead of break (user told us "kalau on ya on")
+                statusLbl.Text = "Waiting: target offline semua..."
+                statusLbl.TextColor3 = C.Orange
+                task.wait(5)
+            else
+                local bp = player:FindFirstChild("Backpack")
+                if not bp then task.wait(2); else
+
+                -- save recent for online targets
+                for _, p in ipairs(poolTargets) do addRecentTarget(p.Name) end
+
+                local matching = {}
+                for _, t in ipairs(bp:GetChildren()) do
+                    if t:IsA("Tool") and petMatchesFilter(t) then
+                        table.insert(matching, t)
+                    end
+                end
+                if #matching == 0 then
+                    -- v2.10: wait instead of break
+                    statusLbl.Text = "Waiting: no pet match filter di backpack..."
+                    statusLbl.TextColor3 = C.Orange
+                    task.wait(5)
+                else
+                    local petTool = matching[math.random(1, #matching)]
+                    local target = poolTargets[math.random(1, #poolTargets)]
+                    local petName = petTool.Name
+                    statusLbl.Text = "→ "..target.Name:sub(1,14).." : "..petName:sub(1,18)
+                    statusLbl.TextColor3 = C.Blue
+                    local ok = giftPetToPlayer(target, petTool)
+                    if ok then
+                        sentCount = sentCount + 1
+                    else
+                        failCount = failCount + 1
+                    end
+                    gCounterLbl.Text = "Sent: "..sentCount.."   Failed: "..failCount
+                    task.wait(1.5)
+                end
                 end
             end
-            if #matching == 0 then
-                statusLbl.Text = "OK: Selesai, gak ada pet match filter lagi"
-                statusLbl.TextColor3 = C.Green
-                break
-            end
-            local petTool = matching[math.random(1, #matching)]
-            -- v2.8: random target from pool
-            local target = poolTargets[math.random(1, #poolTargets)]
-            local petName = petTool.Name
-            statusLbl.Text = "→ "..target.Name:sub(1,14).." : "..petName:sub(1,18)
-            statusLbl.TextColor3 = C.Blue
-            local ok = giftPetToPlayer(target, petTool)
-            if ok then
-                sentCount = sentCount + 1
-            else
-                failCount = failCount + 1
-            end
-            gCounterLbl.Text = "Sent: "..sentCount.."   Failed: "..failCount
-            task.wait(1.5)  -- rate limit
         end
         giftActive = false
         setRunning(false)
-        if giftStopReq then
-            statusLbl.Text = "Stop: Stopped (Sent: "..sentCount..")"
-            statusLbl.TextColor3 = C.Dim
-        end
+        statusLbl.Text = "Stop: Stopped (Sent: "..sentCount..")"
+        statusLbl.TextColor3 = C.Dim
+        _G.ZenxGiftActive = false
+        persistGiftSettings()
     end)
+end
+
+local function stopGift()
+    if not giftActive then return end
+    giftStopReq = true
+    statusLbl.Text = "Status: stopping..."
+    statusLbl.TextColor3 = C.Orange
+end
+
+toggleBtn.MouseButton1Click:Connect(function()
+    if giftActive then
+        stopGift()
+    else
+        startGift()
+    end
 end)
 
 -- ============================================================
@@ -1527,3 +1534,12 @@ task.spawn(function()
 end)
 
 print("[ZenxAgeStats] "..VER.." loaded")
+
+-- v2.10: Restore gift state — kalo terakhir ON, auto-resume after rejoin
+if type(_savedGS) == "table" and _savedGS.giftActive == true then
+    print("[ZenxAgeStats] gift was ON, auto-resuming...")
+    task.spawn(function()
+        task.wait(3)  -- delay biar memContainer + players settle dulu
+        startGift()
+    end)
+end
