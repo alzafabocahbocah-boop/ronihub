@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.156"
-local VERSION_DATE = "v8.156: HISTORY SELL tab baru di sidebar (bawah HOP SERVER). Track pet ke-sold dari booth, total tokens, simpen 24 jam ke file. Auto-detect via snapshot diff (skip kalo auto-clean / pantau yg unlist)."
+local VERSION = "8.158"
+local VERSION_DATE = "v8.158: HISTORY SELL tab di-port dari standalone design — big total token, elapsed timer, sort cycle, pet picker modal (PetRegistry 493 types) dengan search. Filter affects total tokens calc."
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -8040,215 +8040,569 @@ L("  - Fav count")
 L("  - Inventory capacity")
 
 
--- v8.156: HISTORY SELL panel + sales tracker
--- Track listings yg ilang dari booth (asumsi sold kecuali kita unlist sendiri)
+-- v8.158: HISTORY SELL panel — ported dari standalone history_sell.lua design
 ;(function()
-    local SALES_FILE = "zenx_market_sales.json"
-    BH.salesHistory = {}
-    BH.recentUnlists = {}     -- {[uuid] = expiry} — skip diff for these
-    BH.lastBoothSnapshot = nil
+    local hp = panels["HISTORY SELL"]
+    if not hp then return end
 
-    -- File load
+    local salesHistory = {}
+    local salesByKey = {}
+    local elapsedStart = tick()
+    local selectedType = nil
+    local sortMode = "newest"
+
+    -- Resolve remotes
+    local fetchHistRE, addHistRE
     pcall(function()
-        if isfile and isfile(SALES_FILE) then
-            local ok, data = pcall(function() return HttpService:JSONDecode(readfile(SALES_FILE)) end)
-            if ok and type(data) == "table" then BH.salesHistory = data end
+        local Booths = ReplicatedStorage:WaitForChild("GameEvents", 5)
+            and ReplicatedStorage.GameEvents:WaitForChild("TradeEvents", 5)
+            and ReplicatedStorage.GameEvents.TradeEvents:WaitForChild("Booths", 5)
+        if Booths then
+            fetchHistRE = Booths:WaitForChild("FetchHistory", 5)
+            addHistRE = Booths:WaitForChild("AddToHistory", 5)
         end
     end)
+    L("[Hist] FetchHistory="..(fetchHistRE and "OK" or "nil").." AddToHistory="..(addHistRE and "OK" or "nil"))
 
-    -- Purge >24h
-    local function purgeOld()
-        local cutoff = os.time() - 24*3600
-        local fresh = {}
-        for _, e in ipairs(BH.salesHistory) do
-            if (e.time or 0) >= cutoff then table.insert(fresh, e) end
+    -- Scan PetRegistry untuk picker modal
+    local allPetTypes = {}
+    pcall(function()
+        local data = ReplicatedStorage:FindFirstChild("Data")
+        local petReg = data and data:FindFirstChild("PetRegistry")
+        local petList = petReg and petReg:FindFirstChild("PetList")
+        if petList then
+            if petList:IsA("ModuleScript") then
+                local ok, m = pcall(require, petList)
+                if ok and type(m) == "table" then
+                    for name, _ in pairs(m) do
+                        if type(name) == "string" then table.insert(allPetTypes, name) end
+                    end
+                end
+            else
+                for _, c in ipairs(petList:GetChildren()) do
+                    if c:IsA("ModuleScript") then table.insert(allPetTypes, c.Name) end
+                end
+            end
         end
-        BH.salesHistory = fresh
+        for _, alt in ipairs({"PetData", "Pets", "PetTypes"}) do
+            local f = ReplicatedStorage:FindFirstChild(alt)
+            if f then
+                for _, c in ipairs(f:GetChildren()) do
+                    if c:IsA("ModuleScript") or c:IsA("Folder") then
+                        table.insert(allPetTypes, c.Name)
+                    end
+                end
+            end
+        end
+    end)
+    do
+        local seen, uniq = {}, {}
+        for _, n in ipairs(allPetTypes) do
+            if not seen[n] then seen[n] = true; table.insert(uniq, n) end
+        end
+        table.sort(uniq)
+        allPetTypes = uniq
     end
-    purgeOld()
+    L("[Hist] PetRegistry loaded "..#allPetTypes.." types")
 
-    local function saveSales()
-        pcall(function()
-            if writefile then writefile(SALES_FILE, HttpService:JSONEncode(BH.salesHistory)) end
-        end)
-    end
-
-    -- Public API biar dipanggil dari auto-clean / pantau unlist
-    BH.markUnlistedByMe = function(uuid)
-        if not uuid then return end
-        BH.recentUnlists[tostring(uuid)] = tick() + 120  -- 2 menit grace
-        BH.recentUnlists[tostring(uuid):gsub("[{}]", "")] = tick() + 120
-    end
-
-    -- Build HISTORY SELL panel UI
-    local hp = panels["HISTORY SELL"]
+    -- ===== Panel padding =====
     do
         local pad = Instance.new("UIPadding")
         pad.PaddingTop = UDim.new(0, 14) pad.PaddingLeft = UDim.new(0, 14)
         pad.PaddingRight = UDim.new(0, 14) pad.PaddingBottom = UDim.new(0, 14)
         pad.Parent = hp
-
-        local hdrCard = Instance.new("Frame")
-        hdrCard.Size = UDim2.new(1, 0, 0, 64)
-        hdrCard.BackgroundColor3 = C.card hdrCard.BorderSizePixel = 0
-        hdrCard.Parent = hp
-        Instance.new("UICorner", hdrCard).CornerRadius = UDim.new(0, 8)
-
-        lblOf(hdrCard, "💰  HISTORY SELL (24 jam terakhir)", 14, 8, 380, 22, C.accent, 14, FB)
-        local totLbl = lblOf(hdrCard, "Total: 0 sold | 0 tokens", 14, 30, 380, 18, C.text, 12, FM)
-        local refreshBtn = btnOf(hdrCard, 14, 50, 100, 24, "🔄 REFRESH", C.accent)
-        refreshBtn.TextSize = 11
-        local clearBtn = btnOf(hdrCard, 122, 50, 100, 24, "🗑️ CLEAR", C.danger)
-        clearBtn.TextSize = 11
-
-        local listFrame = Instance.new("Frame")
-        listFrame.Size = UDim2.new(1, 0, 1, -78)
-        listFrame.Position = UDim2.new(0, 0, 0, 74)
-        listFrame.BackgroundColor3 = C.bg listFrame.BorderSizePixel = 0
-        listFrame.Parent = hp
-        Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 8)
-
-        local scroll = Instance.new("ScrollingFrame")
-        scroll.Size = UDim2.new(1, -8, 1, -8)
-        scroll.Position = UDim2.new(0, 4, 0, 4)
-        scroll.BackgroundTransparency = 1 scroll.BorderSizePixel = 0
-        scroll.ScrollBarThickness = 4 scroll.ScrollBarImageColor3 = C.accent
-        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-        scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        scroll.Parent = listFrame
-        local lay = Instance.new("UIListLayout")
-        lay.Padding = UDim.new(0, 3) lay.Parent = scroll
-        local spad = Instance.new("UIPadding")
-        spad.PaddingTop = UDim.new(0, 4) spad.PaddingBottom = UDim.new(0, 4)
-        spad.PaddingLeft = UDim.new(0, 6) spad.PaddingRight = UDim.new(0, 6)
-        spad.Parent = scroll
-
-        BH.refreshHistoryPanel = function()
-            for _, c in ipairs(scroll:GetChildren()) do
-                if c:IsA("Frame") then c:Destroy() end
-            end
-            purgeOld()
-            saveSales()
-            local total = 0
-            for _, s in ipairs(BH.salesHistory) do total = total + (tonumber(s.price) or 0) end
-            totLbl.Text = string.format("Total: %d sold  |  %s tokens", #BH.salesHistory, total)
-            -- Sort newest first
-            local sorted = {}
-            for _, s in ipairs(BH.salesHistory) do table.insert(sorted, s) end
-            table.sort(sorted, function(a, b) return (a.time or 0) > (b.time or 0) end)
-            for i, s in ipairs(sorted) do
-                local row = Instance.new("Frame")
-                row.Size = UDim2.new(1, -8, 0, 30)
-                row.BackgroundColor3 = (i % 2 == 0) and C.bg or C.card
-                row.BorderSizePixel = 0 row.Parent = scroll
-                Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
-                -- Time (relative)
-                local ago = os.time() - (s.time or 0)
-                local agoTxt
-                if ago < 60 then agoTxt = ago.."s"
-                elseif ago < 3600 then agoTxt = math.floor(ago/60).."m"
-                else agoTxt = math.floor(ago/3600).."h"..math.floor((ago%3600)/60).."m" end
-                local tm = Instance.new("TextLabel")
-                tm.Size = UDim2.new(0, 60, 1, 0) tm.Position = UDim2.new(0, 8, 0, 0)
-                tm.BackgroundTransparency = 1 tm.Text = agoTxt.." ago"
-                tm.TextColor3 = C.textDim tm.Font = FM tm.TextSize = 11
-                tm.TextXAlignment = Enum.TextXAlignment.Left tm.Parent = row
-                -- Pet type
-                local nm = Instance.new("TextLabel")
-                nm.Size = UDim2.new(0, 160, 1, 0) nm.Position = UDim2.new(0, 76, 0, 0)
-                nm.BackgroundTransparency = 1 nm.Text = tostring(s.petType or "?")
-                nm.TextColor3 = C.text nm.Font = FM nm.TextSize = 12
-                nm.TextXAlignment = Enum.TextXAlignment.Left
-                nm.TextTruncate = Enum.TextTruncate.AtEnd nm.Parent = row
-                -- KG
-                local kg = Instance.new("TextLabel")
-                kg.Size = UDim2.new(0, 60, 1, 0) kg.Position = UDim2.new(0, 240, 0, 0)
-                kg.BackgroundTransparency = 1 kg.Text = string.format("%.1fkg", s.kg or 0)
-                kg.TextColor3 = C.textDim kg.Font = FM kg.TextSize = 11
-                kg.TextXAlignment = Enum.TextXAlignment.Left kg.Parent = row
-                -- Price (token icon yellow)
-                local pr = Instance.new("TextLabel")
-                pr.Size = UDim2.new(1, -310, 1, 0) pr.Position = UDim2.new(0, 304, 0, 0)
-                pr.BackgroundTransparency = 1 pr.Text = "💰 "..tostring(s.price or 0)
-                pr.TextColor3 = C.accent pr.Font = FB pr.TextSize = 13
-                pr.TextXAlignment = Enum.TextXAlignment.Right
-                pr.Parent = row
-                local rpad = Instance.new("UIPadding") rpad.PaddingRight = UDim.new(0, 10); rpad.Parent = row
-            end
-            if #BH.salesHistory == 0 then
-                local empty = Instance.new("TextLabel")
-                empty.Size = UDim2.new(1, -8, 0, 40)
-                empty.BackgroundTransparency = 1
-                empty.Text = "Belum ada pet ke-sold dalam 24h terakhir.\nSc auto-track pas ada listing yg ilang (dipertimbangkan sold)."
-                empty.TextColor3 = C.textDim empty.Font = FM empty.TextSize = 11
-                empty.TextWrapped = true empty.Parent = scroll
-            end
-        end
-
-        refreshBtn.MouseButton1Click:Connect(function() BH.refreshHistoryPanel() end)
-        clearBtn.MouseButton1Click:Connect(function()
-            BH.salesHistory = {}
-            saveSales()
-            BH.refreshHistoryPanel()
-            L("[Sales] history cleared")
-        end)
-        BH.refreshHistoryPanel()
     end
 
-    -- Background sales tracker — diff snapshot every 15s
-    task.spawn(function()
-        task.wait(20)  -- biar game replicate dulu
-        while gui.Parent do
-            local ok, data = pcall(BH.fetchBoothData, player)
-            if ok and data and data.Listings then
-                -- Build current snapshot
-                local cur = {}
-                for uuid, listing in pairs(data.Listings) do
-                    if listing.ItemType == "Pet" and listing.ItemId then
-                        local item = data.Items and data.Items[listing.ItemId]
-                        local bw = (item and item.PetData and tonumber(item.PetData.BaseWeight)) or 0
-                        cur[tostring(uuid)] = {
-                            petType = (item and tostring(item.PetType)) or "?",
-                            kg = bw * 1.1,
-                            price = tonumber(listing.Price) or 0,
-                        }
-                    end
-                end
-                -- Compare with last snapshot
-                if BH.lastBoothSnapshot then
-                    -- Clean expired unlist marks
-                    local now = tick()
-                    for u, exp in pairs(BH.recentUnlists) do
-                        if now > exp then BH.recentUnlists[u] = nil end
-                    end
-                    -- Find missing listings = sold
-                    local newSales = 0
-                    for uuid, info in pairs(BH.lastBoothSnapshot) do
-                        if not cur[uuid] then
-                            local unlisted = BH.recentUnlists[uuid] or BH.recentUnlists[uuid:gsub("[{}]","")]
-                            if not unlisted then
-                                table.insert(BH.salesHistory, {
-                                    time = os.time(),
-                                    petType = info.petType,
-                                    kg = info.kg,
-                                    price = info.price,
-                                    uuid = uuid,
-                                })
-                                newSales = newSales + 1
-                                L(string.format("[Sales] 💰 SOLD: %s %.2fkg @ %d", info.petType, info.kg, info.price))
-                            end
-                        end
-                    end
-                    if newSales > 0 then
-                        purgeOld(); saveSales()
-                        if BH.refreshHistoryPanel then pcall(BH.refreshHistoryPanel) end
-                    end
-                end
-                BH.lastBoothSnapshot = cur
+    -- ===== Stats card =====
+    local statsCard = Instance.new("Frame")
+    statsCard.Size = UDim2.new(1, 0, 0, 78)
+    statsCard.BackgroundColor3 = C.card
+    statsCard.BorderSizePixel = 0
+    statsCard.Parent = hp
+    Instance.new("UICorner", statsCard).CornerRadius = UDim.new(0, 8)
+
+    local bigTotal = Instance.new("TextLabel")
+    bigTotal.Size = UDim2.new(1, -130, 1, 0) bigTotal.Position = UDim2.new(0, 14, 0, 0)
+    bigTotal.BackgroundTransparency = 1 bigTotal.Text = "🪙 0"
+    bigTotal.TextColor3 = C.accent bigTotal.Font = FB bigTotal.TextSize = 30
+    bigTotal.TextXAlignment = Enum.TextXAlignment.Left
+    bigTotal.TextYAlignment = Enum.TextYAlignment.Center
+    bigTotal.Parent = statsCard
+
+    local subStats = Instance.new("TextLabel")
+    subStats.Size = UDim2.new(0, 120, 0, 20) subStats.Position = UDim2.new(1, -130, 0, 10)
+    subStats.BackgroundTransparency = 1 subStats.Text = "0 sold"
+    subStats.TextColor3 = C.textDim subStats.Font = FM subStats.TextSize = 11
+    subStats.TextXAlignment = Enum.TextXAlignment.Right
+    subStats.Parent = statsCard
+
+    local elapsedLbl = Instance.new("TextLabel")
+    elapsedLbl.Size = UDim2.new(0, 120, 0, 20) elapsedLbl.Position = UDim2.new(1, -130, 0, 32)
+    elapsedLbl.BackgroundTransparency = 1 elapsedLbl.Text = "⏱  0s"
+    elapsedLbl.TextColor3 = C.accent elapsedLbl.Font = Enum.Font.Code elapsedLbl.TextSize = 13
+    elapsedLbl.TextXAlignment = Enum.TextXAlignment.Right
+    elapsedLbl.Parent = statsCard
+
+    local lastSaleLbl = Instance.new("TextLabel")
+    lastSaleLbl.Size = UDim2.new(0, 120, 0, 18) lastSaleLbl.Position = UDim2.new(1, -130, 0, 54)
+    lastSaleLbl.BackgroundTransparency = 1 lastSaleLbl.Text = "—"
+    lastSaleLbl.TextColor3 = C.textDim lastSaleLbl.Font = FM lastSaleLbl.TextSize = 10
+    lastSaleLbl.TextXAlignment = Enum.TextXAlignment.Right
+    lastSaleLbl.Parent = statsCard
+
+    -- ===== Action row =====
+    local actionRow = Instance.new("Frame")
+    actionRow.Size = UDim2.new(1, 0, 0, 30) actionRow.Position = UDim2.new(0, 0, 0, 88)
+    actionRow.BackgroundTransparency = 1
+    actionRow.Parent = hp
+
+    local clearBtn = Instance.new("TextButton")
+    clearBtn.Size = UDim2.new(0, 90, 0, 30) clearBtn.Position = UDim2.new(0, 0, 0, 0)
+    clearBtn.BackgroundColor3 = C.card clearBtn.AutoButtonColor = false
+    clearBtn.Text = "CLEAR" clearBtn.TextColor3 = C.danger
+    clearBtn.Font = FB clearBtn.TextSize = 12 clearBtn.BorderSizePixel = 0
+    clearBtn.Parent = actionRow
+    Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 6)
+
+    local sortBtn = Instance.new("TextButton")
+    sortBtn.Size = UDim2.new(0, 130, 0, 30) sortBtn.Position = UDim2.new(0, 98, 0, 0)
+    sortBtn.BackgroundColor3 = C.card sortBtn.AutoButtonColor = false
+    sortBtn.Text = "Sort: NEWEST" sortBtn.TextColor3 = C.text
+    sortBtn.Font = FB sortBtn.TextSize = 12 sortBtn.BorderSizePixel = 0
+    sortBtn.Parent = actionRow
+    Instance.new("UICorner", sortBtn).CornerRadius = UDim.new(0, 6)
+
+    local typeBtn = Instance.new("TextButton")
+    typeBtn.Size = UDim2.new(1, -236, 0, 30) typeBtn.Position = UDim2.new(0, 236, 0, 0)
+    typeBtn.BackgroundColor3 = C.card typeBtn.AutoButtonColor = false
+    typeBtn.Text = "▼  All Pets" typeBtn.TextColor3 = C.text
+    typeBtn.Font = FB typeBtn.TextSize = 12 typeBtn.BorderSizePixel = 0
+    typeBtn.Parent = actionRow
+    Instance.new("UICorner", typeBtn).CornerRadius = UDim.new(0, 6)
+
+    -- ===== List frame =====
+    local listFrame = Instance.new("Frame")
+    listFrame.Size = UDim2.new(1, 0, 1, -150) listFrame.Position = UDim2.new(0, 0, 0, 128)
+    listFrame.BackgroundColor3 = C.bg listFrame.BorderSizePixel = 0
+    listFrame.Parent = hp
+    Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 8)
+
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, -8, 1, -8) scroll.Position = UDim2.new(0, 4, 0, 4)
+    scroll.BackgroundTransparency = 1 scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 4 scroll.ScrollBarImageColor3 = C.accent
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.Parent = listFrame
+    do
+        local lay = Instance.new("UIListLayout")
+        lay.Padding = UDim.new(0, 4) lay.Parent = scroll
+        local spad = Instance.new("UIPadding")
+        spad.PaddingTop = UDim.new(0, 6) spad.PaddingBottom = UDim.new(0, 6)
+        spad.PaddingLeft = UDim.new(0, 6) spad.PaddingRight = UDim.new(0, 6)
+        spad.Parent = scroll
+    end
+
+    local footerLbl = Instance.new("TextLabel")
+    footerLbl.Size = UDim2.new(1, 0, 0, 18) footerLbl.Position = UDim2.new(0, 0, 1, -16)
+    footerLbl.BackgroundTransparency = 1 footerLbl.Text = "Idle"
+    footerLbl.TextColor3 = C.textDim footerLbl.Font = Enum.Font.Code footerLbl.TextSize = 10
+    footerLbl.TextXAlignment = Enum.TextXAlignment.Left
+    footerLbl.Parent = hp
+
+    -- ===== Helpers =====
+    local function parseEntry(e)
+        if type(e) ~= "table" then return nil end
+        local t = tonumber(e.Time or e.Timestamp or e.time or e.At) or os.time()
+        local price = tonumber(e.Price or e.price or e.Cost or e.Amount) or 0
+        local petType = e.PetType or e.petType or e.ItemName or e.Name or "?"
+        local mut = nil
+        local kg = 0
+        if type(e.PetData) == "table" then
+            if tonumber(e.PetData.BaseWeight) then kg = e.PetData.BaseWeight * 1.1 end
+            mut = e.PetData.MutationType
+        elseif tonumber(e.BaseWeight) then
+            kg = e.BaseWeight * 1.1
+        end
+        local key = tostring(e.Id or e.UUID or e.ListingId or e.ItemId or "")
+        if key == "" then key = tostring(t).."_"..tostring(price).."_"..tostring(petType) end
+        return {time = t, petType = tostring(petType), kg = kg, price = price, key = key, mut = mut}
+    end
+
+    local function addEntry(e)
+        local p = parseEntry(e)
+        if not p then return false end
+        if salesByKey[p.key] then return false end
+        salesByKey[p.key] = true
+        table.insert(salesHistory, p)
+        return true
+    end
+
+    local function purgeOld()
+        local cutoff = os.time() - 24*3600
+        local fresh, keys = {}, {}
+        for _, e in ipairs(salesHistory) do
+            if (e.time or 0) >= cutoff then
+                table.insert(fresh, e); keys[e.key] = true
             end
-            task.wait(15)
+        end
+        salesHistory = fresh; salesByKey = keys
+    end
+
+    local function timeAgo(t)
+        local diff = os.time() - (t or 0)
+        if diff < 0 then return "—" end
+        if diff < 60 then return diff.."s" end
+        if diff < 3600 then return math.floor(diff/60).."m" end
+        if diff < 86400 then return math.floor(diff/3600).."h"..math.floor((diff%3600)/60).."m" end
+        return math.floor(diff/86400).."d"
+    end
+
+    local function fmtNum(n)
+        local s = tostring(n)
+        local k
+        while true do
+            s, k = s:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
+            if k == 0 then break end
+        end
+        return s
+    end
+
+    local function renderRow(entry)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -8, 0, 48)
+        row.BackgroundColor3 = C.card row.BorderSizePixel = 0
+        row.Parent = scroll
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+        local stripe = Instance.new("Frame")
+        stripe.Size = UDim2.new(0, 4, 1, -10) stripe.Position = UDim2.new(0, 4, 0, 5)
+        stripe.BackgroundColor3 = (entry.price >= 500) and C.success
+            or (entry.price >= 200) and C.accent or C.textDim
+        stripe.BorderSizePixel = 0 stripe.Parent = row
+        Instance.new("UICorner", stripe).CornerRadius = UDim.new(1, 0)
+
+        local nameLbl = Instance.new("TextLabel")
+        nameLbl.Size = UDim2.new(0, 200, 0, 20) nameLbl.Position = UDim2.new(0, 16, 0, 6)
+        nameLbl.BackgroundTransparency = 1 nameLbl.Text = entry.petType
+        nameLbl.TextColor3 = C.text nameLbl.Font = FB nameLbl.TextSize = 14
+        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+        nameLbl.TextTruncate = Enum.TextTruncate.AtEnd nameLbl.Parent = row
+
+        if entry.mut then
+            local mutBadge = Instance.new("TextLabel")
+            mutBadge.Size = UDim2.new(0, 30, 0, 16) mutBadge.Position = UDim2.new(0, 220, 0, 8)
+            mutBadge.BackgroundColor3 = Color3.fromRGB(150, 100, 200)
+            mutBadge.Text = tostring(entry.mut) mutBadge.TextColor3 = Color3.new(1, 1, 1)
+            mutBadge.Font = FB mutBadge.TextSize = 10
+            mutBadge.Parent = row
+            Instance.new("UICorner", mutBadge).CornerRadius = UDim.new(0, 3)
+        end
+
+        local subLbl = Instance.new("TextLabel")
+        subLbl.Size = UDim2.new(0, 250, 0, 16) subLbl.Position = UDim2.new(0, 16, 0, 26)
+        subLbl.BackgroundTransparency = 1
+        local kgTxt = (entry.kg and entry.kg > 0) and string.format("%.1fkg", entry.kg) or "—"
+        subLbl.Text = kgTxt .. "   •   " .. timeAgo(entry.time).." ago"
+        subLbl.TextColor3 = C.textDim subLbl.Font = FM subLbl.TextSize = 11
+        subLbl.TextXAlignment = Enum.TextXAlignment.Left subLbl.Parent = row
+
+        local priceLbl = Instance.new("TextLabel")
+        priceLbl.Size = UDim2.new(0, 80, 1, 0) priceLbl.Position = UDim2.new(1, -90, 0, 0)
+        priceLbl.BackgroundTransparency = 1 priceLbl.Text = "🪙 "..tostring(entry.price)
+        priceLbl.TextColor3 = C.accent priceLbl.Font = FB priceLbl.TextSize = 15
+        priceLbl.TextXAlignment = Enum.TextXAlignment.Right priceLbl.Parent = row
+        local rpad = Instance.new("UIPadding") rpad.PaddingRight = UDim.new(0, 10); rpad.Parent = row
+    end
+
+    local function refreshUI()
+        for _, c in ipairs(scroll:GetChildren()) do
+            if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
+        end
+        purgeOld()
+        -- Filter
+        local sorted = {}
+        for _, s in ipairs(salesHistory) do
+            if not selectedType or s.petType == selectedType then
+                table.insert(sorted, s)
+            end
+        end
+        -- Total dari filtered subset
+        local total = 0
+        for _, s in ipairs(sorted) do total = total + (tonumber(s.price) or 0) end
+        bigTotal.Text = "🪙 "..fmtNum(total)
+        subStats.Text = #sorted.." sold"..(selectedType and "  ("..selectedType..")" or "")
+
+        if #salesHistory > 0 then
+            local latest = 0
+            for _, s in ipairs(salesHistory) do
+                if (s.time or 0) > latest then latest = s.time end
+            end
+            lastSaleLbl.Text = "last: "..timeAgo(latest).." ago"
+        else
+            lastSaleLbl.Text = "no sales yet"
+        end
+
+        if sortMode == "newest" then
+            table.sort(sorted, function(a, b) return (a.time or 0) > (b.time or 0) end)
+        elseif sortMode == "price_high" then
+            table.sort(sorted, function(a, b) return (a.price or 0) > (b.price or 0) end)
+        elseif sortMode == "price_low" then
+            table.sort(sorted, function(a, b) return (a.price or 0) < (b.price or 0) end)
+        end
+        for _, e in ipairs(sorted) do renderRow(e) end
+
+        if #salesHistory == 0 then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.new(1, -20, 0, 40)
+            empty.BackgroundTransparency = 1
+            empty.Text = "Belum ada penjualan"
+            empty.TextColor3 = C.textDim empty.Font = FM empty.TextSize = 12
+            empty.Parent = scroll
+        elseif #sorted == 0 then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.new(1, -20, 0, 40)
+            empty.BackgroundTransparency = 1
+            empty.Text = "Tidak ada hasil untuk '"..tostring(selectedType).."'"
+            empty.TextColor3 = C.textDim empty.Font = FM empty.TextSize = 12
+            empty.Parent = scroll
+        end
+    end
+
+    -- ===== Fetch dari server =====
+    local fetching = false
+    local function fetchHistory()
+        if not fetchHistRE or fetching then return end
+        fetching = true
+        footerLbl.Text = "Fetching..." footerLbl.TextColor3 = C.accent
+        task.spawn(function()
+            local ok, result = pcall(function() return fetchHistRE:InvokeServer() end)
+            fetching = false
+            if not ok then
+                footerLbl.Text = "Error: "..tostring(result):sub(1, 80)
+                footerLbl.TextColor3 = C.danger; return
+            end
+            if type(result) == "boolean" then
+                footerLbl.Text = "✓ fetch ack — data realtime via AddToHistory"
+                footerLbl.TextColor3 = C.textDim; return
+            end
+            if type(result) ~= "table" then
+                footerLbl.Text = "Got "..type(result).." (expected table)"
+                footerLbl.TextColor3 = C.danger; return
+            end
+            local added = 0
+            for _, e in pairs(result) do
+                if type(e) == "table" and addEntry(e) then added = added + 1 end
+            end
+            purgeOld()
+            refreshUI()
+            footerLbl.Text = "✓ added "..added.." | total="..#salesHistory.." | "..os.date("%H:%M:%S")
+            footerLbl.TextColor3 = C.success
+        end)
+    end
+
+    -- ===== Realtime AddToHistory subscribe =====
+    if addHistRE then
+        addHistRE.OnClientEvent:Connect(function(...)
+            local args = {...}
+            for _, a in ipairs(args) do
+                if type(a) == "table" and addEntry(a) then
+                    purgeOld(); refreshUI()
+                    footerLbl.Text = "🔔 NEW SALE @ "..os.date("%H:%M:%S")
+                    footerLbl.TextColor3 = C.success
+                end
+            end
+        end)
+    end
+
+    -- ===== Pet Type Picker Modal =====
+    local picker = Instance.new("Frame")
+    picker.Size = UDim2.new(0, 320, 0, 380)
+    picker.Position = UDim2.new(0.5, -160, 0.5, -190)
+    picker.BackgroundColor3 = C.panel picker.BorderSizePixel = 0
+    picker.Visible = false picker.ZIndex = 50
+    picker.Parent = hp
+    Instance.new("UICorner", picker).CornerRadius = UDim.new(0, 10)
+    do
+        local s = Instance.new("UIStroke", picker)
+        s.Color = C.accent; s.Thickness = 1; s.Transparency = 0.5
+    end
+
+    do
+        local pTitle = Instance.new("TextLabel")
+        pTitle.Size = UDim2.new(1, -50, 0, 30) pTitle.Position = UDim2.new(0, 12, 0, 8)
+        pTitle.BackgroundTransparency = 1 pTitle.Text = "Pilih jenis pet"
+        pTitle.TextColor3 = C.accent pTitle.Font = FB pTitle.TextSize = 14
+        pTitle.TextXAlignment = Enum.TextXAlignment.Left
+        pTitle.ZIndex = 51 pTitle.Parent = picker
+
+        local pClose = Instance.new("TextButton")
+        pClose.Size = UDim2.new(0, 28, 0, 28) pClose.Position = UDim2.new(1, -36, 0, 8)
+        pClose.BackgroundColor3 = C.card pClose.AutoButtonColor = false
+        pClose.Text = "×" pClose.TextColor3 = C.text
+        pClose.Font = FB pClose.TextSize = 16 pClose.BorderSizePixel = 0
+        pClose.ZIndex = 51 pClose.Parent = picker
+        Instance.new("UICorner", pClose).CornerRadius = UDim.new(0, 5)
+        pClose.MouseButton1Click:Connect(function() picker.Visible = false end)
+    end
+
+    local pSearch = Instance.new("TextBox")
+    pSearch.Size = UDim2.new(1, -24, 0, 30) pSearch.Position = UDim2.new(0, 12, 0, 44)
+    pSearch.BackgroundColor3 = C.input pSearch.BorderSizePixel = 0
+    pSearch.Text = "" pSearch.PlaceholderText = "🔍  Cari nama pet..."
+    pSearch.PlaceholderColor3 = C.textDim
+    pSearch.TextColor3 = C.text pSearch.Font = FM pSearch.TextSize = 12
+    pSearch.ClearTextOnFocus = false
+    pSearch.TextXAlignment = Enum.TextXAlignment.Left
+    pSearch.ZIndex = 51 pSearch.Parent = picker
+    Instance.new("UICorner", pSearch).CornerRadius = UDim.new(0, 6)
+    do
+        local p = Instance.new("UIPadding")
+        p.PaddingLeft = UDim.new(0, 10) p.PaddingRight = UDim.new(0, 10) p.Parent = pSearch
+    end
+
+    local allRowBtn = Instance.new("TextButton")
+    allRowBtn.Size = UDim2.new(1, -24, 0, 32) allRowBtn.Position = UDim2.new(0, 12, 0, 84)
+    allRowBtn.BackgroundColor3 = C.card allRowBtn.AutoButtonColor = false
+    allRowBtn.Text = "✓  All Pets" allRowBtn.TextColor3 = C.accent
+    allRowBtn.Font = FB allRowBtn.TextSize = 13
+    allRowBtn.TextXAlignment = Enum.TextXAlignment.Left allRowBtn.BorderSizePixel = 0
+    allRowBtn.ZIndex = 51 allRowBtn.Parent = picker
+    Instance.new("UICorner", allRowBtn).CornerRadius = UDim.new(0, 5)
+    do
+        local p = Instance.new("UIPadding")
+        p.PaddingLeft = UDim.new(0, 12) p.Parent = allRowBtn
+    end
+
+    local pScroll = Instance.new("ScrollingFrame")
+    pScroll.Size = UDim2.new(1, -24, 1, -136) pScroll.Position = UDim2.new(0, 12, 0, 124)
+    pScroll.BackgroundColor3 = C.card pScroll.BorderSizePixel = 0
+    pScroll.ScrollBarThickness = 4 pScroll.ScrollBarImageColor3 = C.accent
+    pScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    pScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    pScroll.ZIndex = 51 pScroll.Parent = picker
+    Instance.new("UICorner", pScroll).CornerRadius = UDim.new(0, 6)
+    do
+        local lay = Instance.new("UIListLayout")
+        lay.Padding = UDim.new(0, 3) lay.Parent = pScroll
+        local pad = Instance.new("UIPadding")
+        pad.PaddingTop = UDim.new(0, 4) pad.PaddingBottom = UDim.new(0, 4)
+        pad.PaddingLeft = UDim.new(0, 4) pad.PaddingRight = UDim.new(0, 4)
+        pad.Parent = pScroll
+    end
+
+    local function renderPicker(filter)
+        for _, c in ipairs(pScroll:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
+        end
+        filter = (filter or ""):lower()
+        if not selectedType then
+            allRowBtn.BackgroundColor3 = C.accent
+            allRowBtn.TextColor3 = Color3.new(0, 0, 0)
+            allRowBtn.Text = "✓  All Pets"
+        else
+            allRowBtn.BackgroundColor3 = C.card
+            allRowBtn.TextColor3 = C.text
+            allRowBtn.Text = "   All Pets"
+        end
+        local salesByType = {}
+        for _, s in ipairs(salesHistory) do
+            salesByType[s.petType] = (salesByType[s.petType] or 0) + 1
+        end
+        local typesSet = {}
+        for _, n in ipairs(allPetTypes) do typesSet[n] = true end
+        for t in pairs(salesByType) do typesSet[t] = true end
+        local list = {}
+        for n in pairs(typesSet) do
+            table.insert(list, {name = n, count = salesByType[n] or 0})
+        end
+        table.sort(list, function(a, b)
+            if a.count ~= b.count then return a.count > b.count end
+            return a.name < b.name
+        end)
+        for _, it in ipairs(list) do
+            if filter == "" or it.name:lower():find(filter, 1, true) then
+                local b = Instance.new("TextButton")
+                b.Size = UDim2.new(1, -8, 0, 30)
+                b.BackgroundColor3 = (selectedType == it.name) and C.accent or C.card
+                b.TextColor3 = (selectedType == it.name) and Color3.new(0,0,0) or C.text
+                b.BorderSizePixel = 0 b.AutoButtonColor = false
+                b.Text = it.name..(it.count > 0 and "   ("..it.count..")" or "")
+                b.Font = FM b.TextSize = 12
+                b.TextXAlignment = Enum.TextXAlignment.Left
+                b.ZIndex = 52 b.Parent = pScroll
+                Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+                local p = Instance.new("UIPadding") p.PaddingLeft = UDim.new(0, 12); p.Parent = b
+                b.MouseButton1Click:Connect(function()
+                    selectedType = it.name
+                    typeBtn.Text = "▼  "..it.name
+                    picker.Visible = false
+                    refreshUI()
+                end)
+            end
+        end
+    end
+
+    pSearch:GetPropertyChangedSignal("Text"):Connect(function() renderPicker(pSearch.Text) end)
+    allRowBtn.MouseButton1Click:Connect(function()
+        selectedType = nil
+        typeBtn.Text = "▼  All Pets"
+        picker.Visible = false
+        refreshUI()
+    end)
+    typeBtn.MouseButton1Click:Connect(function()
+        picker.Visible = not picker.Visible
+        if picker.Visible then renderPicker(pSearch.Text or "") end
+    end)
+
+    -- ===== Buttons =====
+    clearBtn.MouseButton1Click:Connect(function()
+        salesHistory = {} salesByKey = {} elapsedStart = tick()
+        refreshUI()
+        footerLbl.Text = "Cleared (local view)" footerLbl.TextColor3 = C.textDim
+    end)
+    sortBtn.MouseButton1Click:Connect(function()
+        if sortMode == "newest" then sortMode = "price_high"; sortBtn.Text = "Sort: PRICE HIGH"
+        elseif sortMode == "price_high" then sortMode = "price_low"; sortBtn.Text = "Sort: PRICE LOW"
+        else sortMode = "newest"; sortBtn.Text = "Sort: NEWEST" end
+        refreshUI()
+    end)
+
+    -- ===== Auto-fetch saat tab dibuka =====
+    hp:GetPropertyChangedSignal("Visible"):Connect(function()
+        if hp.Visible then task.spawn(fetchHistory) end
+    end)
+
+    -- ===== Elapsed timer (1s tick) =====
+    task.spawn(function()
+        while gui.Parent do
+            if hp.Visible then
+                local sec = math.floor(tick() - elapsedStart)
+                local txt
+                if sec < 60 then txt = sec.."s"
+                elseif sec < 3600 then txt = math.floor(sec/60).."m "..(sec%60).."s"
+                else txt = math.floor(sec/3600).."h "..math.floor((sec%3600)/60).."m" end
+                elapsedLbl.Text = "⏱  "..txt
+            end
+            task.wait(1)
         end
     end)
+
+    -- ===== Refresh relative timestamps tiap 30s =====
+    task.spawn(function()
+        while gui.Parent do
+            task.wait(30)
+            if hp.Visible and #salesHistory > 0 then refreshUI() end
+        end
+    end)
+
+    -- ===== Initial fetch =====
+    task.spawn(function()
+        task.wait(3)
+        if fetchHistRE then fetchHistory() end
+    end)
+
+    refreshUI()
 end)()
 
 
