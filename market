@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.154"
-local VERSION_DATE = "v8.154: (1) AUTO-CLEAN BOOTH ke paling atas MISC. (2) Status 'Stopped — X listed' dipindah ke title bar sebelah ZENX MARKET, rules area diperlebar ke atas. (3) AGE LOCK card di MISC: ANY/AGE 1/AGE 100 — filter pet yg ke-list/count basis age supaya KG predictable"
+local VERSION = "8.156"
+local VERSION_DATE = "v8.156: HISTORY SELL tab baru di sidebar (bawah HOP SERVER). Track pet ke-sold dari booth, total tokens, simpen 24 jam ke file. Auto-detect via snapshot diff (skip kalo auto-clean / pantau yg unlist)."
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -1059,6 +1059,7 @@ makeSbBtn("MARKET")
 makeSbBtn("LIST HARGA")
 makeSbBtn("SNIPE")
 makeSbBtn("HOP SERVER")
+makeSbBtn("HISTORY SELL")
 makeSbBtn("GARDEN")
 
 -- ===== PANELS =====
@@ -1073,17 +1074,19 @@ local marketPanel = makePanel("MARKET")
 local pricePanel = makePanel("LIST HARGA")
 local snipePanel = makePanel("SNIPE")
 local hopServerPanel = makePanel("HOP SERVER")
+makePanel("HISTORY SELL")  -- v8.156: store via panels table
 local gardenPanel = makePanel("GARDEN")
 BH.gardenPanel = gardenPanel  -- store for cross-scope access
 
 -- v8.49: detect garden server (no TradeWorld = garden)
 local isGardenServer = (Workspace:FindFirstChild("TradeWorld") == nil)
 if isGardenServer then
-    -- Hide MARKET/LIST HARGA/SNIPE/HOP SERVER tabs, show GARDEN by default
+    -- Hide MARKET/LIST HARGA/SNIPE/HOP SERVER/HISTORY tabs, show GARDEN by default
     sbBtns.MARKET.btn.Visible = false
     sbBtns["LIST HARGA"].btn.Visible = false
     sbBtns.SNIPE.btn.Visible = false
     sbBtns["HOP SERVER"].btn.Visible = false
+    sbBtns["HISTORY SELL"].btn.Visible = false
     marketPanel.Visible = false
     gardenPanel.Visible = true
     -- override default tab visual ke GARDEN
@@ -2295,42 +2298,75 @@ do
     end)
 end
 
--- v8.154: AGE LOCK card — restrict listing/clean to only age 1 OR age 100
+-- v8.155: AGE LOCK card — multi-select, pet age 1 dan/atau 100 (kg predictable)
 do
-    local ageCard = makeCard(miscPanel, 102)
-    ageCard.LayoutOrder = -5  -- atas, di bawah cleanCard
+    local ageCard = makeCard(miscPanel, 118)
+    ageCard.LayoutOrder = -5
     lblOf(ageCard, "🔒  AGE LOCK (basis KG predictable)", 14, 10, 380, 22, C.accent, 14, FB)
-    lblOf(ageCard, "Filter pet berdasarkan age. Age 1 = 6kg, Age 100 = 60kg, lain skip.", 14, 32, 480, 18, C.textDim, 11)
+    lblOf(ageCard, "Pilih age yg boleh ke-list. Age 1 = 6kg, Age 100 = 60kg.", 14, 32, 480, 18, C.textDim, 11)
 
-    local savedMode = (BH.marketState and BH.marketState.ageLockMode) or "any"
-    BH.ageLockMode = savedMode  -- "any", "age1", "age100"
-
-    local btnAny  = btnOf(ageCard, 14, 56, 110, 30, "ANY AGE", C.card)
-    local btnAge1 = btnOf(ageCard, 132, 56, 110, 30, "ONLY AGE 1", C.card)
-    local btnAge100 = btnOf(ageCard, 250, 56, 120, 30, "ONLY AGE 100", C.card)
-
-    local function refreshAgeBtns()
-        btnAny.BackgroundColor3 = (BH.ageLockMode == "any") and C.accent or C.card
-        btnAny.TextColor3 = (BH.ageLockMode == "any") and Color3.new(0,0,0) or C.text
-        btnAge1.BackgroundColor3 = (BH.ageLockMode == "age1") and C.accent or C.card
-        btnAge1.TextColor3 = (BH.ageLockMode == "age1") and Color3.new(0,0,0) or C.text
-        btnAge100.BackgroundColor3 = (BH.ageLockMode == "age100") and C.accent or C.card
-        btnAge100.TextColor3 = (BH.ageLockMode == "age100") and Color3.new(0,0,0) or C.text
+    -- Load saved state (table format: {[1]=true, [100]=true})
+    BH.ageLockAllowed = {}
+    if BH.marketState and type(BH.marketState.ageLockAllowed) == "table" then
+        for k, v in pairs(BH.marketState.ageLockAllowed) do
+            local n = tonumber(k)
+            if n and v then BH.ageLockAllowed[n] = true end
+        end
     end
-    refreshAgeBtns()
 
-    local function setAge(mode)
-        BH.ageLockMode = mode
-        refreshAgeBtns()
+    local btnAge1 = btnOf(ageCard, 14, 56, 130, 30, "AGE 1", C.card)
+    local btnAge100 = btnOf(ageCard, 152, 56, 140, 30, "AGE 100", C.card)
+    local btnClear = btnOf(ageCard, 300, 56, 80, 30, "ANY", C.card)
+    local ageStatusLbl = lblOf(ageCard, "Allowed: any age", 14, 92, 480, 18, C.textDim, 10)
+
+    local function refreshBtns()
+        local s = BH.ageLockAllowed or {}
+        btnAge1.BackgroundColor3 = s[1] and C.success or C.card
+        btnAge1.TextColor3 = s[1] and Color3.new(0,0,0) or C.text
+        btnAge100.BackgroundColor3 = s[100] and C.success or C.card
+        btnAge100.TextColor3 = s[100] and Color3.new(0,0,0) or C.text
+        -- ANY button hijau kalo gak ada yg di-toggle (= any age)
+        local none = not (s[1] or s[100])
+        btnClear.BackgroundColor3 = none and C.accent or C.card
+        btnClear.TextColor3 = none and Color3.new(0,0,0) or C.text
+
+        -- status text
+        local picked = {}
+        if s[1] then table.insert(picked, "Age 1") end
+        if s[100] then table.insert(picked, "Age 100") end
+        if #picked == 0 then
+            ageStatusLbl.Text = "Allowed: any age"
+        else
+            ageStatusLbl.Text = "Allowed: "..table.concat(picked, " + ")
+        end
+    end
+    refreshBtns()
+
+    local function persistAge()
         if BH.marketState then
-            BH.marketState.ageLockMode = mode
+            BH.marketState.ageLockAllowed = {}
+            for k, v in pairs(BH.ageLockAllowed) do
+                BH.marketState.ageLockAllowed[tostring(k)] = v
+            end
             BH.saveMarketState(BH.marketState)
         end
-        L("[AgeLock] mode = "..mode)
     end
-    btnAny.MouseButton1Click:Connect(function() setAge("any") end)
-    btnAge1.MouseButton1Click:Connect(function() setAge("age1") end)
-    btnAge100.MouseButton1Click:Connect(function() setAge("age100") end)
+
+    btnAge1.MouseButton1Click:Connect(function()
+        BH.ageLockAllowed[1] = (not BH.ageLockAllowed[1]) and true or nil
+        refreshBtns(); persistAge()
+        L("[AgeLock] Age 1 toggled — set="..tostring(BH.ageLockAllowed[1] or "off"))
+    end)
+    btnAge100.MouseButton1Click:Connect(function()
+        BH.ageLockAllowed[100] = (not BH.ageLockAllowed[100]) and true or nil
+        refreshBtns(); persistAge()
+        L("[AgeLock] Age 100 toggled — set="..tostring(BH.ageLockAllowed[100] or "off"))
+    end)
+    btnClear.MouseButton1Click:Connect(function()
+        BH.ageLockAllowed = {}
+        refreshBtns(); persistAge()
+        L("[AgeLock] cleared → any age")
+    end)
 end
 
 -- v8.48: AUTO-START card — auto klik START pas script load (kalau rules ada)
@@ -2512,6 +2548,7 @@ do
                     end
                     if ok and (r1 == true or r1 == nil or (type(r1) == "string" and not r1:lower():find("error") and not r1:lower():find("fail"))) then
                         removed = removed + 1
+                        if BH.markUnlistedByMe then BH.markUnlistedByMe(listingUuid) end  -- v8.156
                         break
                     end
                 end
@@ -2974,6 +3011,7 @@ do
                         local success, info = tryUnlistOne(toUnlist[i])
                         if success then
                             removed = removed + 1
+                            if BH.markUnlistedByMe then BH.markUnlistedByMe(toUnlist[i]) end  -- v8.156
                         else
                             failed = failed + 1
                             L("[Pantau] ["..i.."] ✗ "..tostring(info))
@@ -3180,6 +3218,7 @@ do
                         if success then
                             batchRemoved = batchRemoved + 1
                             removed = removed + 1
+                            if BH.markUnlistedByMe then BH.markUnlistedByMe(allUuids[i]) end  -- v8.156
                         else
                             batchFailed = batchFailed + 1
                             failed = failed + 1
@@ -4479,17 +4518,17 @@ BH.countMyPetsForRule = function(r)
     local ruleType = r.type
     local ruleMin = r.min or 0
     local ruleMax = (r.max == math.huge) and math.huge or r.max
-    local ageLock = BH.ageLockMode or "any"  -- v8.154
+    local ageLockSet = BH.ageLockAllowed  -- v8.155: set of allowed ages, nil/empty = any
+    local hasAgeLock = ageLockSet and next(ageLockSet) ~= nil
     local count = 0
     local debugInfo = {checked=0, typeMatch=0, kgMatch=0, hasBase=0, noBase=0}
     for _, t in ipairs(bp:GetChildren()) do
-        if isPet(t) then
-            -- v8.154: age lock filter
+        if isPet(t) and not isFav(t) then  -- v8.155: skip fav consistent dengan listing loop
+            -- v8.155: age lock multi-select filter
             local skipByAge = false
-            if ageLock ~= "any" then
+            if hasAgeLock then
                 local age = getAge(t) or 0
-                if ageLock == "age1" and age ~= 1 then skipByAge = true end
-                if ageLock == "age100" and age ~= 100 then skipByAge = true end
+                if not ageLockSet[age] then skipByAge = true end
             end
             if not skipByAge then
             debugInfo.checked = debugInfo.checked + 1
@@ -5586,16 +5625,16 @@ BH.onStartClick = function()
 
             local pets = {}
             local mutatedDebugCount = 0  -- v8.111: log first 5 mutated pets
-            local ageLockMode = BH.ageLockMode or "any"  -- v8.154
+            local ageLockSet = BH.ageLockAllowed  -- v8.155: multi-select age filter
+            local hasAgeLock = ageLockSet and next(ageLockSet) ~= nil
             local ageSkippedCount = 0
             for _, t in ipairs(bp:GetChildren()) do
                 local skipPet = false
                 if isPet(t) and not isFav(t) then
-                    -- v8.154: age lock filter
-                    if ageLockMode ~= "any" then
+                    -- v8.155: age lock multi-select filter
+                    if hasAgeLock then
                         local petAge = getAge(t) or 0
-                        if (ageLockMode == "age1" and petAge ~= 1) or
-                           (ageLockMode == "age100" and petAge ~= 100) then
+                        if not ageLockSet[petAge] then
                             ageSkippedCount = ageSkippedCount + 1
                             skipPet = true
                         end
@@ -7999,6 +8038,218 @@ L("Cek tab LIST HARGA buat liat:")
 L("  - Total pet di backpack")
 L("  - Fav count")
 L("  - Inventory capacity")
+
+
+-- v8.156: HISTORY SELL panel + sales tracker
+-- Track listings yg ilang dari booth (asumsi sold kecuali kita unlist sendiri)
+;(function()
+    local SALES_FILE = "zenx_market_sales.json"
+    BH.salesHistory = {}
+    BH.recentUnlists = {}     -- {[uuid] = expiry} — skip diff for these
+    BH.lastBoothSnapshot = nil
+
+    -- File load
+    pcall(function()
+        if isfile and isfile(SALES_FILE) then
+            local ok, data = pcall(function() return HttpService:JSONDecode(readfile(SALES_FILE)) end)
+            if ok and type(data) == "table" then BH.salesHistory = data end
+        end
+    end)
+
+    -- Purge >24h
+    local function purgeOld()
+        local cutoff = os.time() - 24*3600
+        local fresh = {}
+        for _, e in ipairs(BH.salesHistory) do
+            if (e.time or 0) >= cutoff then table.insert(fresh, e) end
+        end
+        BH.salesHistory = fresh
+    end
+    purgeOld()
+
+    local function saveSales()
+        pcall(function()
+            if writefile then writefile(SALES_FILE, HttpService:JSONEncode(BH.salesHistory)) end
+        end)
+    end
+
+    -- Public API biar dipanggil dari auto-clean / pantau unlist
+    BH.markUnlistedByMe = function(uuid)
+        if not uuid then return end
+        BH.recentUnlists[tostring(uuid)] = tick() + 120  -- 2 menit grace
+        BH.recentUnlists[tostring(uuid):gsub("[{}]", "")] = tick() + 120
+    end
+
+    -- Build HISTORY SELL panel UI
+    local hp = panels["HISTORY SELL"]
+    do
+        local pad = Instance.new("UIPadding")
+        pad.PaddingTop = UDim.new(0, 14) pad.PaddingLeft = UDim.new(0, 14)
+        pad.PaddingRight = UDim.new(0, 14) pad.PaddingBottom = UDim.new(0, 14)
+        pad.Parent = hp
+
+        local hdrCard = Instance.new("Frame")
+        hdrCard.Size = UDim2.new(1, 0, 0, 64)
+        hdrCard.BackgroundColor3 = C.card hdrCard.BorderSizePixel = 0
+        hdrCard.Parent = hp
+        Instance.new("UICorner", hdrCard).CornerRadius = UDim.new(0, 8)
+
+        lblOf(hdrCard, "💰  HISTORY SELL (24 jam terakhir)", 14, 8, 380, 22, C.accent, 14, FB)
+        local totLbl = lblOf(hdrCard, "Total: 0 sold | 0 tokens", 14, 30, 380, 18, C.text, 12, FM)
+        local refreshBtn = btnOf(hdrCard, 14, 50, 100, 24, "🔄 REFRESH", C.accent)
+        refreshBtn.TextSize = 11
+        local clearBtn = btnOf(hdrCard, 122, 50, 100, 24, "🗑️ CLEAR", C.danger)
+        clearBtn.TextSize = 11
+
+        local listFrame = Instance.new("Frame")
+        listFrame.Size = UDim2.new(1, 0, 1, -78)
+        listFrame.Position = UDim2.new(0, 0, 0, 74)
+        listFrame.BackgroundColor3 = C.bg listFrame.BorderSizePixel = 0
+        listFrame.Parent = hp
+        Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 8)
+
+        local scroll = Instance.new("ScrollingFrame")
+        scroll.Size = UDim2.new(1, -8, 1, -8)
+        scroll.Position = UDim2.new(0, 4, 0, 4)
+        scroll.BackgroundTransparency = 1 scroll.BorderSizePixel = 0
+        scroll.ScrollBarThickness = 4 scroll.ScrollBarImageColor3 = C.accent
+        scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        scroll.Parent = listFrame
+        local lay = Instance.new("UIListLayout")
+        lay.Padding = UDim.new(0, 3) lay.Parent = scroll
+        local spad = Instance.new("UIPadding")
+        spad.PaddingTop = UDim.new(0, 4) spad.PaddingBottom = UDim.new(0, 4)
+        spad.PaddingLeft = UDim.new(0, 6) spad.PaddingRight = UDim.new(0, 6)
+        spad.Parent = scroll
+
+        BH.refreshHistoryPanel = function()
+            for _, c in ipairs(scroll:GetChildren()) do
+                if c:IsA("Frame") then c:Destroy() end
+            end
+            purgeOld()
+            saveSales()
+            local total = 0
+            for _, s in ipairs(BH.salesHistory) do total = total + (tonumber(s.price) or 0) end
+            totLbl.Text = string.format("Total: %d sold  |  %s tokens", #BH.salesHistory, total)
+            -- Sort newest first
+            local sorted = {}
+            for _, s in ipairs(BH.salesHistory) do table.insert(sorted, s) end
+            table.sort(sorted, function(a, b) return (a.time or 0) > (b.time or 0) end)
+            for i, s in ipairs(sorted) do
+                local row = Instance.new("Frame")
+                row.Size = UDim2.new(1, -8, 0, 30)
+                row.BackgroundColor3 = (i % 2 == 0) and C.bg or C.card
+                row.BorderSizePixel = 0 row.Parent = scroll
+                Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+                -- Time (relative)
+                local ago = os.time() - (s.time or 0)
+                local agoTxt
+                if ago < 60 then agoTxt = ago.."s"
+                elseif ago < 3600 then agoTxt = math.floor(ago/60).."m"
+                else agoTxt = math.floor(ago/3600).."h"..math.floor((ago%3600)/60).."m" end
+                local tm = Instance.new("TextLabel")
+                tm.Size = UDim2.new(0, 60, 1, 0) tm.Position = UDim2.new(0, 8, 0, 0)
+                tm.BackgroundTransparency = 1 tm.Text = agoTxt.." ago"
+                tm.TextColor3 = C.textDim tm.Font = FM tm.TextSize = 11
+                tm.TextXAlignment = Enum.TextXAlignment.Left tm.Parent = row
+                -- Pet type
+                local nm = Instance.new("TextLabel")
+                nm.Size = UDim2.new(0, 160, 1, 0) nm.Position = UDim2.new(0, 76, 0, 0)
+                nm.BackgroundTransparency = 1 nm.Text = tostring(s.petType or "?")
+                nm.TextColor3 = C.text nm.Font = FM nm.TextSize = 12
+                nm.TextXAlignment = Enum.TextXAlignment.Left
+                nm.TextTruncate = Enum.TextTruncate.AtEnd nm.Parent = row
+                -- KG
+                local kg = Instance.new("TextLabel")
+                kg.Size = UDim2.new(0, 60, 1, 0) kg.Position = UDim2.new(0, 240, 0, 0)
+                kg.BackgroundTransparency = 1 kg.Text = string.format("%.1fkg", s.kg or 0)
+                kg.TextColor3 = C.textDim kg.Font = FM kg.TextSize = 11
+                kg.TextXAlignment = Enum.TextXAlignment.Left kg.Parent = row
+                -- Price (token icon yellow)
+                local pr = Instance.new("TextLabel")
+                pr.Size = UDim2.new(1, -310, 1, 0) pr.Position = UDim2.new(0, 304, 0, 0)
+                pr.BackgroundTransparency = 1 pr.Text = "💰 "..tostring(s.price or 0)
+                pr.TextColor3 = C.accent pr.Font = FB pr.TextSize = 13
+                pr.TextXAlignment = Enum.TextXAlignment.Right
+                pr.Parent = row
+                local rpad = Instance.new("UIPadding") rpad.PaddingRight = UDim.new(0, 10); rpad.Parent = row
+            end
+            if #BH.salesHistory == 0 then
+                local empty = Instance.new("TextLabel")
+                empty.Size = UDim2.new(1, -8, 0, 40)
+                empty.BackgroundTransparency = 1
+                empty.Text = "Belum ada pet ke-sold dalam 24h terakhir.\nSc auto-track pas ada listing yg ilang (dipertimbangkan sold)."
+                empty.TextColor3 = C.textDim empty.Font = FM empty.TextSize = 11
+                empty.TextWrapped = true empty.Parent = scroll
+            end
+        end
+
+        refreshBtn.MouseButton1Click:Connect(function() BH.refreshHistoryPanel() end)
+        clearBtn.MouseButton1Click:Connect(function()
+            BH.salesHistory = {}
+            saveSales()
+            BH.refreshHistoryPanel()
+            L("[Sales] history cleared")
+        end)
+        BH.refreshHistoryPanel()
+    end
+
+    -- Background sales tracker — diff snapshot every 15s
+    task.spawn(function()
+        task.wait(20)  -- biar game replicate dulu
+        while gui.Parent do
+            local ok, data = pcall(BH.fetchBoothData, player)
+            if ok and data and data.Listings then
+                -- Build current snapshot
+                local cur = {}
+                for uuid, listing in pairs(data.Listings) do
+                    if listing.ItemType == "Pet" and listing.ItemId then
+                        local item = data.Items and data.Items[listing.ItemId]
+                        local bw = (item and item.PetData and tonumber(item.PetData.BaseWeight)) or 0
+                        cur[tostring(uuid)] = {
+                            petType = (item and tostring(item.PetType)) or "?",
+                            kg = bw * 1.1,
+                            price = tonumber(listing.Price) or 0,
+                        }
+                    end
+                end
+                -- Compare with last snapshot
+                if BH.lastBoothSnapshot then
+                    -- Clean expired unlist marks
+                    local now = tick()
+                    for u, exp in pairs(BH.recentUnlists) do
+                        if now > exp then BH.recentUnlists[u] = nil end
+                    end
+                    -- Find missing listings = sold
+                    local newSales = 0
+                    for uuid, info in pairs(BH.lastBoothSnapshot) do
+                        if not cur[uuid] then
+                            local unlisted = BH.recentUnlists[uuid] or BH.recentUnlists[uuid:gsub("[{}]","")]
+                            if not unlisted then
+                                table.insert(BH.salesHistory, {
+                                    time = os.time(),
+                                    petType = info.petType,
+                                    kg = info.kg,
+                                    price = info.price,
+                                    uuid = uuid,
+                                })
+                                newSales = newSales + 1
+                                L(string.format("[Sales] 💰 SOLD: %s %.2fkg @ %d", info.petType, info.kg, info.price))
+                            end
+                        end
+                    end
+                    if newSales > 0 then
+                        purgeOld(); saveSales()
+                        if BH.refreshHistoryPanel then pcall(BH.refreshHistoryPanel) end
+                    end
+                end
+                BH.lastBoothSnapshot = cur
+            end
+            task.wait(15)
+        end
+    end)
+end)()
 
 
 -- v8.49: GARDEN PANEL UI build (server-detect)
