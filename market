@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.150"
-local VERSION_DATE = "v8.150: FIX auto-clean KG basis (BaseWeight × 1.1 age-1 normalized, sesuai rule) + strip mutation prefix dari pet type + SAFETY GUARD abort kalo 100% non-match"
+local VERSION = "8.154"
+local VERSION_DATE = "v8.154: (1) AUTO-CLEAN BOOTH ke paling atas MISC. (2) Status 'Stopped — X listed' dipindah ke title bar sebelah ZENX MARKET, rules area diperlebar ke atas. (3) AGE LOCK card di MISC: ANY/AGE 1/AGE 100 — filter pet yg ke-list/count basis age supaya KG predictable"
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -939,11 +939,24 @@ logoLbl.TextColor3 = C.accent logoLbl.Font = FB logoLbl.TextSize = 18
 logoLbl.TextXAlignment = Enum.TextXAlignment.Left logoLbl.Parent = titleBar
 
 local titleLbl = Instance.new("TextLabel")
-titleLbl.Size = UDim2.new(0.7, 0, 1, 0) titleLbl.Position = UDim2.new(0, 50, 0, 0)
+titleLbl.Size = UDim2.new(0, 170, 1, 0) titleLbl.Position = UDim2.new(0, 50, 0, 0)
 titleLbl.BackgroundTransparency = 1
 titleLbl.Text = "ZENX MARKET v"..VERSION
 titleLbl.TextColor3 = C.accent titleLbl.Font = FB titleLbl.TextSize = 13
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left titleLbl.Parent = titleBar
+
+-- v8.154: status indicator di title bar (samping logo) — mirror dari statsLbl listing panel
+do
+    local headerStatusLbl = Instance.new("TextLabel")
+    headerStatusLbl.Size = UDim2.new(1, -270, 1, 0) headerStatusLbl.Position = UDim2.new(0, 224, 0, 0)
+    headerStatusLbl.BackgroundTransparency = 1
+    headerStatusLbl.Text = ""
+    headerStatusLbl.TextColor3 = C.success headerStatusLbl.Font = Enum.Font.Code headerStatusLbl.TextSize = 11
+    headerStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    headerStatusLbl.TextTruncate = Enum.TextTruncate.AtEnd
+    headerStatusLbl.Parent = titleBar
+    BH.headerStatusLbl = headerStatusLbl
+end
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 32, 0, 28) closeBtn.Position = UDim2.new(1, -42, 0.5, -14)
@@ -1235,9 +1248,10 @@ local listPad = Instance.new("UIPadding") listPad.PaddingTop = UDim.new(0, 14)
 listPad.PaddingLeft = UDim.new(0, 14) listPad.PaddingRight = UDim.new(0, 14) listPad.PaddingBottom = UDim.new(0, 14)
 listPad.Parent = listingPanel
 
--- Stats card
+-- Stats card — v8.154: HIDE (status mirror ke title bar)
 local statsCard = Instance.new("Frame")
-statsCard.Size = UDim2.new(1, 0, 0, 56) statsCard.BackgroundColor3 = C.card statsCard.BorderSizePixel = 0
+statsCard.Size = UDim2.new(1, 0, 0, 0) statsCard.BackgroundColor3 = C.card statsCard.BorderSizePixel = 0
+statsCard.Visible = false
 statsCard.Parent = listingPanel
 Instance.new("UICorner", statsCard).CornerRadius = UDim.new(0, 8)
 local statsLbl = Instance.new("TextLabel")
@@ -1247,9 +1261,21 @@ statsLbl.TextColor3 = C.success statsLbl.Font = Enum.Font.Code statsLbl.TextSize
 statsLbl.TextXAlignment = Enum.TextXAlignment.Left statsLbl.TextYAlignment = Enum.TextYAlignment.Top
 statsLbl.TextWrapped = true statsLbl.Parent = statsCard
 
--- Rules list (added pet+kg+price combos)
+-- v8.154: mirror statsLbl ke headerStatusLbl di title bar
+statsLbl:GetPropertyChangedSignal("Text"):Connect(function()
+    if BH.headerStatusLbl then BH.headerStatusLbl.Text = statsLbl.Text end
+end)
+statsLbl:GetPropertyChangedSignal("TextColor3"):Connect(function()
+    if BH.headerStatusLbl then BH.headerStatusLbl.TextColor3 = statsLbl.TextColor3 end
+end)
+if BH.headerStatusLbl then
+    BH.headerStatusLbl.Text = statsLbl.Text
+    BH.headerStatusLbl.TextColor3 = statsLbl.TextColor3
+end
+
+-- Rules list (added pet+kg+price combos) — v8.154: extend up (was y=68, sekarang y=0)
 local rulesScroll = Instance.new("ScrollingFrame")
-rulesScroll.Size = UDim2.new(1, 0, 0, 90) rulesScroll.Position = UDim2.new(0, 0, 0, 68)
+rulesScroll.Size = UDim2.new(1, 0, 0, 158) rulesScroll.Position = UDim2.new(0, 0, 0, 0)
 rulesScroll.BackgroundColor3 = C.card rulesScroll.BorderSizePixel = 0
 rulesScroll.ScrollBarThickness = 4 rulesScroll.Parent = listingPanel
 Instance.new("UICorner", rulesScroll).CornerRadius = UDim.new(0, 8)
@@ -2095,7 +2121,7 @@ local miscPad = Instance.new("UIPadding")
 miscPad.PaddingTop = UDim.new(0, 14) miscPad.PaddingLeft = UDim.new(0, 14)
 miscPad.PaddingRight = UDim.new(0, 14) miscPad.PaddingBottom = UDim.new(0, 14)
 miscPad.Parent = miscPanel
-local miscLayout = Instance.new("UIListLayout") miscLayout.Padding = UDim.new(0, 10) miscLayout.Parent = miscPanel
+local miscLayout = Instance.new("UIListLayout") miscLayout.Padding = UDim.new(0, 10) miscLayout.SortOrder = Enum.SortOrder.LayoutOrder miscLayout.Parent = miscPanel
 
 local function makeCard(parent, height)
     local c = Instance.new("Frame")
@@ -2269,6 +2295,44 @@ do
     end)
 end
 
+-- v8.154: AGE LOCK card — restrict listing/clean to only age 1 OR age 100
+do
+    local ageCard = makeCard(miscPanel, 102)
+    ageCard.LayoutOrder = -5  -- atas, di bawah cleanCard
+    lblOf(ageCard, "🔒  AGE LOCK (basis KG predictable)", 14, 10, 380, 22, C.accent, 14, FB)
+    lblOf(ageCard, "Filter pet berdasarkan age. Age 1 = 6kg, Age 100 = 60kg, lain skip.", 14, 32, 480, 18, C.textDim, 11)
+
+    local savedMode = (BH.marketState and BH.marketState.ageLockMode) or "any"
+    BH.ageLockMode = savedMode  -- "any", "age1", "age100"
+
+    local btnAny  = btnOf(ageCard, 14, 56, 110, 30, "ANY AGE", C.card)
+    local btnAge1 = btnOf(ageCard, 132, 56, 110, 30, "ONLY AGE 1", C.card)
+    local btnAge100 = btnOf(ageCard, 250, 56, 120, 30, "ONLY AGE 100", C.card)
+
+    local function refreshAgeBtns()
+        btnAny.BackgroundColor3 = (BH.ageLockMode == "any") and C.accent or C.card
+        btnAny.TextColor3 = (BH.ageLockMode == "any") and Color3.new(0,0,0) or C.text
+        btnAge1.BackgroundColor3 = (BH.ageLockMode == "age1") and C.accent or C.card
+        btnAge1.TextColor3 = (BH.ageLockMode == "age1") and Color3.new(0,0,0) or C.text
+        btnAge100.BackgroundColor3 = (BH.ageLockMode == "age100") and C.accent or C.card
+        btnAge100.TextColor3 = (BH.ageLockMode == "age100") and Color3.new(0,0,0) or C.text
+    end
+    refreshAgeBtns()
+
+    local function setAge(mode)
+        BH.ageLockMode = mode
+        refreshAgeBtns()
+        if BH.marketState then
+            BH.marketState.ageLockMode = mode
+            BH.saveMarketState(BH.marketState)
+        end
+        L("[AgeLock] mode = "..mode)
+    end
+    btnAny.MouseButton1Click:Connect(function() setAge("any") end)
+    btnAge1.MouseButton1Click:Connect(function() setAge("age1") end)
+    btnAge100.MouseButton1Click:Connect(function() setAge("age100") end)
+end
+
 -- v8.48: AUTO-START card — auto klik START pas script load (kalau rules ada)
 do
     local autoStartCard = makeCard(miscPanel, 86)
@@ -2295,6 +2359,7 @@ end
 -- v8.145: AUTO-UNLIST NON-MATCH card — auto unlist pet di booth yg gak match rule
 do
     local cleanCard = makeCard(miscPanel, 110)
+    cleanCard.LayoutOrder = -10  -- v8.154: paling atas MISC
     lblOf(cleanCard, "🧹  AUTO-CLEAN BOOTH", 14, 10, 360, 22, C.accent, 14, FB)
     lblOf(cleanCard, "Unlist pet non-match rule + cap kelebihan maxListings (cek 10s)", 14, 32, 480, 18, C.textDim, 11)
     local cleanState = (BH.marketState and BH.marketState.autoCleanNonMatch) == true
@@ -2505,275 +2570,6 @@ do
     end)
 end
 
--- v8.49: AUTO-ACCEPT card (garden server feature) — auto terima gift & trade
-do
-    local acceptCard = makeCard(miscPanel, 116)
-    lblOf(acceptCard, "🎁  AUTO-ACCEPT (Garden Server)", 14, 10, 360, 22, C.accent, 14, FB)
-    lblOf(acceptCard, "Auto terima gift / trade dari player lain", 14, 32, 360, 18, C.textDim, 11)
-    local giftBtn = btnOf(acceptCard, 14, 54, 170, 28, "🎁 Auto-Gift: OFF", C.danger)
-    local tradeBtn = btnOf(acceptCard, 192, 54, 170, 28, "🤝 Auto-Trade: OFF", C.danger)
-    local statusLbl = lblOf(acceptCard, "Scanning gift/trade remotes...", 14, 88, 480, 18, C.textDim, 10)
-
-    -- Scan RS untuk gift/trade remotes
-    BH.giftRemotes = {}
-    BH.tradeRemotes = {}
-    local function scanRemotes(parent, depth)
-        if depth > 6 then return end
-        for _, c in ipairs(parent:GetChildren()) do
-            if c:IsA("RemoteEvent") or c:IsA("RemoteFunction") then
-                local n = c.Name:lower()
-                if n:find("gift") or n:find("offer") then
-                    table.insert(BH.giftRemotes, {remote=c, name=c.Name, isFn=c:IsA("RemoteFunction")})
-                end
-                if n:find("trade") and not n:find("booth") then
-                    table.insert(BH.tradeRemotes, {remote=c, name=c.Name, isFn=c:IsA("RemoteFunction")})
-                end
-            end
-            pcall(function() scanRemotes(c, depth + 1) end)
-        end
-    end
-    scanRemotes(RS, 0)
-    statusLbl.Text = string.format("Found: %d gift, %d trade remotes", #BH.giftRemotes, #BH.tradeRemotes)
-
-    -- v8.69: load from state file biar persist after rejoin
-    BH.autoGift = (BH.marketState and BH.marketState.autoGift) == true
-    BH.autoTrade = (BH.marketState and BH.marketState.autoTrade) == true
-    BH.giftConns = {}
-    BH.tradeConns = {}
-
-    local function hookGifts()
-        for _, conn in ipairs(BH.giftConns) do conn:Disconnect() end
-        BH.giftConns = {}
-        if not BH.autoGift then return end
-        -- v8.65: precise remote from leveling sc — listen GiftPet → fire AcceptPetGift(true, uuid)
-        local ge = RS:FindFirstChild("GameEvents")
-        if not ge then L("[Auto-Gift] ❌ no GameEvents"); return end
-
-        -- Try multiple known paths/names
-        local giftPetRE = ge:FindFirstChild("GiftPet")
-        local acceptPetGiftRE = ge:FindFirstChild("AcceptPetGift")
-
-        -- v8.68: kalo gak nemu, scan broader
-        if not giftPetRE then
-            giftPetRE = RS:FindFirstChild("GiftPet", true)
-        end
-        if not acceptPetGiftRE then
-            acceptPetGiftRE = RS:FindFirstChild("AcceptPetGift", true)
-        end
-
-        -- Diagnostic: log semua remote yg related ke gift
-        if not (giftPetRE and acceptPetGiftRE) then
-            L("[Auto-Gift] ❌ default path gagal, scan remote yg related:")
-            local found = {}
-            for _, c in ipairs(RS:GetDescendants()) do
-                if (c:IsA("RemoteEvent") or c:IsA("RemoteFunction")) then
-                    local n = c.Name:lower()
-                    if n:find("gift") or n:find("petgiv") or n:find("acceptgift") or n:find("givepet") then
-                        table.insert(found, {name=c.Name, path=c:GetFullName(), class=c.ClassName})
-                    end
-                end
-            end
-            if #found == 0 then
-                L("  (gak ada remote dengan keyword gift)")
-            else
-                for _, r in ipairs(found) do
-                    L("  • "..r.path.." ["..r.class.."]")
-                end
-            end
-            L("  Kasih tau gw nama remote yg ON CLIENT (incoming) sama yg ACCEPT")
-            return
-        end
-
-        L("[Auto-Gift] remotes OK: "..giftPetRE:GetFullName().." → "..acceptPetGiftRE:GetFullName())
-
-        local accCount = 0
-
-        -- Method A: OnClientEvent (kalo giftPetRE = RemoteEvent fire client → server)
-        if giftPetRE:IsA("RemoteEvent") then
-            local conn = giftPetRE.OnClientEvent:Connect(function(petUUID, petName, senderUsername)
-                if not BH.autoGift then return end
-                pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
-                task.spawn(function()
-                    task.wait(0.05)
-                    pcall(function() acceptPetGiftRE:FireServer(true, petUUID) end)
-                end)
-                accCount = accCount + 1
-                L("[Auto-Gift] ✅ #"..accCount.." (OnClientEvent) from "..tostring(senderUsername))
-            end)
-            table.insert(BH.giftConns, conn)
-        end
-
-        -- Method B: ChildAdded di PlayerGui (kalo game pakai notification GUI)
-        local pg = player:FindFirstChild("PlayerGui")
-        if pg then
-            local conn2 = pg.DescendantAdded:Connect(function(d)
-                if not BH.autoGift then return end
-                local n = d.Name:lower()
-                local txt = ""
-                if d:IsA("TextLabel") or d:IsA("TextButton") then txt = tostring(d.Text or ""):lower() end
-                if n:find("giftpopup") or n:find("giftframe") or n:find("incominggift")
-                   or txt:find("wants to gift") or txt:find("sent you a") or txt:find("gifted you") then
-                    L("[Auto-Gift] notif detected: "..d:GetFullName())
-                    -- Cari Accept button di parent chain
-                    task.wait(0.1)
-                    local cur = d
-                    for _ = 1, 5 do
-                        if not cur then break end
-                        for _, child in ipairs(cur:GetDescendants()) do
-                            if (child:IsA("TextButton") or child:IsA("ImageButton")) then
-                                local btnTxt = ""
-                                if child:IsA("TextButton") then btnTxt = tostring(child.Text or ""):lower() end
-                                local fullTxt = btnTxt.." "..child.Name:lower()
-                                if fullTxt:find("accept") or fullTxt:find("yes") or fullTxt:find("confirm") then
-                                    pcall(function()
-                                        if firesignal then firesignal(child.Activated) end
-                                        if getconnections then
-                                            for _, c in ipairs(getconnections(child.Activated)) do
-                                                pcall(function() c:Fire() end)
-                                            end
-                                        end
-                                    end)
-                                    accCount = accCount + 1
-                                    L("[Auto-Gift] ✅ #"..accCount.." (button click) "..child:GetFullName())
-                                    return
-                                end
-                            end
-                        end
-                        cur = cur.Parent
-                    end
-                end
-            end)
-            table.insert(BH.giftConns, conn2)
-        end
-
-        L("[Auto-Gift] hook installed ("..#BH.giftConns.." listeners)")
-    end
-
-    local function hookTrades()
-        for _, conn in ipairs(BH.tradeConns) do conn:Disconnect() end
-        BH.tradeConns = {}
-        if not BH.autoTrade then return end
-        -- v8.65: precise remote — listen SendRequest → fire RespondRequest(tradeID, true)
-        local ge = RS:FindFirstChild("GameEvents")
-        local te = ge and ge:FindFirstChild("TradeEvents")
-        if not te then L("[Auto-Trade] ❌ no TradeEvents"); return end
-        local sendReqRE = te:FindFirstChild("SendRequest")
-        local respondReqRE = te:FindFirstChild("RespondRequest")
-        local acceptRE = te:FindFirstChild("Accept")
-        local confirmRE = te:FindFirstChild("Confirm")
-        if not (sendReqRE and respondReqRE) then
-            L("[Auto-Trade] ❌ remote gak nemu (SendRequest/RespondRequest)")
-            return
-        end
-        local lastTradeID = nil
-        local accCount = 0
-        local spamRunning = false
-
-        -- Spammer: tekan tombol Accept GUI + brute force fire confirm/accept remote
-        local function findAcceptBtn()
-            local pg = player:FindFirstChild("PlayerGui")
-            local tui = pg and pg:FindFirstChild("TradingUI")
-            local lt = tui and tui:FindFirstChild("LiveTrade")
-            if not lt or not lt.Visible then return nil end
-            local opts = lt:FindFirstChild("Options")
-            return opts and opts:FindFirstChild("Accept")
-        end
-        local function spamConfirm()
-            local btn = findAcceptBtn()
-            if not btn then return false end
-            if firesignal then pcall(function() firesignal(btn.Activated) end) end
-            if getconnections then
-                pcall(function()
-                    for _, c in ipairs(getconnections(btn.Activated)) do
-                        pcall(function() c:Fire() end)
-                    end
-                end)
-            end
-            if lastTradeID then
-                if confirmRE then pcall(function() confirmRE:FireServer(lastTradeID) end) end
-                if acceptRE then pcall(function() acceptRE:FireServer(lastTradeID) end) end
-            end
-            return true
-        end
-        local function startSpammer()
-            if spamRunning then return end
-            spamRunning = true
-            task.spawn(function()
-                while BH.autoTrade and spamRunning do
-                    if not spamConfirm() then break end
-                    task.wait(3)
-                end
-                spamRunning = false
-            end)
-        end
-
-        -- Hook all TradeEvents (except history/inventory)
-        for _, r in ipairs(te:GetChildren()) do
-            if r:IsA("RemoteEvent") then
-                local lname = r.Name:lower()
-                if not (lname:find("history") or lname:find("inventory")) then
-                    local conn = r.OnClientEvent:Connect(function(...)
-                        if not BH.autoTrade then return end
-                        local args = {...}
-                        if type(args[1]) == "string" and #args[1] > 20 and args[1]:find("-") then
-                            lastTradeID = args[1]
-                        end
-                        if lname:find("cancel") or lname:find("reject") or lname:find("decline") then
-                            spamRunning = false
-                            return
-                        end
-                        if r == sendReqRE and respondReqRE and lastTradeID then
-                            pcall(function() respondReqRE:FireServer(lastTradeID, true) end)
-                            accCount = accCount + 1
-                            L("[Auto-Trade] ✅ accept #"..accCount.." tradeID="..lastTradeID:sub(1,8))
-                            task.delay(2, startSpammer)
-                            return
-                        end
-                        if r.Name == "UpdateTradeState" then startSpammer() end
-                    end)
-                    table.insert(BH.tradeConns, conn)
-                end
-            end
-        end
-        L("[Auto-Trade] hook installed ("..#BH.tradeConns.." listeners, RespondRequest+spam)")
-    end
-
-    BH.hookGiftsFn = hookGifts
-    BH.hookTradesFn = hookTrades
-
-    giftBtn.MouseButton1Click:Connect(function()
-        BH.autoGift = not BH.autoGift
-        giftBtn.Text = BH.autoGift and "🎁 Auto-Gift: ON" or "🎁 Auto-Gift: OFF"
-        giftBtn.BackgroundColor3 = BH.autoGift and C.success or C.danger
-        hookGifts()
-        -- v8.69: persist state
-        if BH.marketState then BH.marketState.autoGift = BH.autoGift; BH.saveMarketState(BH.marketState) end
-        L("[Auto-Gift] "..(BH.autoGift and "enabled, "..#BH.giftConns.." listener" or "disabled"))
-    end)
-
-    tradeBtn.MouseButton1Click:Connect(function()
-        BH.autoTrade = not BH.autoTrade
-        tradeBtn.Text = BH.autoTrade and "🤝 Auto-Trade: ON" or "🤝 Auto-Trade: OFF"
-        tradeBtn.BackgroundColor3 = BH.autoTrade and C.success or C.danger
-        hookTrades()
-        if BH.marketState then BH.marketState.autoTrade = BH.autoTrade; BH.saveMarketState(BH.marketState) end
-        L("[Auto-Trade] "..(BH.autoTrade and "enabled, "..#BH.tradeConns.." listener" or "disabled"))
-    end)
-
-    -- v8.69: kalo state loaded autoGift=true / autoTrade=true → auto install hook + update UI
-    if BH.autoGift then
-        giftBtn.Text = "🎁 Auto-Gift: ON"
-        giftBtn.BackgroundColor3 = C.success
-        hookGifts()
-        L("[Auto-Gift] auto-enabled from state file")
-    end
-    if BH.autoTrade then
-        tradeBtn.Text = "🤝 Auto-Trade: ON"
-        tradeBtn.BackgroundColor3 = C.success
-        hookTrades()
-        L("[Auto-Trade] auto-enabled from state file")
-    end
-end
 
 -- v8.49: PET TYPES card — breakdown pet di backpack per type
 do
@@ -4683,10 +4479,19 @@ BH.countMyPetsForRule = function(r)
     local ruleType = r.type
     local ruleMin = r.min or 0
     local ruleMax = (r.max == math.huge) and math.huge or r.max
+    local ageLock = BH.ageLockMode or "any"  -- v8.154
     local count = 0
     local debugInfo = {checked=0, typeMatch=0, kgMatch=0, hasBase=0, noBase=0}
     for _, t in ipairs(bp:GetChildren()) do
         if isPet(t) then
+            -- v8.154: age lock filter
+            local skipByAge = false
+            if ageLock ~= "any" then
+                local age = getAge(t) or 0
+                if ageLock == "age1" and age ~= 1 then skipByAge = true end
+                if ageLock == "age100" and age ~= 100 then skipByAge = true end
+            end
+            if not skipByAge then
             debugInfo.checked = debugInfo.checked + 1
             local pType = getPetType(t)
             local pBase = (BH.getBaseName and pType ~= "") and BH.getBaseName(pType) or pType
@@ -4701,6 +4506,7 @@ BH.countMyPetsForRule = function(r)
                     count = count + 1
                 end
             end
+            end  -- skipByAge
         end
     end
     -- v8.122: log diagnostic kalo count==0 tapi ada typeMatch (debug bug)
@@ -4969,6 +4775,41 @@ do
         local typesMap = {}
         for _, t in ipairs(KNOWN_PETS) do typesMap[t] = 0 end
         for t, _ in pairs(scanPetTypes()) do typesMap[t] = 0 end
+
+        -- v8.153: scan SEMUA pet types dari game registry (~493 entries)
+        pcall(function()
+            local data = RS:FindFirstChild("Data")
+            local petReg = data and data:FindFirstChild("PetRegistry")
+            local petList = petReg and petReg:FindFirstChild("PetList")
+            if petList then
+                if petList:IsA("ModuleScript") then
+                    local ok, m = pcall(require, petList)
+                    if ok and type(m) == "table" then
+                        for name, _ in pairs(m) do
+                            if type(name) == "string" then typesMap[name] = typesMap[name] or 0 end
+                        end
+                    end
+                else
+                    for _, c in ipairs(petList:GetChildren()) do
+                        if c:IsA("ModuleScript") then
+                            typesMap[c.Name] = typesMap[c.Name] or 0
+                        end
+                    end
+                end
+            end
+            -- Alt path: RS.PetData or RS.Pets folder
+            for _, alt in ipairs({"PetData", "Pets", "PetTypes"}) do
+                local f = RS:FindFirstChild(alt)
+                if f then
+                    for _, c in ipairs(f:GetChildren()) do
+                        if c:IsA("ModuleScript") or c:IsA("Folder") then
+                            typesMap[c.Name] = typesMap[c.Name] or 0
+                        end
+                    end
+                end
+            end
+        end)
+
         local bp = player:FindFirstChild("Backpack")
         if bp then for _, t in ipairs(bp:GetChildren()) do
             if isPet(t) and not isFav(t) then typesMap[getPetType(t)] = (typesMap[getPetType(t)] or 0) + 1 end
@@ -5745,8 +5586,22 @@ BH.onStartClick = function()
 
             local pets = {}
             local mutatedDebugCount = 0  -- v8.111: log first 5 mutated pets
+            local ageLockMode = BH.ageLockMode or "any"  -- v8.154
+            local ageSkippedCount = 0
             for _, t in ipairs(bp:GetChildren()) do
+                local skipPet = false
                 if isPet(t) and not isFav(t) then
+                    -- v8.154: age lock filter
+                    if ageLockMode ~= "any" then
+                        local petAge = getAge(t) or 0
+                        if (ageLockMode == "age1" and petAge ~= 1) or
+                           (ageLockMode == "age100" and petAge ~= 100) then
+                            ageSkippedCount = ageSkippedCount + 1
+                            skipPet = true
+                        end
+                    end
+                end
+                if isPet(t) and not isFav(t) and not skipPet then
                     local uuid = tostring(t:GetAttribute("PET_UUID") or t.Name)
                     local clean = uuid:gsub("^{",""):gsub("}$","")
                     local pType = getPetType(t)
@@ -8156,51 +8011,18 @@ BH.buildGardenPanel = function()
     btnRow.Size = UDim2.new(1, -28, 0, 28) btnRow.Position = UDim2.new(0, 14, 0, 14)
     btnRow.BackgroundTransparency = 1 btnRow.Parent = gp
 
-    local gGiftBtn = Instance.new("TextButton")
-    gGiftBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
-    gGiftBtn.Position = UDim2.new(0, 0, 0, 0)
-    gGiftBtn.BackgroundColor3 = C.card
-    gGiftBtn.AutoButtonColor = false
-    gGiftBtn.Text = "Auto Accept Gift: OFF" gGiftBtn.TextColor3 = C.textDim
-    gGiftBtn.Font = FM gGiftBtn.TextSize = 11
-    gGiftBtn.BorderSizePixel = 0 gGiftBtn.Parent = btnRow
-    Instance.new("UICorner", gGiftBtn).CornerRadius = UDim.new(0, 6)
-
-    local gTradeBtn = Instance.new("TextButton")
-    gTradeBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
-    gTradeBtn.Position = UDim2.new(0.335, btnPad/2, 0, 0)
-    gTradeBtn.BackgroundColor3 = C.card
-    gTradeBtn.AutoButtonColor = false
-    gTradeBtn.Text = "Auto Accept Trade: OFF" gTradeBtn.TextColor3 = C.textDim
-    gTradeBtn.Font = FM gTradeBtn.TextSize = 11
-    gTradeBtn.BorderSizePixel = 0 gTradeBtn.Parent = btnRow
-    Instance.new("UICorner", gTradeBtn).CornerRadius = UDim.new(0, 6)
-
+    -- v8.152: remove Auto Accept Gift/Trade buttons (khusus sc garden)
+    -- TP to Market jadi full-width
     local gTravelBtn = Instance.new("TextButton")
-    gTravelBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
-    gTravelBtn.Position = UDim2.new(0.67, btnPad, 0, 0)
+    gTravelBtn.Size = UDim2.new(1, 0, 1, 0)
+    gTravelBtn.Position = UDim2.new(0, 0, 0, 0)
     gTravelBtn.BackgroundColor3 = C.card
     gTravelBtn.AutoButtonColor = false
-    gTravelBtn.Text = "TP to Market" gTravelBtn.TextColor3 = C.textDim
-    gTravelBtn.Font = FM gTravelBtn.TextSize = 11
+    gTravelBtn.Text = "🚀 TP to Market" gTravelBtn.TextColor3 = C.text
+    gTravelBtn.Font = FB gTravelBtn.TextSize = 13
     gTravelBtn.BorderSizePixel = 0 gTravelBtn.Parent = btnRow
     Instance.new("UICorner", gTravelBtn).CornerRadius = UDim.new(0, 6)
 
-    gGiftBtn.MouseButton1Click:Connect(function()
-        BH.autoGift = not BH.autoGift
-        gGiftBtn.Text = "Auto Accept Gift: "..(BH.autoGift and "ON" or "OFF")
-        gGiftBtn.TextColor3 = BH.autoGift and C.accent or C.textDim
-        if BH.hookGiftsFn then BH.hookGiftsFn() end
-        -- v8.69: persist
-        if BH.marketState then BH.marketState.autoGift = BH.autoGift; BH.saveMarketState(BH.marketState) end
-    end)
-    gTradeBtn.MouseButton1Click:Connect(function()
-        BH.autoTrade = not BH.autoTrade
-        gTradeBtn.Text = "Auto Accept Trade: "..(BH.autoTrade and "ON" or "OFF")
-        gTradeBtn.TextColor3 = BH.autoTrade and C.accent or C.textDim
-        if BH.hookTradesFn then BH.hookTradesFn() end
-        if BH.marketState then BH.marketState.autoTrade = BH.autoTrade; BH.saveMarketState(BH.marketState) end
-    end)
     gTravelBtn.MouseButton1Click:Connect(function()
         L("[TP-Market] mencari 'Travel to Farmer Market' button...")
         local fired = false
@@ -8330,17 +8152,19 @@ BH.buildGardenPanel = function()
         Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
         return b
     end
-    local tabAll = makeTab("ALL", 0, 80)
-    local tab60p = makeTab("60kg+", 86, 80)
-    local tab60m = makeTab("60kg-", 172, 80)
+    local tabAll = makeTab("ALL", 0, 70)
+    local tab60p = makeTab("60kg+", 76, 70)
+    local tab60m = makeTab("60kg-", 152, 70)
+    local tabGift = makeTab("🎁 GIFT", 228, 90)
     local function setTabActive(active)
-        for _, b in ipairs({tabAll, tab60p, tab60m}) do
+        for _, b in ipairs({tabAll, tab60p, tab60m, tabGift}) do
             b.BackgroundColor3 = C.card
             b.TextColor3 = C.textDim
         end
         if active == "all" then tabAll.BackgroundColor3 = C.accent; tabAll.TextColor3 = Color3.new(0,0,0)
         elseif active == "60plus" then tab60p.BackgroundColor3 = C.accent; tab60p.TextColor3 = Color3.new(0,0,0)
         elseif active == "60minus" then tab60m.BackgroundColor3 = C.accent; tab60m.TextColor3 = Color3.new(0,0,0)
+        elseif active == "gift" then tabGift.BackgroundColor3 = C.success; tabGift.TextColor3 = Color3.new(0,0,0)
         end
     end
     setTabActive("all")
@@ -8361,6 +8185,618 @@ BH.buildGardenPanel = function()
         pad.PaddingLeft = UDim.new(0, 6) pad.PaddingRight = UDim.new(0, 6)
         pad.Parent = gListScroll
     end
+
+    -- v8.151: 🎁 AUTO GIFT CARD — same area as gListScroll, toggled via tab
+    local giftCard = Instance.new("Frame")
+    giftCard.Size = gListScroll.Size
+    giftCard.Position = gListScroll.Position
+    giftCard.BackgroundColor3 = C.input
+    giftCard.BorderSizePixel = 0
+    giftCard.Visible = false  -- initial hidden, ALL tab default
+    giftCard.Parent = gp
+    Instance.new("UICorner", giftCard).CornerRadius = UDim.new(0, 6)
+
+    -- ===== Gift state =====
+    local giftSelectedTargets = {}  -- {[name]=true}
+    local giftSelectedPets = {}  -- {[type]=true}
+    local giftActive = false
+    local giftStopReq = false
+    local giftSent, giftFailed = 0, 0
+    local giftMatchCount = 0
+
+    -- Load from state
+    if BH.marketState and BH.marketState.gardenGift then
+        local g = BH.marketState.gardenGift
+        if type(g.targets) == "table" then
+            for _, n in ipairs(g.targets) do giftSelectedTargets[n] = true end
+        end
+        if type(g.pets) == "table" then
+            for _, n in ipairs(g.pets) do giftSelectedPets[n] = true end
+        end
+    end
+
+    local function persistGiftState()
+        if not BH.marketState then return end
+        local targets, pets = {}, {}
+        for n in pairs(giftSelectedTargets) do table.insert(targets, n) end
+        for n in pairs(giftSelectedPets) do table.insert(pets, n) end
+        BH.marketState.gardenGift = {
+            targets = targets, pets = pets,
+            kg = (giftKgBox and giftKgBox.Text) or "",
+            age = (giftAgeBox and giftAgeBox.Text) or "",
+            active = giftActive,
+        }
+        BH.saveMarketState(BH.marketState)
+    end
+
+    -- ===== Layout inside giftCard =====
+    -- Row 1: Title + TOTAL match count
+    local gTitleLbl = Instance.new("TextLabel")
+    gTitleLbl.Size = UDim2.new(1, -120, 0, 26) gTitleLbl.Position = UDim2.new(0, 12, 0, 8)
+    gTitleLbl.BackgroundTransparency = 1 gTitleLbl.Text = "🎁 AUTO GIFT"
+    gTitleLbl.TextColor3 = C.accent gTitleLbl.Font = FB gTitleLbl.TextSize = 15
+    gTitleLbl.TextXAlignment = Enum.TextXAlignment.Left gTitleLbl.Parent = giftCard
+
+    local gTotalLbl = Instance.new("TextLabel")
+    gTotalLbl.Size = UDim2.new(0, 110, 0, 26) gTotalLbl.Position = UDim2.new(1, -120, 0, 8)
+    gTotalLbl.BackgroundTransparency = 1 gTotalLbl.Text = "Match: 0"
+    gTotalLbl.TextColor3 = C.text gTotalLbl.Font = FB gTotalLbl.TextSize = 14
+    gTotalLbl.TextXAlignment = Enum.TextXAlignment.Right gTotalLbl.Parent = giftCard
+
+    -- Row 2: Target picker + Pet picker
+    local gTargetBtn = Instance.new("TextButton")
+    gTargetBtn.Size = UDim2.new(0.5, -16, 0, 30) gTargetBtn.Position = UDim2.new(0, 12, 0, 42)
+    gTargetBtn.BackgroundColor3 = C.card gTargetBtn.AutoButtonColor = false
+    gTargetBtn.Text = "🎯 Target..." gTargetBtn.TextColor3 = C.text
+    gTargetBtn.Font = FM gTargetBtn.TextSize = 12 gTargetBtn.BorderSizePixel = 0
+    gTargetBtn.Parent = giftCard
+    Instance.new("UICorner", gTargetBtn).CornerRadius = UDim.new(0, 5)
+
+    local gPetBtn = Instance.new("TextButton")
+    gPetBtn.Size = UDim2.new(0.5, -16, 0, 30) gPetBtn.Position = UDim2.new(0.5, 4, 0, 42)
+    gPetBtn.BackgroundColor3 = C.card gPetBtn.AutoButtonColor = false
+    gPetBtn.Text = "🐾 Pet Type..." gPetBtn.TextColor3 = C.text
+    gPetBtn.Font = FM gPetBtn.TextSize = 12 gPetBtn.BorderSizePixel = 0
+    gPetBtn.Parent = giftCard
+    Instance.new("UICorner", gPetBtn).CornerRadius = UDim.new(0, 5)
+
+    -- Row 3: KG min + Age min
+    local function lblFor(parent, text, x, y, w)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(0, w, 0, 18) l.Position = UDim2.new(0, x, 0, y)
+        l.BackgroundTransparency = 1 l.Text = text l.TextColor3 = C.textDim
+        l.Font = FM l.TextSize = 11 l.TextXAlignment = Enum.TextXAlignment.Left
+        l.Parent = parent
+        return l
+    end
+    lblFor(giftCard, "KG min:", 12, 80, 60)
+    giftKgBox = Instance.new("TextBox")
+    giftKgBox.Size = UDim2.new(0, 70, 0, 26) giftKgBox.Position = UDim2.new(0, 72, 0, 78)
+    giftKgBox.BackgroundColor3 = C.card giftKgBox.Text = ""
+    giftKgBox.PlaceholderText = "0" giftKgBox.TextColor3 = C.text
+    giftKgBox.Font = FM giftKgBox.TextSize = 12 giftKgBox.BorderSizePixel = 0
+    giftKgBox.ClearTextOnFocus = false giftKgBox.Parent = giftCard
+    Instance.new("UICorner", giftKgBox).CornerRadius = UDim.new(0, 4)
+
+    lblFor(giftCard, "Age min:", 160, 80, 60)
+    giftAgeBox = Instance.new("TextBox")
+    giftAgeBox.Size = UDim2.new(0, 70, 0, 26) giftAgeBox.Position = UDim2.new(0, 220, 0, 78)
+    giftAgeBox.BackgroundColor3 = C.card giftAgeBox.Text = ""
+    giftAgeBox.PlaceholderText = "0" giftAgeBox.TextColor3 = C.text
+    giftAgeBox.Font = FM giftAgeBox.TextSize = 12 giftAgeBox.BorderSizePixel = 0
+    giftAgeBox.ClearTextOnFocus = false giftAgeBox.Parent = giftCard
+    Instance.new("UICorner", giftAgeBox).CornerRadius = UDim.new(0, 4)
+
+    -- Load saved values
+    if BH.marketState and BH.marketState.gardenGift then
+        if BH.marketState.gardenGift.kg then giftKgBox.Text = BH.marketState.gardenGift.kg end
+        if BH.marketState.gardenGift.age then giftAgeBox.Text = BH.marketState.gardenGift.age end
+    end
+    giftKgBox.FocusLost:Connect(persistGiftState)
+    giftAgeBox.FocusLost:Connect(persistGiftState)
+
+    -- Row 4: GIFT toggle + counters
+    local giftToggle = Instance.new("TextButton")
+    giftToggle.Size = UDim2.new(0.5, -16, 0, 32) giftToggle.Position = UDim2.new(0, 12, 0, 116)
+    giftToggle.BackgroundColor3 = C.danger giftToggle.AutoButtonColor = false
+    giftToggle.Text = "🎁 GIFT: OFF" giftToggle.TextColor3 = Color3.new(0, 0, 0)
+    giftToggle.Font = FB giftToggle.TextSize = 13 giftToggle.BorderSizePixel = 0
+    giftToggle.Parent = giftCard
+    Instance.new("UICorner", giftToggle).CornerRadius = UDim.new(0, 5)
+
+    local giftCounterLbl = Instance.new("TextLabel")
+    giftCounterLbl.Size = UDim2.new(0.5, -16, 0, 32) giftCounterLbl.Position = UDim2.new(0.5, 4, 0, 116)
+    giftCounterLbl.BackgroundTransparency = 1 giftCounterLbl.Text = "Sent: 0   Failed: 0"
+    giftCounterLbl.TextColor3 = C.text giftCounterLbl.Font = FM giftCounterLbl.TextSize = 13
+    giftCounterLbl.TextXAlignment = Enum.TextXAlignment.Left giftCounterLbl.Parent = giftCard
+
+    local giftStatusLbl = Instance.new("TextLabel")
+    giftStatusLbl.Size = UDim2.new(1, -24, 0, 22) giftStatusLbl.Position = UDim2.new(0, 12, 0, 154)
+    giftStatusLbl.BackgroundTransparency = 1 giftStatusLbl.Text = "Status: idle"
+    giftStatusLbl.TextColor3 = C.textDim giftStatusLbl.Font = FM giftStatusLbl.TextSize = 11
+    giftStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+    giftStatusLbl.TextTruncate = Enum.TextTruncate.AtEnd giftStatusLbl.Parent = giftCard
+
+    -- Helper labels (under status)
+    local giftPickedLbl = Instance.new("TextLabel")
+    giftPickedLbl.Size = UDim2.new(1, -24, 0, 18) giftPickedLbl.Position = UDim2.new(0, 12, 0, 180)
+    giftPickedLbl.BackgroundTransparency = 1 giftPickedLbl.Text = "Targets: 0 | Pet types: 0"
+    giftPickedLbl.TextColor3 = C.textDim giftPickedLbl.Font = FM giftPickedLbl.TextSize = 11
+    giftPickedLbl.TextXAlignment = Enum.TextXAlignment.Left giftPickedLbl.Parent = giftCard
+
+    -- ===== Gift remote setup =====
+    local outGiftRE = nil
+    local outPGS = nil
+    pcall(function()
+        local ge = RS:FindFirstChild("GameEvents")
+        if ge then outGiftRE = ge:FindFirstChild("PetGiftingService") end
+        if not outGiftRE then outGiftRE = RS:FindFirstChild("PetGiftingService", true) end
+    end)
+    pcall(function()
+        local mods = RS:FindFirstChild("Modules") and RS.Modules:FindFirstChild("PetServices")
+        local gm = mods and mods:FindFirstChild("PetGiftingInputService")
+        if gm then
+            local ok, mod = pcall(require, gm)
+            if ok then outPGS = mod end
+        end
+    end)
+
+    -- ===== Helpers =====
+    local function isFavPet(t)
+        if t:GetAttribute("FAVORITE") == true then return true end
+        if t:GetAttribute("IsFavorited") == true then return true end
+        if t:GetAttribute("Favorited") == true then return true end
+        return false
+    end
+
+    local function petMatchesGiftFilter(t)
+        if not isPet(t) then return false end
+        if isFavPet(t) then return false end  -- skip favorit
+        local pt = getPetType(t)
+        local baseName = (BH.getBaseName and pt ~= "") and BH.getBaseName(pt) or pt
+        -- Pet type filter
+        local hasPetFilter = next(giftSelectedPets) ~= nil
+        if hasPetFilter then
+            if not (giftSelectedPets[baseName] or giftSelectedPets[pt]) then return false end
+        end
+        -- KG min filter (basis age-1)
+        local kgMin = tonumber(giftKgBox.Text) or 0
+        if kgMin > 0 then
+            local bk = getBaseKg(t)
+            if not bk or bk < kgMin then return false end
+        end
+        -- Age min filter
+        local ageMin = tonumber(giftAgeBox.Text) or 0
+        if ageMin > 0 then
+            local age = getAge(t) or 0
+            if age < ageMin then return false end
+        end
+        return true
+    end
+
+    local function findGiftPlayer(name)
+        if not name or name == "" then return nil end
+        local low = name:lower()
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= player and (p.Name:lower() == low or p.DisplayName:lower() == low) then return p end
+        end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= player and (p.Name:lower():find(low, 1, true) or p.DisplayName:lower():find(low, 1, true)) then return p end
+        end
+        return nil
+    end
+
+    local function giftPetToTarget(targetPlayer, petTool)
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not hum then return false end
+        pcall(function() hum:UnequipTools() end)
+        task.wait(0.1)
+        pcall(function() hum:EquipTool(petTool) end)
+        task.wait(0.25)
+        local sent = false
+        if outPGS and outPGS.GivePet then
+            pcall(function() outPGS.GivePet(targetPlayer) end)
+            task.wait(0.4)
+            if not petTool.Parent then sent = true end
+        end
+        if not sent and outGiftRE then
+            local uuid = petTool:GetAttribute("PET_UUID")
+            local u = tostring(uuid)
+            if u:sub(1,1) ~= "{" then u = "{"..u.."}" end
+            pcall(function() outGiftRE:FireServer("GivePet", targetPlayer, u) end)
+            task.wait(0.4)
+            if not petTool.Parent then sent = true end
+            if not sent then
+                pcall(function() outGiftRE:FireServer("GivePet", targetPlayer) end)
+                task.wait(0.4)
+                if not petTool.Parent then sent = true end
+            end
+        end
+        return sent
+    end
+
+    -- Update displays
+    local function updateGiftDisplay()
+        local nt = 0; for _ in pairs(giftSelectedTargets) do nt = nt + 1 end
+        local np = 0; for _ in pairs(giftSelectedPets) do np = np + 1 end
+        gTargetBtn.Text = nt > 0 and ("🎯 "..nt.." target") or "🎯 Target..."
+        gPetBtn.Text = np > 0 and ("🐾 "..np.." pet type") or "🐾 Pet Type..."
+        giftPickedLbl.Text = string.format("Targets: %d | Pet types: %d", nt, np)
+        -- Refresh match count
+        local bp = player:FindFirstChild("Backpack")
+        local cnt = 0
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                if petMatchesGiftFilter(t) then cnt = cnt + 1 end
+            end
+        end
+        giftMatchCount = cnt
+        gTotalLbl.Text = "Match: "..cnt
+    end
+
+    -- Refresh match count periodically
+    task.spawn(function()
+        while giftCard.Parent do
+            if giftCard.Visible then pcall(updateGiftDisplay) end
+            task.wait(2)
+        end
+    end)
+
+    -- ===== Target Picker Modal =====
+    local function openTargetPicker()
+        local overlay = Instance.new("Frame")
+        overlay.Size = UDim2.new(1, 0, 1, 0) overlay.Position = UDim2.new(0, 0, 0, 0)
+        overlay.BackgroundColor3 = Color3.new(0, 0, 0) overlay.BackgroundTransparency = 0.5
+        overlay.ZIndex = 200 overlay.Parent = gui
+
+        local mFrame = Instance.new("Frame")
+        mFrame.Size = UDim2.new(0, 360, 0, 380)
+        mFrame.Position = UDim2.new(0.5, -180, 0.5, -190)
+        mFrame.BackgroundColor3 = C.bg mFrame.BorderSizePixel = 0
+        mFrame.ZIndex = 201 mFrame.Parent = overlay
+        Instance.new("UICorner", mFrame).CornerRadius = UDim.new(0, 8)
+        local s = Instance.new("UIStroke", mFrame); s.Color = C.accent; s.Thickness = 2
+
+        local tbar = Instance.new("Frame")
+        tbar.Size = UDim2.new(1, 0, 0, 36) tbar.BackgroundColor3 = C.card
+        tbar.BorderSizePixel = 0 tbar.ZIndex = 202 tbar.Parent = mFrame
+        Instance.new("UICorner", tbar).CornerRadius = UDim.new(0, 8)
+
+        local tlbl = Instance.new("TextLabel")
+        tlbl.Size = UDim2.new(1, -120, 1, 0) tlbl.Position = UDim2.new(0, 12, 0, 0)
+        tlbl.BackgroundTransparency = 1 tlbl.Text = "Target (multi)"
+        tlbl.TextColor3 = C.accent tlbl.Font = FB tlbl.TextSize = 14
+        tlbl.TextXAlignment = Enum.TextXAlignment.Left tlbl.ZIndex = 202 tlbl.Parent = tbar
+
+        local doneBtn = Instance.new("TextButton")
+        doneBtn.Size = UDim2.new(0, 60, 0, 24) doneBtn.Position = UDim2.new(1, -110, 0.5, -12)
+        doneBtn.BackgroundColor3 = C.success doneBtn.Text = "DONE"
+        doneBtn.TextColor3 = Color3.new(0, 0, 0) doneBtn.Font = FB doneBtn.TextSize = 11
+        doneBtn.BorderSizePixel = 0 doneBtn.AutoButtonColor = false
+        doneBtn.ZIndex = 203 doneBtn.Parent = tbar
+        Instance.new("UICorner", doneBtn).CornerRadius = UDim.new(0, 4)
+
+        local clrBtn = Instance.new("TextButton")
+        clrBtn.Size = UDim2.new(0, 40, 0, 24) clrBtn.Position = UDim2.new(1, -46, 0.5, -12)
+        clrBtn.BackgroundColor3 = C.danger clrBtn.Text = "CLR"
+        clrBtn.TextColor3 = Color3.new(1, 1, 1) clrBtn.Font = FB clrBtn.TextSize = 11
+        clrBtn.BorderSizePixel = 0 clrBtn.AutoButtonColor = false
+        clrBtn.ZIndex = 203 clrBtn.Parent = tbar
+        Instance.new("UICorner", clrBtn).CornerRadius = UDim.new(0, 4)
+
+        local searchBox = Instance.new("TextBox")
+        searchBox.Size = UDim2.new(1, -24, 0, 28) searchBox.Position = UDim2.new(0, 12, 0, 46)
+        searchBox.BackgroundColor3 = C.card searchBox.Text = ""
+        searchBox.PlaceholderText = "Cari player..." searchBox.TextColor3 = C.text
+        searchBox.Font = FM searchBox.TextSize = 12 searchBox.BorderSizePixel = 0
+        searchBox.ClearTextOnFocus = false searchBox.ZIndex = 202 searchBox.Parent = mFrame
+        Instance.new("UICorner", searchBox).CornerRadius = UDim.new(0, 4)
+
+        local pScroll = Instance.new("ScrollingFrame")
+        pScroll.Size = UDim2.new(1, -24, 1, -90) pScroll.Position = UDim2.new(0, 12, 0, 82)
+        pScroll.BackgroundColor3 = C.card pScroll.BorderSizePixel = 0
+        pScroll.ScrollBarThickness = 4 pScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        pScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        pScroll.ZIndex = 202 pScroll.Parent = mFrame
+        Instance.new("UICorner", pScroll).CornerRadius = UDim.new(0, 4)
+        local lay = Instance.new("UIListLayout"); lay.Padding = UDim.new(0, 3); lay.Parent = pScroll
+        local pad = Instance.new("UIPadding")
+        pad.PaddingTop = UDim.new(0, 4) pad.PaddingBottom = UDim.new(0, 4)
+        pad.PaddingLeft = UDim.new(0, 4) pad.PaddingRight = UDim.new(0, 4)
+        pad.Parent = pScroll
+
+        local function renderList(filter)
+            for _, c in ipairs(pScroll:GetChildren()) do
+                if c:IsA("TextButton") then c:Destroy() end
+            end
+            filter = (filter or ""):lower()
+            local items = {}
+            local seen = {}
+            -- Selected first
+            for n in pairs(giftSelectedTargets) do
+                local p = findGiftPlayer(n)
+                table.insert(items, {name=n, online=(p ~= nil), picked=true})
+                seen[n:lower()] = true
+            end
+            -- Online players
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= player and not seen[p.Name:lower()] then
+                    table.insert(items, {name=p.Name, online=true, picked=false})
+                end
+            end
+            for _, it in ipairs(items) do
+                if filter == "" or it.name:lower():find(filter, 1, true) then
+                    local row = Instance.new("TextButton")
+                    row.Size = UDim2.new(1, -4, 0, 28)
+                    if it.picked then
+                        row.BackgroundColor3 = C.success
+                        row.TextColor3 = Color3.new(0, 0, 0)
+                    else
+                        row.BackgroundColor3 = C.bg
+                        row.TextColor3 = C.text
+                    end
+                    row.Text = (it.picked and "v " or "  ")..it.name..(it.online and "" or " (offline)")
+                    row.Font = FM row.TextSize = 12 row.TextXAlignment = Enum.TextXAlignment.Left
+                    row.BorderSizePixel = 0 row.AutoButtonColor = false
+                    row.ZIndex = 203 row.Parent = pScroll
+                    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+                    Instance.new("UIPadding", row).PaddingLeft = UDim.new(0, 10)
+                    row.MouseButton1Click:Connect(function()
+                        if giftSelectedTargets[it.name] then
+                            giftSelectedTargets[it.name] = nil
+                        else
+                            giftSelectedTargets[it.name] = true
+                        end
+                        persistGiftState()
+                        updateGiftDisplay()
+                        renderList(searchBox.Text)
+                    end)
+                end
+            end
+        end
+        renderList("")
+        searchBox:GetPropertyChangedSignal("Text"):Connect(function() renderList(searchBox.Text) end)
+
+        doneBtn.MouseButton1Click:Connect(function() overlay:Destroy() end)
+        clrBtn.MouseButton1Click:Connect(function()
+            giftSelectedTargets = {}
+            persistGiftState()
+            updateGiftDisplay()
+            renderList(searchBox.Text)
+        end)
+    end
+    gTargetBtn.MouseButton1Click:Connect(openTargetPicker)
+
+    -- ===== Pet Picker Modal =====
+    local function openPetPicker()
+        local overlay = Instance.new("Frame")
+        overlay.Size = UDim2.new(1, 0, 1, 0)
+        overlay.BackgroundColor3 = Color3.new(0, 0, 0) overlay.BackgroundTransparency = 0.5
+        overlay.ZIndex = 200 overlay.Parent = gui
+
+        local mFrame = Instance.new("Frame")
+        mFrame.Size = UDim2.new(0, 360, 0, 380)
+        mFrame.Position = UDim2.new(0.5, -180, 0.5, -190)
+        mFrame.BackgroundColor3 = C.bg mFrame.BorderSizePixel = 0
+        mFrame.ZIndex = 201 mFrame.Parent = overlay
+        Instance.new("UICorner", mFrame).CornerRadius = UDim.new(0, 8)
+        local s = Instance.new("UIStroke", mFrame); s.Color = C.accent; s.Thickness = 2
+
+        local tbar = Instance.new("Frame")
+        tbar.Size = UDim2.new(1, 0, 0, 36) tbar.BackgroundColor3 = C.card
+        tbar.BorderSizePixel = 0 tbar.ZIndex = 202 tbar.Parent = mFrame
+        Instance.new("UICorner", tbar).CornerRadius = UDim.new(0, 8)
+
+        local tlbl = Instance.new("TextLabel")
+        tlbl.Size = UDim2.new(1, -120, 1, 0) tlbl.Position = UDim2.new(0, 12, 0, 0)
+        tlbl.BackgroundTransparency = 1 tlbl.Text = "Pet Type (multi)"
+        tlbl.TextColor3 = C.accent tlbl.Font = FB tlbl.TextSize = 14
+        tlbl.TextXAlignment = Enum.TextXAlignment.Left tlbl.ZIndex = 202 tlbl.Parent = tbar
+
+        local doneBtn = Instance.new("TextButton")
+        doneBtn.Size = UDim2.new(0, 60, 0, 24) doneBtn.Position = UDim2.new(1, -110, 0.5, -12)
+        doneBtn.BackgroundColor3 = C.success doneBtn.Text = "DONE"
+        doneBtn.TextColor3 = Color3.new(0, 0, 0) doneBtn.Font = FB doneBtn.TextSize = 11
+        doneBtn.BorderSizePixel = 0 doneBtn.AutoButtonColor = false
+        doneBtn.ZIndex = 203 doneBtn.Parent = tbar
+        Instance.new("UICorner", doneBtn).CornerRadius = UDim.new(0, 4)
+
+        local clrBtn = Instance.new("TextButton")
+        clrBtn.Size = UDim2.new(0, 40, 0, 24) clrBtn.Position = UDim2.new(1, -46, 0.5, -12)
+        clrBtn.BackgroundColor3 = C.danger clrBtn.Text = "CLR"
+        clrBtn.TextColor3 = Color3.new(1, 1, 1) clrBtn.Font = FB clrBtn.TextSize = 11
+        clrBtn.BorderSizePixel = 0 clrBtn.AutoButtonColor = false
+        clrBtn.ZIndex = 203 clrBtn.Parent = tbar
+        Instance.new("UICorner", clrBtn).CornerRadius = UDim.new(0, 4)
+
+        local searchBox = Instance.new("TextBox")
+        searchBox.Size = UDim2.new(1, -24, 0, 28) searchBox.Position = UDim2.new(0, 12, 0, 46)
+        searchBox.BackgroundColor3 = C.card searchBox.Text = ""
+        searchBox.PlaceholderText = "Cari pet type..." searchBox.TextColor3 = C.text
+        searchBox.Font = FM searchBox.TextSize = 12 searchBox.BorderSizePixel = 0
+        searchBox.ClearTextOnFocus = false searchBox.ZIndex = 202 searchBox.Parent = mFrame
+        Instance.new("UICorner", searchBox).CornerRadius = UDim.new(0, 4)
+
+        local pScroll = Instance.new("ScrollingFrame")
+        pScroll.Size = UDim2.new(1, -24, 1, -90) pScroll.Position = UDim2.new(0, 12, 0, 82)
+        pScroll.BackgroundColor3 = C.card pScroll.BorderSizePixel = 0
+        pScroll.ScrollBarThickness = 4 pScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+        pScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        pScroll.ZIndex = 202 pScroll.Parent = mFrame
+        Instance.new("UICorner", pScroll).CornerRadius = UDim.new(0, 4)
+        local lay = Instance.new("UIListLayout"); lay.Padding = UDim.new(0, 3); lay.Parent = pScroll
+        local pad = Instance.new("UIPadding")
+        pad.PaddingTop = UDim.new(0, 4) pad.PaddingBottom = UDim.new(0, 4)
+        pad.PaddingLeft = UDim.new(0, 4) pad.PaddingRight = UDim.new(0, 4)
+        pad.Parent = pScroll
+
+        local function renderList(filter)
+            for _, c in ipairs(pScroll:GetChildren()) do
+                if c:IsA("TextButton") then c:Destroy() end
+            end
+            filter = (filter or ""):lower()
+            -- Collect from backpack
+            local types = {}
+            local bp = player:FindFirstChild("Backpack")
+            if bp then
+                for _, t in ipairs(bp:GetChildren()) do
+                    if isPet(t) then
+                        local pt = getPetType(t)
+                        local base = (BH.getBaseName and pt ~= "") and BH.getBaseName(pt) or pt
+                        types[base] = (types[base] or 0) + 1
+                    end
+                end
+            end
+            -- Add already-selected types
+            for n in pairs(giftSelectedPets) do
+                if not types[n] then types[n] = 0 end
+            end
+            -- Sort: selected first, then count
+            local sorted = {}
+            for name, count in pairs(types) do
+                table.insert(sorted, {name=name, count=count, picked=giftSelectedPets[name] == true})
+            end
+            table.sort(sorted, function(a, b)
+                if a.picked ~= b.picked then return a.picked end
+                if a.count ~= b.count then return a.count > b.count end
+                return a.name < b.name
+            end)
+            for _, it in ipairs(sorted) do
+                if filter == "" or it.name:lower():find(filter, 1, true) then
+                    local row = Instance.new("TextButton")
+                    row.Size = UDim2.new(1, -4, 0, 28)
+                    if it.picked then
+                        row.BackgroundColor3 = C.success
+                        row.TextColor3 = Color3.new(0, 0, 0)
+                    else
+                        row.BackgroundColor3 = C.bg
+                        row.TextColor3 = C.text
+                    end
+                    row.Text = (it.picked and "v " or "  ")..it.name.."  ×"..it.count
+                    row.Font = FM row.TextSize = 12 row.TextXAlignment = Enum.TextXAlignment.Left
+                    row.BorderSizePixel = 0 row.AutoButtonColor = false
+                    row.ZIndex = 203 row.Parent = pScroll
+                    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+                    Instance.new("UIPadding", row).PaddingLeft = UDim.new(0, 10)
+                    row.MouseButton1Click:Connect(function()
+                        if giftSelectedPets[it.name] then
+                            giftSelectedPets[it.name] = nil
+                        else
+                            giftSelectedPets[it.name] = true
+                        end
+                        persistGiftState()
+                        updateGiftDisplay()
+                        renderList(searchBox.Text)
+                    end)
+                end
+            end
+        end
+        renderList("")
+        searchBox:GetPropertyChangedSignal("Text"):Connect(function() renderList(searchBox.Text) end)
+
+        doneBtn.MouseButton1Click:Connect(function() overlay:Destroy() end)
+        clrBtn.MouseButton1Click:Connect(function()
+            giftSelectedPets = {}
+            persistGiftState()
+            updateGiftDisplay()
+            renderList(searchBox.Text)
+        end)
+    end
+    gPetBtn.MouseButton1Click:Connect(openPetPicker)
+
+    -- ===== GIFT LOOP =====
+    local function startOutGift()
+        if giftActive then return end
+        local nt = 0; for _ in pairs(giftSelectedTargets) do nt = nt + 1 end
+        if nt == 0 then
+            giftStatusLbl.Text = "❌ Belum pilih target"
+            giftStatusLbl.TextColor3 = C.danger
+            return
+        end
+        if not outGiftRE and not outPGS then
+            giftStatusLbl.Text = "❌ Gift remote/module gak ada"
+            giftStatusLbl.TextColor3 = C.danger
+            return
+        end
+        giftActive = true
+        giftStopReq = false
+        giftSent, giftFailed = 0, 0
+        giftCounterLbl.Text = "Sent: 0   Failed: 0"
+        giftToggle.Text = "🎁 GIFT: ON"
+        giftToggle.BackgroundColor3 = C.success
+        giftStatusLbl.Text = "Status: starting..."
+        giftStatusLbl.TextColor3 = C.accent
+        persistGiftState()
+
+        task.spawn(function()
+            math.randomseed(tick())
+            while not giftStopReq do
+                -- Refresh pool
+                local pool = {}
+                local seenP = {}
+                for n in pairs(giftSelectedTargets) do
+                    local p = findGiftPlayer(n)
+                    if p and not seenP[p] then table.insert(pool, p); seenP[p] = true end
+                end
+                if #pool == 0 then
+                    giftStatusLbl.Text = "Waiting: target offline semua..."
+                    giftStatusLbl.TextColor3 = C.danger
+                    task.wait(5)
+                else
+                    local bp = player:FindFirstChild("Backpack")
+                    if not bp then task.wait(2)
+                    else
+                        local matching = {}
+                        for _, t in ipairs(bp:GetChildren()) do
+                            if petMatchesGiftFilter(t) then table.insert(matching, t) end
+                        end
+                        if #matching == 0 then
+                            giftStatusLbl.Text = "Waiting: no pet match filter..."
+                            giftStatusLbl.TextColor3 = C.accent
+                            task.wait(5)
+                        else
+                            local petTool = matching[math.random(1, #matching)]
+                            local target = pool[math.random(1, #pool)]
+                            giftStatusLbl.Text = "→ "..target.Name:sub(1,14).." : "..petTool.Name:sub(1,18)
+                            giftStatusLbl.TextColor3 = C.accent
+                            local ok = giftPetToTarget(target, petTool)
+                            if ok then giftSent = giftSent + 1 else giftFailed = giftFailed + 1 end
+                            giftCounterLbl.Text = "Sent: "..giftSent.."   Failed: "..giftFailed
+                            task.wait(1.5)
+                        end
+                    end
+                end
+            end
+            giftActive = false
+            giftToggle.Text = "🎁 GIFT: OFF"
+            giftToggle.BackgroundColor3 = C.danger
+            giftStatusLbl.Text = "Stopped (Sent: "..giftSent..")"
+            giftStatusLbl.TextColor3 = C.textDim
+            persistGiftState()
+        end)
+    end
+
+    local function stopOutGift()
+        if not giftActive then return end
+        giftStopReq = true
+        giftStatusLbl.Text = "Stopping..."
+        giftStatusLbl.TextColor3 = C.accent
+    end
+
+    giftToggle.MouseButton1Click:Connect(function()
+        if giftActive then stopOutGift() else startOutGift() end
+    end)
+
+    -- Resume on load
+    if BH.marketState and BH.marketState.gardenGift and BH.marketState.gardenGift.active then
+        task.spawn(function()
+            task.wait(3)
+            startOutGift()
+        end)
+    end
+
+    updateGiftDisplay()
 
     BH.refreshGardenStats = function()
         for _, c in ipairs(gListScroll:GetChildren()) do
@@ -8425,17 +8861,22 @@ BH.buildGardenPanel = function()
         end
     end
 
-    if BH.autoGift then
-        gGiftBtn.Text = "Auto Accept Gift: ON" gGiftBtn.TextColor3 = C.accent
-    end
-    if BH.autoTrade then
-        gTradeBtn.Text = "Auto Accept Trade: ON" gTradeBtn.TextColor3 = C.accent
-    end
+    -- v8.152: removed gGiftBtn/gTradeBtn refs (auto-accept moved to garden sc)
 
-    -- v8.148: wire tab clicks
-    tabAll.MouseButton1Click:Connect(function() gardenFilter = "all"; setTabActive("all"); pcall(BH.refreshGardenStats) end)
-    tab60p.MouseButton1Click:Connect(function() gardenFilter = "60plus"; setTabActive("60plus"); pcall(BH.refreshGardenStats) end)
-    tab60m.MouseButton1Click:Connect(function() gardenFilter = "60minus"; setTabActive("60minus"); pcall(BH.refreshGardenStats) end)
+    -- v8.148: wire tab clicks | v8.151: gift tab
+    local function showListTab()
+        gListScroll.Visible = true
+        giftCard.Visible = false
+    end
+    local function showGiftTab()
+        gListScroll.Visible = false
+        giftCard.Visible = true
+        pcall(updateGiftDisplay)
+    end
+    tabAll.MouseButton1Click:Connect(function() gardenFilter = "all"; setTabActive("all"); showListTab(); pcall(BH.refreshGardenStats) end)
+    tab60p.MouseButton1Click:Connect(function() gardenFilter = "60plus"; setTabActive("60plus"); showListTab(); pcall(BH.refreshGardenStats) end)
+    tab60m.MouseButton1Click:Connect(function() gardenFilter = "60minus"; setTabActive("60minus"); showListTab(); pcall(BH.refreshGardenStats) end)
+    tabGift.MouseButton1Click:Connect(function() setTabActive("gift"); showGiftTab() end)
 
     do
         local bp = player:FindFirstChild("Backpack")
