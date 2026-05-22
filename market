@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.160"
-local VERSION_DATE = "v8.160: (1) Auto-Start continuous re-fire (hapus firedThisSession flag) — bisa re-fire kapan aja kalo listing berhenti. (2) RESTORE Auto-Accept Gift/Trade di garden panel header (gak hilang, cuma dipasang di garden context aja)."
+local VERSION = "8.161"
+local VERSION_DATE = "v8.161: FIX garden panel kosong/hitam — heavy RS scan & event hook dipindah ke task.spawn biar buildGardenPanel langsung selesai render UI (statsCard, tabs, list, gift card) tanpa ke-block."
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -8683,7 +8683,7 @@ BH.buildGardenPanel = function()
     gTravelBtn.BorderSizePixel = 0 gTravelBtn.Parent = btnRow
     Instance.new("UICorner", gTravelBtn).CornerRadius = UDim.new(0, 6)
 
-    -- ===== Auto-Accept logic (gift + trade) =====
+    -- ===== Auto-Accept logic (gift + trade) — DEFERRED scan biar buildGardenPanel gak block =====
     BH.autoGift = (BH.marketState and BH.marketState.autoGift) == true
     BH.autoTrade = (BH.marketState and BH.marketState.autoTrade) == true
 
@@ -8694,69 +8694,6 @@ BH.buildGardenPanel = function()
         gTradeBtn.TextColor3 = BH.autoTrade and C.accent or C.textDim
     end
     refreshAcceptUI()
-
-    -- Scan RS untuk gift/trade remotes
-    local ge = ReplicatedStorage:FindFirstChild("GameEvents")
-    local giftPetRE = ge and ge:FindFirstChild("GiftPet")
-    local acceptPetGiftRE = ge and (ge:FindFirstChild("AcceptPetGift") or ReplicatedStorage:FindFirstChild("AcceptPetGift", true))
-    -- Trade remotes — scan by keyword
-    local tradeAcceptRemotes = {}
-    pcall(function()
-        for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
-            if (d:IsA("RemoteEvent") or d:IsA("RemoteFunction")) then
-                local n = d.Name:lower()
-                if (n:find("accept") or n:find("confirm")) and (n:find("trade") or n:find("offer")) then
-                    table.insert(tradeAcceptRemotes, d)
-                end
-            end
-        end
-    end)
-    L("[AutoAccept] giftPet="..(giftPetRE and "OK" or "nil").." acceptPet="..(acceptPetGiftRE and "OK" or "nil").." tradeRemotes="..#tradeAcceptRemotes)
-
-    -- Gift hook: pas GiftPet fires ke client → auto-accept
-    if giftPetRE and acceptPetGiftRE then
-        giftPetRE.OnClientEvent:Connect(function(...)
-            if not BH.autoGift then return end
-            local args = {...}
-            -- Cari UUID di args
-            for _, a in ipairs(args) do
-                if type(a) == "string" and a:find("%-") and #a >= 30 then
-                    task.spawn(function()
-                        pcall(function() acceptPetGiftRE:FireServer(true, a) end)
-                        L("[AutoAccept] gift accepted: "..a:sub(1, 8))
-                    end)
-                    return
-                end
-            end
-        end)
-    end
-
-    -- Trade hook: fire all detected accept remotes when toggle ON
-    -- (game-specific, jadi pake auto-click PlayerGui popup approach as fallback)
-    task.spawn(function()
-        local pg = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui", 5)
-        while gui.Parent do
-            if BH.autoTrade and pg then
-                -- Look for trade prompt button
-                for _, d in ipairs(pg:GetDescendants()) do
-                    if d:IsA("TextButton") or d:IsA("ImageButton") then
-                        local fullText = (tostring(d.Name or "")..((d:IsA("TextButton") and d.Text) or "")):lower()
-                        if fullText:find("accept") and (fullText:find("trade") or fullText:find("offer")) then
-                            pcall(function()
-                                -- Try Activate or fire MouseButton1Click
-                                if d.Activate then d:Activate() end
-                                local prio = game:GetService("VirtualInputManager")
-                                if prio then
-                                    -- skip — simulating clicks unreliable; just call Activate
-                                end
-                            end)
-                        end
-                    end
-                end
-            end
-            task.wait(1)
-        end
-    end)
 
     gGiftBtn.MouseButton1Click:Connect(function()
         BH.autoGift = not BH.autoGift
@@ -8769,6 +8706,55 @@ BH.buildGardenPanel = function()
         refreshAcceptUI()
         if BH.marketState then BH.marketState.autoTrade = BH.autoTrade; BH.saveMarketState(BH.marketState) end
         L("[AutoAccept] trade "..(BH.autoTrade and "ON" or "OFF"))
+    end)
+
+    -- Scan + hook gift remote di background (gak block UI build)
+    task.spawn(function()
+        task.wait(1)
+        local ok, ge = pcall(function() return ReplicatedStorage:FindFirstChild("GameEvents") end)
+        if not ok or not ge then return end
+        local giftPetRE = ge:FindFirstChild("GiftPet")
+        local acceptPetGiftRE = ge:FindFirstChild("AcceptPetGift")
+        L("[AutoAccept] giftPet="..(giftPetRE and "OK" or "nil").." acceptPet="..(acceptPetGiftRE and "OK" or "nil"))
+        if giftPetRE and acceptPetGiftRE then
+            pcall(function()
+                giftPetRE.OnClientEvent:Connect(function(...)
+                    if not BH.autoGift then return end
+                    local args = {...}
+                    for _, a in ipairs(args) do
+                        if type(a) == "string" and a:find("%-") and #a >= 30 then
+                            task.spawn(function()
+                                pcall(function() acceptPetGiftRE:FireServer(true, a) end)
+                                L("[AutoAccept] gift accepted: "..a:sub(1, 8))
+                            end)
+                            return
+                        end
+                    end
+                end)
+            end)
+        end
+    end)
+
+    -- Trade hook: PlayerGui scan (lazy, di background)
+    task.spawn(function()
+        task.wait(2)
+        local pg = player:FindFirstChild("PlayerGui")
+        if not pg then return end
+        while gui.Parent do
+            if BH.autoTrade then
+                pcall(function()
+                    for _, d in ipairs(pg:GetDescendants()) do
+                        if d:IsA("TextButton") or d:IsA("ImageButton") then
+                            local fullText = (tostring(d.Name or "")..((d:IsA("TextButton") and d.Text) or "")):lower()
+                            if fullText:find("accept") and (fullText:find("trade") or fullText:find("offer")) then
+                                pcall(function() if d.Activate then d:Activate() end end)
+                            end
+                        end
+                    end
+                end)
+            end
+            task.wait(1)
+        end
     end)
 
     gTravelBtn.MouseButton1Click:Connect(function()
