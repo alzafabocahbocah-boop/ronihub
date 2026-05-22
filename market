@@ -2,8 +2,8 @@
 -- Left sidebar: Market | List Harga | Snipe
 -- Market sub-tabs: Listing | Rejoin | Misc
 
-local VERSION = "8.158"
-local VERSION_DATE = "v8.158: HISTORY SELL tab di-port dari standalone design — big total token, elapsed timer, sort cycle, pet picker modal (PetRegistry 493 types) dengan search. Filter affects total tokens calc."
+local VERSION = "8.160"
+local VERSION_DATE = "v8.160: (1) Auto-Start continuous re-fire (hapus firedThisSession flag) — bisa re-fire kapan aja kalo listing berhenti. (2) RESTORE Auto-Accept Gift/Trade di garden panel header (gak hilang, cuma dipasang di garden context aja)."
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -8045,11 +8045,42 @@ L("  - Inventory capacity")
     local hp = panels["HISTORY SELL"]
     if not hp then return end
 
+    local HIST_FILE = "zenx_market_history.json"
+
     local salesHistory = {}
     local salesByKey = {}
-    local elapsedStart = tick()
+    local elapsedStartEpoch = os.time()  -- v8.159: pake os.time() biar persistent
     local selectedType = nil
     local sortMode = "newest"
+
+    -- v8.159: Load dari file
+    pcall(function()
+        if isfile and isfile(HIST_FILE) then
+            local ok, data = pcall(function() return HttpService:JSONDecode(readfile(HIST_FILE)) end)
+            if ok and type(data) == "table" then
+                if type(data.history) == "table" then
+                    salesHistory = data.history
+                    for _, e in ipairs(salesHistory) do
+                        if e.key then salesByKey[e.key] = true end
+                    end
+                end
+                if tonumber(data.elapsedStartEpoch) then
+                    elapsedStartEpoch = tonumber(data.elapsedStartEpoch)
+                end
+            end
+        end
+    end)
+
+    local function saveHist()
+        pcall(function()
+            if writefile then
+                writefile(HIST_FILE, HttpService:JSONEncode({
+                    history = salesHistory,
+                    elapsedStartEpoch = elapsedStartEpoch,
+                }))
+            end
+        end)
+    end
 
     -- Resolve remotes
     local fetchHistRE, addHistRE
@@ -8235,18 +8266,23 @@ L("  - Inventory capacity")
         if salesByKey[p.key] then return false end
         salesByKey[p.key] = true
         table.insert(salesHistory, p)
+        saveHist()  -- v8.159: persist on add
         return true
     end
 
     local function purgeOld()
         local cutoff = os.time() - 24*3600
         local fresh, keys = {}, {}
+        local removed = 0
         for _, e in ipairs(salesHistory) do
             if (e.time or 0) >= cutoff then
                 table.insert(fresh, e); keys[e.key] = true
+            else
+                removed = removed + 1
             end
         end
         salesHistory = fresh; salesByKey = keys
+        if removed > 0 then saveHist() end
     end
 
     local function timeAgo(t)
@@ -8557,7 +8593,8 @@ L("  - Inventory capacity")
 
     -- ===== Buttons =====
     clearBtn.MouseButton1Click:Connect(function()
-        salesHistory = {} salesByKey = {} elapsedStart = tick()
+        salesHistory = {} salesByKey = {} elapsedStartEpoch = os.time()
+        saveHist()
         refreshUI()
         footerLbl.Text = "Cleared (local view)" footerLbl.TextColor3 = C.textDim
     end)
@@ -8577,11 +8614,12 @@ L("  - Inventory capacity")
     task.spawn(function()
         while gui.Parent do
             if hp.Visible then
-                local sec = math.floor(tick() - elapsedStart)
+                local sec = os.time() - elapsedStartEpoch
                 local txt
                 if sec < 60 then txt = sec.."s"
                 elseif sec < 3600 then txt = math.floor(sec/60).."m "..(sec%60).."s"
-                else txt = math.floor(sec/3600).."h "..math.floor((sec%3600)/60).."m" end
+                elseif sec < 86400 then txt = math.floor(sec/3600).."h "..math.floor((sec%3600)/60).."m"
+                else txt = math.floor(sec/86400).."d "..math.floor((sec%86400)/3600).."h" end
                 elapsedLbl.Text = "⏱  "..txt
             end
             task.wait(1)
@@ -8616,17 +8654,122 @@ BH.buildGardenPanel = function()
     btnRow.Size = UDim2.new(1, -28, 0, 28) btnRow.Position = UDim2.new(0, 14, 0, 14)
     btnRow.BackgroundTransparency = 1 btnRow.Parent = gp
 
-    -- v8.152: remove Auto Accept Gift/Trade buttons (khusus sc garden)
-    -- TP to Market jadi full-width
+    -- v8.160: restore Auto Accept Gift/Trade (KHUSUS garden server)
+    local gGiftBtn = Instance.new("TextButton")
+    gGiftBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
+    gGiftBtn.Position = UDim2.new(0, 0, 0, 0)
+    gGiftBtn.BackgroundColor3 = C.card gGiftBtn.AutoButtonColor = false
+    gGiftBtn.Text = "Auto Gift: OFF" gGiftBtn.TextColor3 = C.textDim
+    gGiftBtn.Font = FM gGiftBtn.TextSize = 11
+    gGiftBtn.BorderSizePixel = 0 gGiftBtn.Parent = btnRow
+    Instance.new("UICorner", gGiftBtn).CornerRadius = UDim.new(0, 6)
+
+    local gTradeBtn = Instance.new("TextButton")
+    gTradeBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
+    gTradeBtn.Position = UDim2.new(0.335, btnPad/2, 0, 0)
+    gTradeBtn.BackgroundColor3 = C.card gTradeBtn.AutoButtonColor = false
+    gTradeBtn.Text = "Auto Trade: OFF" gTradeBtn.TextColor3 = C.textDim
+    gTradeBtn.Font = FM gTradeBtn.TextSize = 11
+    gTradeBtn.BorderSizePixel = 0 gTradeBtn.Parent = btnRow
+    Instance.new("UICorner", gTradeBtn).CornerRadius = UDim.new(0, 6)
+
     local gTravelBtn = Instance.new("TextButton")
-    gTravelBtn.Size = UDim2.new(1, 0, 1, 0)
-    gTravelBtn.Position = UDim2.new(0, 0, 0, 0)
+    gTravelBtn.Size = UDim2.new(0.33, -btnPad, 1, 0)
+    gTravelBtn.Position = UDim2.new(0.67, btnPad, 0, 0)
     gTravelBtn.BackgroundColor3 = C.card
     gTravelBtn.AutoButtonColor = false
-    gTravelBtn.Text = "🚀 TP to Market" gTravelBtn.TextColor3 = C.text
-    gTravelBtn.Font = FB gTravelBtn.TextSize = 13
+    gTravelBtn.Text = "🚀 TP Market" gTravelBtn.TextColor3 = C.textDim
+    gTravelBtn.Font = FM gTravelBtn.TextSize = 11
     gTravelBtn.BorderSizePixel = 0 gTravelBtn.Parent = btnRow
     Instance.new("UICorner", gTravelBtn).CornerRadius = UDim.new(0, 6)
+
+    -- ===== Auto-Accept logic (gift + trade) =====
+    BH.autoGift = (BH.marketState and BH.marketState.autoGift) == true
+    BH.autoTrade = (BH.marketState and BH.marketState.autoTrade) == true
+
+    local function refreshAcceptUI()
+        gGiftBtn.Text = "Auto Gift: "..(BH.autoGift and "ON" or "OFF")
+        gGiftBtn.TextColor3 = BH.autoGift and C.accent or C.textDim
+        gTradeBtn.Text = "Auto Trade: "..(BH.autoTrade and "ON" or "OFF")
+        gTradeBtn.TextColor3 = BH.autoTrade and C.accent or C.textDim
+    end
+    refreshAcceptUI()
+
+    -- Scan RS untuk gift/trade remotes
+    local ge = ReplicatedStorage:FindFirstChild("GameEvents")
+    local giftPetRE = ge and ge:FindFirstChild("GiftPet")
+    local acceptPetGiftRE = ge and (ge:FindFirstChild("AcceptPetGift") or ReplicatedStorage:FindFirstChild("AcceptPetGift", true))
+    -- Trade remotes — scan by keyword
+    local tradeAcceptRemotes = {}
+    pcall(function()
+        for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
+            if (d:IsA("RemoteEvent") or d:IsA("RemoteFunction")) then
+                local n = d.Name:lower()
+                if (n:find("accept") or n:find("confirm")) and (n:find("trade") or n:find("offer")) then
+                    table.insert(tradeAcceptRemotes, d)
+                end
+            end
+        end
+    end)
+    L("[AutoAccept] giftPet="..(giftPetRE and "OK" or "nil").." acceptPet="..(acceptPetGiftRE and "OK" or "nil").." tradeRemotes="..#tradeAcceptRemotes)
+
+    -- Gift hook: pas GiftPet fires ke client → auto-accept
+    if giftPetRE and acceptPetGiftRE then
+        giftPetRE.OnClientEvent:Connect(function(...)
+            if not BH.autoGift then return end
+            local args = {...}
+            -- Cari UUID di args
+            for _, a in ipairs(args) do
+                if type(a) == "string" and a:find("%-") and #a >= 30 then
+                    task.spawn(function()
+                        pcall(function() acceptPetGiftRE:FireServer(true, a) end)
+                        L("[AutoAccept] gift accepted: "..a:sub(1, 8))
+                    end)
+                    return
+                end
+            end
+        end)
+    end
+
+    -- Trade hook: fire all detected accept remotes when toggle ON
+    -- (game-specific, jadi pake auto-click PlayerGui popup approach as fallback)
+    task.spawn(function()
+        local pg = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui", 5)
+        while gui.Parent do
+            if BH.autoTrade and pg then
+                -- Look for trade prompt button
+                for _, d in ipairs(pg:GetDescendants()) do
+                    if d:IsA("TextButton") or d:IsA("ImageButton") then
+                        local fullText = (tostring(d.Name or "")..((d:IsA("TextButton") and d.Text) or "")):lower()
+                        if fullText:find("accept") and (fullText:find("trade") or fullText:find("offer")) then
+                            pcall(function()
+                                -- Try Activate or fire MouseButton1Click
+                                if d.Activate then d:Activate() end
+                                local prio = game:GetService("VirtualInputManager")
+                                if prio then
+                                    -- skip — simulating clicks unreliable; just call Activate
+                                end
+                            end)
+                        end
+                    end
+                end
+            end
+            task.wait(1)
+        end
+    end)
+
+    gGiftBtn.MouseButton1Click:Connect(function()
+        BH.autoGift = not BH.autoGift
+        refreshAcceptUI()
+        if BH.marketState then BH.marketState.autoGift = BH.autoGift; BH.saveMarketState(BH.marketState) end
+        L("[AutoAccept] gift "..(BH.autoGift and "ON" or "OFF"))
+    end)
+    gTradeBtn.MouseButton1Click:Connect(function()
+        BH.autoTrade = not BH.autoTrade
+        refreshAcceptUI()
+        if BH.marketState then BH.marketState.autoTrade = BH.autoTrade; BH.saveMarketState(BH.marketState) end
+        L("[AutoAccept] trade "..(BH.autoTrade and "ON" or "OFF"))
+    end)
 
     gTravelBtn.MouseButton1Click:Connect(function()
         L("[TP-Market] mencari 'Travel to Farmer Market' button...")
@@ -9510,30 +9653,28 @@ task.spawn(function()
 end)
 
 -- v8.48: AUTO-START
--- v8.136: log spawn IMMEDIATELY biar tau task.spawn reached, lower wait 8s → 4s
+-- v8.160: hapus firedThisSession — bisa re-fire continuous kalo listing berenti
 L("🚀 [Auto-Start] spawning watchdog...")
 task.spawn(function()
     L("🚀 [Auto-Start] watchdog task entered, waiting 4s...")
     task.wait(4)
     L("🚀 [Auto-Start] watchdog ACTIVE — checking every 5s")
     L("🚀 [Auto-Start] initial state: autoStart="..tostring(BH.autoStart)..", rules="..#listingRules..", running="..tostring(isRunning))
-    local firedThisSession = false
+    local lastFire = 0
     while gui.Parent do
-        if BH.autoStart and #listingRules > 0 and not isRunning and not firedThisSession then
-            L("🚀 [Auto-Start] FIRING (autoStart=ON, rules="..#listingRules..")")
+        -- Re-fire continuous: kalo autoStart ON + ada rules + listing stop + udah lewat 10s sejak terakhir
+        if BH.autoStart and #listingRules > 0 and not isRunning and (tick() - lastFire) > 10 then
+            L("🚀 [Auto-Start] FIRING (autoStart=ON, rules="..#listingRules..", since last="..math.floor(tick()-lastFire).."s)")
             task.wait(2)
             if not isRunning and BH.autoStart then
+                lastFire = tick()
                 local ok, err = pcall(BH.onStartClick)
                 if ok then
                     L("🚀 [Auto-Start] onStartClick() called — OK")
-                    firedThisSession = true
                 else
                     L("✗ [Auto-Start] FAIL: "..tostring(err))
                 end
             end
-        end
-        if not BH.autoStart then
-            firedThisSession = false
         end
         task.wait(5)
     end
